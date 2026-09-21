@@ -1,0 +1,105 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f1eee9;
+  --color-paper-raised: #f7f4ef;
+  --color-paper-deep: #e7e2d9;
+  --color-ink: #3c3c3c;
+  --color-ink-soft: #6a6a6a;
+  --color-muted: #8a8a8a;
+  --color-teal: #2a4e56;
+  --color-teal-deep: #1c3940;
+  --color-teal-soft: #3d6a73;
+  --color-terra: #ae593c;
+  --color-sand: #e6d2c0;
+  --color-umber: #4f3528;
+  --color-line: #d8d3cb;
+  --color-sidebar-fg: #f4efe8;
+  --font-sans: "Switzer", "Helvetica Neue", Arial, sans-serif;
+  --radius-sm: 0.75rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.125rem;
+  --shadow-card: 0 24px 50px -28px rgb(28 57 64 / 0.45);
+}
+
+@layer base {
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+.sidebar-wash {
+  isolation: isolate;
+  color: var(--color-sidebar-fg);
+}
+
+.sidebar-wash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background:
+    radial-gradient(120% 80% at 0% 0%, var(--color-teal-soft) 0%, transparent 55%),
+    radial-gradient(90% 70% at 100% 100%, var(--color-terra) 0%, transparent 50%),
+    linear-gradient(165deg, var(--color-teal-deep) 0%, var(--color-teal) 42%, var(--color-umber) 100%);
+}
+
+.sidebar-wash::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, rgb(247 244 239 / 0.08), rgb(28 57 64 / 0.18));
+}
+
+.overview-wash {
+  background:
+    linear-gradient(180deg, rgb(28 57 64 / 0.42) 0%, rgb(28 57 64 / 0.08) 28%, rgb(28 57 64 / 0.05) 58%, rgb(28 57 64 / 0.72) 100%);
+}
+
+.flow-line {
+  fill: none;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.flow-idle {
+  stroke-dasharray: 5 11;
+  opacity: 0.85;
+}
+
+.flow-active {
+  stroke-dasharray: 8 12;
+  stroke-width: 2.8;
+  animation: flow-dash 1.7s linear infinite;
+}
+
+@keyframes flow-dash {
+  to {
+    stroke-dashoffset: -40;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
