@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  DEFAULT_HA_URL,
   HaSocket,
   autoMap,
   liveFromStates,
@@ -37,7 +38,7 @@ export const useHouse = create<Store>((set, get) => ({
   switches: {},
   status: "demo",
   map: {},
-  url: "http://homeassistant.local:8123",
+  url: DEFAULT_HA_URL,
 
   boot() {
     const creds = readCreds();

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useHouse } from "@/lib/house-store";
-import { SWITCHES, readCreds } from "@/lib/ha";
+import { DEFAULT_HA_URL, SWITCHES, readCreds } from "@/lib/ha";
 import { Surface, SectionLabel, Row } from "./ui";
 
 const YAML = `panel_iframe:
@@ -15,6 +15,7 @@ export function PiSetup() {
   const [host, setHost] = useState(url);
   const [token, setToken] = useState("");
   const [copied, setCopied] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     setHost(url);
@@ -22,13 +23,27 @@ export function PiSetup() {
 
   const yaml = YAML.replace("REPLACE_WITH_CHIMES_URL", typeof window === "undefined" ? "URL" : window.location.origin);
 
+  async function signOut() {
+    setSigningOut(true);
+    try {
+      await fetch("/api/logout", {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+    } catch {
+      /* still send them to login so the gate re-checks */
+    }
+    window.location.assign("/login");
+  }
+
   return (
     <section className="space-y-3">
       <SectionLabel>Pi · Home Assistant</SectionLabel>
       <Surface className="space-y-4 p-5">
         <p className="text-sm leading-relaxed text-ink-soft">
           This is the dashboard for the new Pi. Paste a long-lived token from Home Assistant
-          (Profile → Security). On the same network it talks live to the house.
+          (Profile → Security). Default address is the Pi over Tailscale HTTPS.
         </p>
         <label className="block text-sm">
           <span className="text-ink-soft">Address</span>
@@ -36,7 +51,7 @@ export function PiSetup() {
             value={host}
             onChange={(e) => setHost(e.target.value)}
             className="mt-1 w-full rounded-md border border-line bg-paper px-3 py-2 text-sm"
-            placeholder="http://homeassistant.local:8123"
+            placeholder={DEFAULT_HA_URL}
             autoComplete="off"
           />
         </label>
@@ -102,6 +117,26 @@ export function PiSetup() {
           ))}
         </Surface>
       ) : null}
+
+      <Surface className="space-y-3 p-5">
+        <div className="text-xs font-medium uppercase tracking-widest text-ink-soft">
+          Family access
+        </div>
+        <p className="text-sm text-ink-soft">
+          Sign out clears the Shyft session cookie on this tablet. You’ll need the family
+          password again to open Chimes.
+        </p>
+        <button
+          type="button"
+          className="rounded-md border border-line px-3.5 py-2 text-sm"
+          disabled={signingOut}
+          onClick={() => {
+            void signOut();
+          }}
+        >
+          {signingOut ? "Signing out…" : "Sign out"}
+        </button>
+      </Surface>
 
       <Surface className="p-5">
         <div className="mb-2 text-xs font-medium uppercase tracking-widest text-ink-soft">

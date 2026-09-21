@@ -4,11 +4,25 @@ Home Assistant dashboard for Dad’s house. Paper-and-teal UI, live energy flow,
 
 Built to sit on the new Pi. Until you connect, it runs a demo snapshot of the house.
 
+## Family password (required)
+
+The whole app is gated by a Shyft glass login (`/login`) — same family-password pattern as LinksView, not Grok OAuth.
+
+On the host (Vercel / Nitro / local), set:
+
+```bash
+CHIMES_SITE_PASSWORD=your-family-password
+```
+
+Optional: `CHIMES_SESSION_SECRET` (16+ chars). If omitted, a secret is derived from the site password.
+
+After a correct password, the server sets an httpOnly `Secure` `SameSite=Lax` session cookie (~30 days). Sign out is on the **House** page.
+
 ## Connect to the house
 
 1. In Home Assistant: **Profile → Security → Long-lived access tokens**
 2. Open Chimes → **House**
-3. Address: `http://homeassistant.local:8123`
+3. Address: `https://chimes-pi.tail8e29b8.ts.net` (Tailscale Serve HTTPS → HA on the Pi)
 4. Paste the token → **Connect**
 
 Chimes maps Huawei / LUNA / Zappi / Octopus / lights / plugs / Stevie automatically. Sidebar shows **Live** instead of Demo.
@@ -32,10 +46,10 @@ Kiosk the panel in Chromium on the Pi display.
 
 ```bash
 npm install
-npm run dev
+CHIMES_SITE_PASSWORD=dev-password npm run dev
 ```
 
-Open the app, go to **House**, paste the token.
+Open `/login`, enter the password, then go to **House** and paste the HA token.
 
 ## What’s in here
 
@@ -48,7 +62,7 @@ Open the app, go to **House**, paste the token.
 | Charge | Zappi Eco+, Intelligent |
 | History | 7 / 28 day solar, house, grid, spend |
 | Garden | Pergola, ponds |
-| House | Lights, plugs, **Pi connection** |
+| House | Lights, plugs, **Pi connection**, sign out |
 | Overview | iPad wall — house film, glass tiles (flow + 24h graph) |
 
 ## Note
