@@ -34,6 +34,9 @@ export const SWITCHES: { id: SwitchId; label: string; match: string[] }[] = [
 const CREDS = "chimes.ha.creds";
 const MAP = "chimes.ha.map";
 
+/** Dad’s Pi Home Assistant via Tailscale Serve HTTPS (dashboard is HTTPS → avoid mixed content). */
+export const DEFAULT_HA_URL = "https://chimes-pi.tail8e29b8.ts.net";
+
 export type HaCreds = { url: string; token: string };
 
 export function readCreds(): HaCreds | null {
