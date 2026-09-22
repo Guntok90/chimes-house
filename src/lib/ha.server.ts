@@ -1,7 +1,4 @@
-/**
- * Server-side Home Assistant reads. Token stays on the host — never ship to the browser.
- */
-import { haToken, haUrl } from "./env.server";
+import { EMPTY_LIVE, type HouseLive } from "./house";
 import {
   autoMap,
   liveFromStates,
@@ -9,7 +6,7 @@ import {
   type HaMap,
   type HaState,
 } from "./ha";
-import { SNAPSHOT, type HouseLive } from "./house";
+import { haToken, haUrl } from "./env.server";
 
 export type HaLivePayload = {
   configured: boolean;
@@ -62,9 +59,10 @@ export async function fetchHaLive(): Promise<HaLivePayload> {
   try {
     const states = await fetchHaStates();
     const map = autoMap(states);
+    // EMPTY_LIVE — never blend SNAPSHOT demo numbers into a live payload.
     return {
       configured: true,
-      live: liveFromStates(states, map, SNAPSHOT),
+      live: liveFromStates(states, map, EMPTY_LIVE),
       switches: switchOn(states, map),
       map,
     };

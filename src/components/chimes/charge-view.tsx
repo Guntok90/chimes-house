@@ -12,14 +12,23 @@ export function ChargeView() {
       <PageTitle>Charge</PageTitle>
 
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-        <Metric accent label="Zappi" value="Eco+" hint={live.zappiPlugged ? "Plugged in" : "Waiting"} />
+        <Metric
+          accent
+          label="Zappi"
+          value={live.zappiMode === "—" ? "—" : live.zappiMode}
+          hint={live.zappiPlugged ? "Plugged in" : "Waiting"}
+        />
         <Metric label="Intelligent" value={live.intelligent ? "Ready" : "Off"} hint="Octopus" />
         <Metric
           label="Window"
           value={live.offPeak ? "Off-peak" : "Peak"}
           hint="Cheap rate"
         />
-        <Metric label="Session" value="0.00 kWh" hint="No charge running" />
+        <Metric
+          label="Charge power"
+          value={`${live.zappiW} W`}
+          hint={live.zappiW > 30 ? "Charging" : "Idle"}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -32,13 +41,15 @@ export function ChargeView() {
               </span>
               <div>
                 <div className="font-medium">Driveway charger</div>
-                <div className="text-sm text-ink-soft">Eco+ · surplus then off-peak</div>
+                <div className="text-sm text-ink-soft">
+                  {live.zappiMode === "—" ? "Mode unknown" : live.zappiMode} · surplus then off-peak
+                </div>
               </div>
             </div>
             <div className="px-1">
-              <Row label="Mode" value="Eco+" />
+              <Row label="Mode" value={live.zappiMode} />
               <Row label="Plug" value={live.zappiPlugged ? "Connected" : "Unplugged"} />
-              <Row label="Charge" value="Idle" />
+              <Row label="Charge" value={live.zappiW > 30 ? `${live.zappiW} W` : "Idle"} />
               <Row label="House CT" value={`${live.houseW} W`} />
               <Row label="Grid CT" value={`${live.gridW} W`} />
               <Row label="Generation" value={`${live.solarNowW + Math.max(0, -live.batteryW)} W`} />

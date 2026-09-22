@@ -14,10 +14,10 @@ import {
   type HaState,
   type SwitchId,
 } from "./ha";
-import { SNAPSHOT, type HouseLive } from "./house";
+import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house";
 
 const socket = new HaSocket();
-const SERVER_POLL_MS = 7_000;
+const SERVER_POLL_MS = 5_000;
 
 type Status = "demo" | "connecting" | "live" | "error";
 
@@ -63,19 +63,22 @@ export const useHouse = create<Store>((set, get) => {
         cache: "no-store",
       });
       if (res.status === 401) {
-        set({ status: "demo", error: undefined });
+        set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
         return;
       }
       const data = (await res.json()) as ServerLiveResponse;
       if (!data.configured) {
         // No HA_TOKEN on the host — stay on demo until House Connect.
-        if (get().status !== "live") set({ status: "demo", error: undefined });
+        set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
         return;
       }
       if (data.error && !data.live) {
-        if (get().status !== "live") {
-          set({ status: "error", error: data.error });
+        // Keep last full live frame on a blip — don't flip the badge to Demo.
+        if (get().status === "live") {
+          set({ error: data.error });
+          return;
         }
+        set({ status: "error", error: data.error, live: { ...SNAPSHOT } });
         return;
       }
       if (data.live) {
@@ -90,10 +93,15 @@ export const useHouse = create<Store>((set, get) => {
         });
       }
     } catch (err) {
-      if (get().status !== "live") {
+      const message =
+        err instanceof Error ? err.message : "Could not reach live house.";
+      if (get().status === "live") {
+        set({ error: message });
+      } else {
         set({
           status: "error",
-          error: err instanceof Error ? err.message : "Could not reach live house.",
+          error: message,
+          live: { ...SNAPSHOT },
         });
       }
     } finally {
@@ -138,10 +146,11 @@ export const useHouse = create<Store>((set, get) => {
       };
       socket.onStates = (states: HaState[]) => {
         const saved = readMap();
-        const mapped = { ...autoMap(states), ...saved };
+        // autoMap wins over stale localStorage so preferred Pi entities stick.
+        const mapped = { ...saved, ...autoMap(states) };
         writeMap(mapped);
         set({
-          live: liveFromStates(states, mapped, SNAPSHOT),
+          live: liveFromStates(states, mapped, EMPTY_LIVE),
           switches: switchOn(states, mapped),
           map: mapped,
           status: "live",

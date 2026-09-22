@@ -234,7 +234,13 @@ function StatusChips() {
   return (
     <div className="flex flex-wrap gap-1.5">
       <span className="rounded-full bg-sand/25 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg">
-        {status === "live" ? "Live" : status === "connecting" ? "Connecting" : "Demo"}
+        {status === "live"
+          ? "Live"
+          : status === "connecting"
+            ? "Connecting"
+            : status === "error"
+              ? "Error"
+              : "Demo"}
       </span>
       <span className="rounded-full bg-sidebar-fg/12 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg/80">
         {live.offPeak ? "Off-peak" : "Peak"}

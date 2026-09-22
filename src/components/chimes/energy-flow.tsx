@@ -29,7 +29,7 @@ export function EnergyFlow({
   const solarOn = solar > 30;
   const gridIn = live.gridW > 30;
   const gridOut = live.gridW < -30;
-  const carOn = false;
+  const carOn = live.zappiW > 30;
   const glass = tone === "glass";
   const idle = glass ? "flow-idle stroke-sidebar-fg/35" : "flow-idle stroke-line";
   const badge = battOut ? "On battery" : solarOn && home > 0 ? "Solar" : "Idle";
@@ -50,7 +50,7 @@ export function EnergyFlow({
               Energy flow
             </div>
             <div className="mt-1 text-sm tabular-nums text-ink">
-              {solar} W solar · {home} W home · 0 W car
+              {solar} W solar · {home} W home · {live.zappiW} W car
             </div>
           </div>
           <div className="rounded-full border border-line bg-white/70 px-2.5 py-1 text-xs font-medium text-ink">
@@ -149,9 +149,9 @@ export function EnergyFlow({
           at="left-[80%] top-[70%]"
           icon={Car}
           ring="border-umber"
-          value="0 W"
+          value={`${live.zappiW} W`}
           label="Cars"
-          hint="waiting"
+          hint={carOn ? "charging" : "waiting"}
           on={carOn}
         />
       </div>
