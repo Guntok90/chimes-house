@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as ApiLoginRouteImport } from './routes/api/login'
 import { Route as ApiLogoutRouteImport } from './routes/api/logout'
+import { Route as ApiHaLiveRouteImport } from './routes/api/ha/live'
+import { Route as ApiHaStatesRouteImport } from './routes/api/ha/states'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -34,18 +36,32 @@ const ApiLogoutRoute = ApiLogoutRouteImport.update({
   path: '/api/logout',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiHaLiveRoute = ApiHaLiveRouteImport.update({
+  id: '/api/ha/live',
+  path: '/api/ha/live',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiHaStatesRoute = ApiHaStatesRouteImport.update({
+  id: '/api/ha/states',
+  path: '/api/ha/states',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/ha/live': typeof ApiHaLiveRoute
+  '/api/ha/states': typeof ApiHaStatesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/ha/live': typeof ApiHaLiveRoute
+  '/api/ha/states': typeof ApiHaStatesRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -53,13 +69,34 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/ha/live': typeof ApiHaLiveRoute
+  '/api/ha/states': typeof ApiHaStatesRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/api/login' | '/api/logout'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/api/login'
+    | '/api/logout'
+    | '/api/ha/live'
+    | '/api/ha/states'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/api/login' | '/api/logout'
-  id: '__root__' | '/' | '/login' | '/api/login' | '/api/logout'
+  to:
+    | '/'
+    | '/login'
+    | '/api/login'
+    | '/api/logout'
+    | '/api/ha/live'
+    | '/api/ha/states'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/api/login'
+    | '/api/logout'
+    | '/api/ha/live'
+    | '/api/ha/states'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -67,6 +104,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   ApiLoginRoute: typeof ApiLoginRoute
   ApiLogoutRoute: typeof ApiLogoutRoute
+  ApiHaLiveRoute: typeof ApiHaLiveRoute
+  ApiHaStatesRoute: typeof ApiHaStatesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -99,6 +138,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiLogoutRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/ha/live': {
+      id: '/api/ha/live'
+      path: '/api/ha/live'
+      fullPath: '/api/ha/live'
+      preLoaderRoute: typeof ApiHaLiveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/ha/states': {
+      id: '/api/ha/states'
+      path: '/api/ha/states'
+      fullPath: '/api/ha/states'
+      preLoaderRoute: typeof ApiHaStatesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -107,6 +160,8 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   ApiLoginRoute: ApiLoginRoute,
   ApiLogoutRoute: ApiLogoutRoute,
+  ApiHaLiveRoute: ApiHaLiveRoute,
+  ApiHaStatesRoute: ApiHaStatesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

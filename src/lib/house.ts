@@ -9,10 +9,37 @@ export type HouseLive = {
   inverterStatus: string;
   zappiMode: string;
   zappiPlugged: boolean;
+  /** Zappi charge power (W) when a myenergi power entity is present. */
+  zappiW: number;
   intelligent: boolean;
   offPeak: boolean;
   gridCharge: boolean;
   stevieHome: boolean;
+  /** From `sun.sun` when available; demo evening snapshot is below horizon. */
+  sunAboveHorizon: boolean;
+};
+
+/**
+ * Neutral values used while mapping HA states — never fall back to demo numbers
+ * (e.g. 16.68 kWh) once we are on a live path.
+ */
+export const EMPTY_LIVE: HouseLive = {
+  soc: 0,
+  batteryW: 0,
+  inverterW: 0,
+  solarNowW: 0,
+  houseW: 0,
+  gridW: 0,
+  solarTodayKwh: 0,
+  inverterStatus: "—",
+  zappiMode: "—",
+  zappiPlugged: false,
+  zappiW: 0,
+  intelligent: false,
+  offPeak: false,
+  gridCharge: false,
+  stevieHome: false,
+  sunAboveHorizon: true,
 };
 
 export const SNAPSHOT: HouseLive = {
@@ -26,10 +53,12 @@ export const SNAPSHOT: HouseLive = {
   inverterStatus: "On-grid",
   zappiMode: "Eco+",
   zappiPlugged: false,
+  zappiW: 0,
   intelligent: true,
   offPeak: true,
   gridCharge: false,
   stevieHome: true,
+  sunAboveHorizon: false,
 };
 
 /** Demo snapshot. Live values come from `useLive()`. */

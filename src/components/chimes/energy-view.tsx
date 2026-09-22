@@ -7,26 +7,40 @@ import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
 export function EnergyView() {
   const LIVE = useLive();
   const today = WEEK[WEEK.length - 1];
+  const solarHint =
+    LIVE.solarNowW > 30
+      ? "Producing"
+      : LIVE.sunAboveHorizon === false
+        ? "After dusk"
+        : "Idle";
+  const gridHint =
+    LIVE.gridW > 30 ? "Importing" : LIVE.gridW < -30 ? "Exporting" : "Balanced";
+  const battHint =
+    LIVE.batteryW < -30 ? "Discharging" : LIVE.batteryW > 30 ? "Charging" : "Idle";
+  const blurb =
+    LIVE.solarNowW > 30
+      ? `Solar is producing ${LIVE.solarNowW} W. House load ${LIVE.houseW} W.`
+      : LIVE.batteryW < -30
+        ? `Battery is covering the house (${Math.abs(LIVE.batteryW)} W out). Solar is ${solarHint.toLowerCase()}.`
+        : `Solar is ${solarHint.toLowerCase()}. House load ${LIVE.houseW} W.`;
+
   return (
     <div className="space-y-8">
       <PageTitle>Energy</PageTitle>
       <section>
         <SectionLabel>Live flow</SectionLabel>
         <EnergyFlow />
-        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-soft">
-          Battery is covering the house. Solar is idle after dusk. Grid sits at zero. Both cars
-          are waiting.
-        </p>
+        <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-soft">{blurb}</p>
       </section>
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
-        <Metric accent label="Solar now" value={`${LIVE.solarNowW} W`} hint="After dusk" />
+        <Metric accent label="Solar now" value={`${LIVE.solarNowW} W`} hint={solarHint} />
         <Metric label="House" value={`${LIVE.houseW} W`} hint="Live load" />
         <Metric
           label="Battery"
           value={`${Math.abs(LIVE.batteryW)} W`}
-          hint={LIVE.batteryW < 0 ? "Discharging" : "Charging"}
+          hint={battHint}
         />
-        <Metric label="Grid" value={`${LIVE.gridW} W`} hint="Balanced" />
+        <Metric label="Grid" value={`${LIVE.gridW} W`} hint={gridHint} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

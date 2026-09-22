@@ -1,4 +1,4 @@
-import { SNAPSHOT, type HouseLive } from "./house";
+import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house.ts";
 
 export type HaState = {
   entity_id: string;
@@ -36,6 +36,51 @@ const MAP = "chimes.ha.map";
 
 /** Dad’s Pi Home Assistant via Tailscale Serve HTTPS (dashboard is HTTPS → avoid mixed content). */
 export const DEFAULT_HA_URL = "https://chimes-pi.tail8e29b8.ts.net";
+
+/** Preferred entity ids for Chimes-Pi (Huawei / LUNA / myenergi / Octopus). */
+export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
+  soc: [
+    "sensor.battery_1_state_of_capacity",
+    "sensor.battery_state_of_capacity",
+    "sensor.luna2000_state_of_capacity",
+  ],
+  batteryW: [
+    "sensor.battery_1_charge_discharge_power",
+    "sensor.battery_charge_discharge_power",
+    "sensor.battery_1_power",
+    "sensor.luna2000_charge_discharge_power",
+  ],
+  solarNowW: ["sensor.inverter_input_power", "sensor.pv_input_power"],
+  solarTodayKwh: ["sensor.inverter_daily_yield", "sensor.daily_yield"],
+  inverterW: ["sensor.inverter_active_power"],
+  inverterStatus: [
+    "sensor.inverter_status",
+    "sensor.inverter_device_status",
+    "sensor.inverter_state",
+  ],
+  houseW: [
+    "sensor.house_consumption",
+    "sensor.house_power",
+    "sensor.load_power",
+    "sensor.home_load_power",
+    "sensor.home_power",
+    "sensor.power_meter_consumption",
+  ],
+  gridW: [
+    "sensor.grid_active_power",
+    "sensor.grid_power",
+    "sensor.power_meter_active_power",
+    "sensor.meter_active_power",
+    "sensor.active_power",
+  ],
+  zappiMode: [],
+  zappiPlugged: [],
+  zappiW: [],
+  offPeak: [],
+  intelligent: [],
+  gridCharge: [],
+  stevieHome: [],
+};
 
 export type HaCreds = { url: string; token: string };
 
@@ -86,77 +131,202 @@ function blob(s: HaState) {
   return `${s.entity_id} ${String(s.attributes.friendly_name ?? "")}`.toLowerCase();
 }
 
+function available(s: HaState) {
+  return s.state !== "unavailable" && s.state !== "unknown";
+}
+
 function find(states: HaState[], test: (s: HaState, b: string) => boolean) {
-  return states.find((s) => s.state !== "unavailable" && s.state !== "unknown" && test(s, blob(s)));
+  return states.find((s) => available(s) && test(s, blob(s)));
+}
+
+function prefer(states: HaState[], ids: string[] | undefined) {
+  if (!ids?.length) return undefined;
+  for (const id of ids) {
+    const hit = states.find((s) => s.entity_id === id && available(s));
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** Pick first matching preferred id, else fuzzy finder. */
+function resolve(
+  states: HaState[],
+  key: keyof HouseLive,
+  fuzzy: (s: HaState, b: string) => boolean,
+) {
+  return prefer(states, PREFERRED[key]) ?? find(states, fuzzy);
 }
 
 export function autoMap(states: HaState[]): HaMap {
   const map: HaMap = {};
-  const soc = find(
+
+  const soc = resolve(
     states,
-    (s, b) =>
-      (b.includes("soc") || b.includes("state_of_charge") || b.includes("battery_capacity")) &&
-      (b.includes("battery") || b.includes("luna") || b.includes("ess")),
+    "soc",
+    (_s, b) =>
+      (b.includes("soc") ||
+        b.includes("state_of_charge") ||
+        b.includes("state_of_capacity") ||
+        b.includes("battery_capacity")) &&
+      (b.includes("battery") || b.includes("luna") || b.includes("ess")) &&
+      !b.includes("zappi"),
   );
-  const battW = find(
+
+  // Signed Huawei charge/discharge power — not zappi CT, not PV.
+  const battW = resolve(
     states,
-    (s, b) =>
+    "batteryW",
+    (_s, b) =>
       (b.includes("battery") || b.includes("luna")) &&
-      (b.includes("power") || b.includes("charge_discharge")) &&
+      (b.includes("charge_discharge") ||
+        b.includes("charge/discharge") ||
+        (b.includes("power") && (b.includes("charge") || b.includes("discharge")))) &&
       !b.includes("pv") &&
-      !b.includes("today"),
+      !b.includes("today") &&
+      !b.includes("daily") &&
+      !b.includes("zappi") &&
+      !b.includes("generation"),
   );
-  const solarNow = find(
+
+  // PV DC input — not zappi CT “generation & battery”, not inverter AC active power.
+  const solarNow = resolve(
     states,
-    (s, b) =>
+    "solarNowW",
+    (_s, b) =>
       (b.includes("pv") || b.includes("solar") || b.includes("input_power")) &&
       (b.includes("power") || b.includes("watt")) &&
       !b.includes("today") &&
       !b.includes("daily") &&
-      !b.includes("battery"),
+      !b.includes("battery") &&
+      !b.includes("zappi") &&
+      !b.includes("generation"),
   );
-  const solarToday = find(
+
+  const solarToday = resolve(
     states,
-    (s, b) =>
+    "solarTodayKwh",
+    (_s, b) =>
       (b.includes("solar") || b.includes("pv") || b.includes("yield")) &&
       (b.includes("today") || b.includes("daily")) &&
-      !b.includes("battery"),
-  );
-  const house = find(
-    states,
-    (s, b) =>
-      (b.includes("house") || b.includes("load") || b.includes("consumption")) &&
-      (b.includes("power") || b.includes("watt")) &&
       !b.includes("battery") &&
-      !b.includes("solar"),
+      !b.includes("zappi"),
   );
-  const grid = find(
+
+  const house = resolve(
     states,
-    (s, b) =>
-      (b.includes("grid") || b.includes("meter")) &&
-      (b.includes("power") || b.includes("watt")) &&
+    "houseW",
+    (_s, b) =>
+      (b.includes("house") ||
+        b.includes("home_load") ||
+        b.includes("load_power") ||
+        (b.includes("load") && b.includes("power")) ||
+        (b.includes("consumption") && b.includes("power"))) &&
+      (b.includes("power") || b.includes("watt") || b.includes("load") || b.includes("consumption")) &&
+      !b.includes("battery") &&
+      !b.includes("solar") &&
+      !b.includes("pv") &&
+      !b.includes("zappi") &&
+      !b.includes("grid") &&
+      !b.includes("inverter") &&
+      !b.includes("today") &&
+      !b.includes("daily"),
+  );
+
+  const grid = resolve(
+    states,
+    "gridW",
+    (_s, b) =>
+      (b.includes("grid") || (b.includes("meter") && b.includes("active"))) &&
+      (b.includes("power") || b.includes("watt") || b.includes("active")) &&
+      !b.includes("today") &&
+      !b.includes("daily") &&
+      !b.includes("zappi") &&
+      !b.includes("battery") &&
+      !b.includes("charge") &&
+      !b.includes("export_today") &&
+      !b.includes("import_today"),
+  );
+
+  const inverterW = resolve(
+    states,
+    "inverterW",
+    (_s, b) =>
+      (b.includes("inverter") || b.includes("sun2000")) &&
+      (b.includes("active_power") || (b.includes("active") && b.includes("power"))) &&
+      !b.includes("battery") &&
+      !b.includes("input_power") &&
       !b.includes("today"),
   );
-  const inverterW = find(
+
+  const inverterStatus = resolve(
+    states,
+    "inverterStatus",
+    (_s, b) =>
+      b.includes("inverter") &&
+      (b.includes("status") || b.includes("state") || b.includes("device_status")) &&
+      !b.includes("power") &&
+      !b.includes("yield"),
+  );
+
+  const zappiMode = find(
     states,
     (s, b) =>
-      (b.includes("inverter") || b.includes("sun2000") || b.includes("active_power")) &&
-      (b.includes("power") || b.includes("active")) &&
-      !b.includes("battery"),
+      b.includes("zappi") &&
+      (b.includes("mode") || b.includes("charge_mode")) &&
+      (s.entity_id.startsWith("sensor.") ||
+        s.entity_id.startsWith("select.") ||
+        s.entity_id.startsWith("binary_sensor.")),
   );
-  const inverterStatus = find(states, (s, b) => b.includes("inverter") && (b.includes("status") || b.includes("state")));
-  const zappiMode = find(states, (s, b) => b.includes("zappi") && b.includes("mode"));
+
   const zappiPlug = find(
     states,
-    (s, b) => b.includes("zappi") && (b.includes("plug") || b.includes("connected") || b.includes("status")),
+    (s, b) =>
+      b.includes("zappi") &&
+      (b.includes("plug") ||
+        b.includes("connected") ||
+        b.includes("car_connected") ||
+        (b.includes("status") && !b.includes("mode"))),
   );
+
+  const zappiW = find(
+    states,
+    (_s, b) =>
+      b.includes("zappi") &&
+      (b.includes("charge_rate") ||
+        b.includes("charging_power") ||
+        b.includes("charge_power") ||
+        (b.includes("power") && !b.includes("generation") && !b.includes("battery"))),
+  );
+
   const offPeak = find(
     states,
-    (s, b) => b.includes("off_peak") || b.includes("off-peak") || (b.includes("octopus") && b.includes("slot")),
+    (_s, b) =>
+      b.includes("off_peak") ||
+      b.includes("off-peak") ||
+      b.includes("offpeak") ||
+      (b.includes("octopus") && (b.includes("slot") || b.includes("cheap") || b.includes("off"))),
   );
-  const intelligent = find(states, (s, b) => b.includes("intelligent") || (b.includes("octopus") && b.includes("ready")));
-  const gridCharge = find(states, (s, b) => b.includes("grid") && b.includes("charge"));
-  const stevie = find(states, (s, b) => s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")));
+
+  const intelligent = find(
+    states,
+    (_s, b) =>
+      b.includes("intelligent") ||
+      (b.includes("octopus") && (b.includes("ready") || b.includes("dispatch"))),
+  );
+
+  const gridCharge = find(
+    states,
+    (_s, b) =>
+      (b.includes("grid") && b.includes("charge")) ||
+      b.includes("charge_from_grid") ||
+      b.includes("forcible_charge"),
+  );
+
+  const stevie = find(
+    states,
+    (s, b) =>
+      s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")),
+  );
 
   if (soc) map.soc = soc.entity_id;
   if (battW) map.batteryW = battW.entity_id;
@@ -168,6 +338,7 @@ export function autoMap(states: HaState[]): HaMap {
   if (inverterStatus) map.inverterStatus = inverterStatus.entity_id;
   if (zappiMode) map.zappiMode = zappiMode.entity_id;
   if (zappiPlug) map.zappiPlugged = zappiPlug.entity_id;
+  if (zappiW) map.zappiW = zappiW.entity_id;
   if (offPeak) map.offPeak = offPeak.entity_id;
   if (intelligent) map.intelligent = intelligent.entity_id;
   if (gridCharge) map.gridCharge = gridCharge.entity_id;
@@ -184,7 +355,15 @@ export function autoMap(states: HaState[]): HaMap {
   return map;
 }
 
-export function liveFromStates(states: HaState[], map: HaMap, fallback: HouseLive): HouseLive {
+/**
+ * Build HouseLive from HA states. Pass EMPTY_LIVE (default) so missing entities
+ * become zeros/false — never demo SNAPSHOT leftovers like 16.68 kWh.
+ */
+export function liveFromStates(
+  states: HaState[],
+  map: HaMap,
+  fallback: HouseLive = EMPTY_LIVE,
+): HouseLive {
   const byId = new Map(states.map((s) => [s.entity_id, s]));
   const take = (key: keyof HouseLive) => {
     const id = map[key];
@@ -199,16 +378,53 @@ export function liveFromStates(states: HaState[], map: HaMap, fallback: HouseLiv
     const s = take(key);
     if (!s) return current;
     const v = s.state.toLowerCase();
-    return v === "on" || v === "true" || v === "home" || v === "yes" || v === "active";
+    return (
+      v === "on" ||
+      v === "true" ||
+      v === "home" ||
+      v === "yes" ||
+      v === "active" ||
+      v === "plugged_in" ||
+      v === "connected" ||
+      v === "charging"
+    );
   };
 
   const batt = take("batteryW");
   let batteryW = n("batteryW", fallback.batteryW);
   if (batt) {
     const b = blob(batt);
-    const charging = b.includes("charg") && !b.includes("discharg");
-    if (b.includes("discharg") && batteryW > 0) batteryW = -batteryW;
-    if (charging && batteryW < 0) batteryW = Math.abs(batteryW);
+    const signed =
+      b.includes("charge_discharge") ||
+      b.includes("charge/discharge") ||
+      b.includes("charge_and_discharge");
+    // Huawei signed power: negative = discharging, positive = charging — leave as-is.
+    if (!signed) {
+      const charging = b.includes("charg") && !b.includes("discharg");
+      if (b.includes("discharg") && batteryW > 0) batteryW = -batteryW;
+      if (charging && batteryW < 0) batteryW = Math.abs(batteryW);
+    }
+  }
+
+  const sun = byId.get("sun.sun");
+  const sunAboveHorizon = sun ? sun.state === "above_horizon" : fallback.sunAboveHorizon;
+
+  const zappiModeState = take("zappiMode")?.state;
+  const zappiPlugState = take("zappiPlugged");
+  let zappiPlugged = fallback.zappiPlugged;
+  if (zappiPlugState) {
+    const v = zappiPlugState.state.toLowerCase();
+    const negative =
+      v.includes("not connected") ||
+      v.includes("not_connected") ||
+      v.includes("unplugged") ||
+      v.includes("disconnected") ||
+      v === "off" ||
+      v === "false";
+    zappiPlugged = negative
+      ? false
+      : flag("zappiPlugged", false) ||
+        /\b(plugged|connected|charging)\b/.test(v);
   }
 
   return {
@@ -220,12 +436,14 @@ export function liveFromStates(states: HaState[], map: HaMap, fallback: HouseLiv
     gridW: Math.round(n("gridW", fallback.gridW)),
     solarTodayKwh: Number(n("solarTodayKwh", fallback.solarTodayKwh).toFixed(2)),
     inverterStatus: take("inverterStatus")?.state ?? fallback.inverterStatus,
-    zappiMode: take("zappiMode")?.state ?? fallback.zappiMode,
-    zappiPlugged: flag("zappiPlugged", fallback.zappiPlugged),
+    zappiMode: zappiModeState ?? fallback.zappiMode,
+    zappiPlugged,
+    zappiW: Math.round(n("zappiW", fallback.zappiW)),
     intelligent: flag("intelligent", fallback.intelligent),
     offPeak: flag("offPeak", fallback.offPeak),
     gridCharge: flag("gridCharge", fallback.gridCharge),
     stevieHome: flag("stevieHome", fallback.stevieHome),
+    sunAboveHorizon,
   };
 }
 
@@ -332,4 +550,4 @@ export class HaSocket {
   }
 }
 
-export { SNAPSHOT };
+export { EMPTY_LIVE, SNAPSHOT };
