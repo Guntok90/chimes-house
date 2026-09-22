@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { fetchHaStates, isHaConfigured } from "@/lib/ha.server";
+import { isHaConfigured } from "@/lib/ha.server";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -20,18 +20,12 @@ export const Route = createFileRoute("/api/ha/states")({
           headers: { "Cache-Control": "no-store" },
         }),
       GET: async () => {
-        // Family session is enforced by start.ts middleware (not a public path).
-        if (!isHaConfigured()) {
-          return json({ configured: false, states: [] });
-        }
-        try {
-          const states = await fetchHaStates();
-          return json({ configured: true, states });
-        } catch (err) {
-          const message =
-            err instanceof Error ? err.message : "Could not reach Home Assistant";
-          return json({ configured: true, error: message, states: [] }, 502);
-        }
+        // States are read on the tablet WebSocket, not by Vercel.
+        return json({
+          configured: isHaConfigured(),
+          transport: "browser-websocket",
+          states: [],
+        });
       },
     },
   },

@@ -18,40 +18,42 @@ Optional: `CHIMES_SESSION_SECRET` (16+ chars). If omitted, a secret is derived f
 
 After a correct password, the server sets an httpOnly `Secure` `SameSite=Lax` session cookie (~30 days). Sign out is on the **House** page.
 
-## Live Home Assistant (server — preferred)
+## Live Home Assistant (tablet WebSocket)
 
-Tablets get live Overview / Energy Flow / Battery / Charge without pasting a long-lived token in the browser. Set on the host:
+Home Assistant is only on Tailscale Serve: `https://chimes-pi.tail8e29b8.ts.net`. Vercel cannot see MagicDNS, so the server never fetches `/api/states`. Tablets and phones must be on Tailscale (or the house LAN) to reach the Pi. Vercel hosts the UI and, after the family password, hands the Pi address and token to that session.
 
 ```bash
 HA_URL=https://chimes-pi.tail8e29b8.ts.net   # optional; this is the default
-HA_TOKEN=your-ha-long-lived-access-token     # required for server live mode
+HA_TOKEN=your-ha-long-lived-access-token     # required for automatic live mode
 ```
 
-With `HA_TOKEN` set, logged-in clients poll `GET /api/ha/live` every ~5s (family session cookie required). The token never leaves the server.
+After login the app calls `GET /api/ha/bootstrap` (family session cookie required). When `HA_TOKEN` is set the response is `{ configured, url, token }`. The browser stores that the same way as House → Connect and opens a WebSocket to the Pi. Overview, Energy Flow, Battery, and Charge follow `state_changed`. The sidebar shows **Live**.
+
+`HA_TOKEN` is not in the JavaScript bundle. Logged-out calls get 401, or a redirect to `/login`, and no token.
 
 Mapped when present (preferred ids first):
 
-| Field | Preferred entity |
-|---|---|
-| Solar now | `sensor.inverter_input_power` |
-| Solar today | `sensor.inverter_daily_yield` |
-| Inverter W | `sensor.inverter_active_power` |
-| Battery SOC | `sensor.battery_1_state_of_capacity` |
-| Battery W | `sensor.battery_1_charge_discharge_power` (signed; negative = discharging) |
-| House / grid / Zappi / Octopus | fuzzy + common Huawei / myenergi / Octopus names |
+| Field                          | Preferred entity                                                           |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| Solar now                      | `sensor.inverter_input_power`                                              |
+| Solar today                    | `sensor.inverter_daily_yield`                                              |
+| Inverter W                     | `sensor.inverter_active_power`                                             |
+| Battery SOC                    | `sensor.battery_1_state_of_capacity`                                       |
+| Battery W                      | `sensor.battery_1_charge_discharge_power` (signed; negative = discharging) |
+| House / grid / Zappi / Octopus | fuzzy + common Huawei / myenergi / Octopus names                           |
 
-Live payloads use neutral zeros for unmapped fields — they never mix demo numbers (e.g. 16.68 kWh) with partial live data. Without `HA_TOKEN` (or if HA is unreachable on boot), the app stays on the demo snapshot / House Connect path.
+Live values use neutral zeros for unmapped fields — they never mix demo numbers (e.g. 16.68 kWh) with partial live data. “After dusk” only when a live `sun.sun` is `below_horizon`. If bootstrap is unconfigured, or the WebSocket cannot reach the Pi, the app stays on the demo snapshot and shows a connect error.
 
-## Connect to the house (optional browser override)
+## Connect to the house (manual)
 
-For local/dev without server env, or to override:
+For a browser that is already on Tailscale, without `HA_TOKEN` on the host:
 
 1. In Home Assistant: **Profile → Security → Long-lived access tokens**
 2. Open Chimes → **House**
 3. Address: `https://chimes-pi.tail8e29b8.ts.net` (Tailscale Serve HTTPS → HA on the Pi)
 4. Paste the token → **Connect**
 
-Chimes maps Huawei / LUNA / Zappi / Octopus / lights / plugs / Stevie automatically. Sidebar shows **Live** instead of Demo.
+When `HA_TOKEN` is set, the next load uses the server token again. Chimes maps Huawei / LUNA / Zappi / Octopus / lights / plugs / Stevie automatically. Sidebar shows **Live** instead of Demo.
 
 ## Pi panel
 
@@ -75,20 +77,20 @@ npm install
 CHIMES_SITE_PASSWORD=dev-password HA_TOKEN=your-token npm run dev
 ```
 
-Open `/login`, enter the password. With `HA_TOKEN` set, Overview goes live automatically. Or open **House** and paste a browser token.
+Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale goes live over the WebSocket. Or open **House** and paste a browser token.
 
 ## What’s in here
 
-| Page | What it is |
-|---|---|
-| Home | Solar today, battery, house load, lights, Stevie |
-| Energy | Live 5-node flow + inverter / Octopus |
-| Site | 3D plot — house, solar, battery, both cars |
-| Battery | SOC / charge / discharge |
-| Charge | Zappi Eco+, Intelligent |
-| History | 7 / 28 day solar, house, grid, spend |
-| Garden | Pergola, ponds |
-| House | Lights, plugs, **Pi connection**, sign out |
+| Page     | What it is                                             |
+| -------- | ------------------------------------------------------ |
+| Home     | Solar today, battery, house load, lights, Stevie       |
+| Energy   | Live 5-node flow + inverter / Octopus                  |
+| Site     | 3D plot — house, solar, battery, both cars             |
+| Battery  | SOC / charge / discharge                               |
+| Charge   | Zappi Eco+, Intelligent                                |
+| History  | 7 / 28 day solar, house, grid, spend                   |
+| Garden   | Pergola, ponds                                         |
+| House    | Lights, plugs, **Pi connection**, sign out             |
 | Overview | iPad wall — house film, glass tiles (flow + 24h graph) |
 
 ## Note

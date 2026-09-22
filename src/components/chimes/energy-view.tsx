@@ -1,28 +1,27 @@
-import { WEEK } from "@/lib/house";
-import { useLive } from "@/lib/house-store";
+import { WEEK, solarStatusHint } from "@/lib/house";
+import { useHouse, useLive } from "@/lib/house-store";
 import { CostBars, PowerArea } from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
 
 export function EnergyView() {
   const LIVE = useLive();
+  const status = useHouse((s) => s.status);
   const today = WEEK[WEEK.length - 1];
-  const solarHint =
-    LIVE.solarNowW > 30
-      ? "Producing"
-      : LIVE.sunAboveHorizon === false
-        ? "After dusk"
-        : "Idle";
-  const gridHint =
-    LIVE.gridW > 30 ? "Importing" : LIVE.gridW < -30 ? "Exporting" : "Balanced";
-  const battHint =
-    LIVE.batteryW < -30 ? "Discharging" : LIVE.batteryW > 30 ? "Charging" : "Idle";
+  const solarHintRaw = solarStatusHint(status, LIVE);
+  const solarHint = solarHintRaw.charAt(0).toUpperCase() + solarHintRaw.slice(1);
+  const gridHint = LIVE.gridW > 30 ? "Importing" : LIVE.gridW < -30 ? "Exporting" : "Balanced";
+  const battHint = LIVE.batteryW < -30 ? "Discharging" : LIVE.batteryW > 30 ? "Charging" : "Idle";
   const blurb =
-    LIVE.solarNowW > 30
-      ? `Solar is producing ${LIVE.solarNowW} W. House load ${LIVE.houseW} W.`
-      : LIVE.batteryW < -30
-        ? `Battery is covering the house (${Math.abs(LIVE.batteryW)} W out). Solar is ${solarHint.toLowerCase()}.`
-        : `Solar is ${solarHint.toLowerCase()}. House load ${LIVE.houseW} W.`;
+    status === "error"
+      ? "Not connected to the Pi. Showing the demo snapshot — the tablet needs Tailscale or the house Wi-Fi."
+      : status !== "live"
+        ? "Demo snapshot. Tablets on Tailscale go live after the family password."
+        : LIVE.solarNowW > 30
+          ? `Solar is producing ${LIVE.solarNowW} W. House load ${LIVE.houseW} W.`
+          : LIVE.batteryW < -30
+            ? `Battery is covering the house (${Math.abs(LIVE.batteryW)} W out). Solar is ${solarHint.toLowerCase()}.`
+            : `Solar is ${solarHint.toLowerCase()}. House load ${LIVE.houseW} W.`;
 
   return (
     <div className="space-y-8">
@@ -35,11 +34,7 @@ export function EnergyView() {
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <Metric accent label="Solar now" value={`${LIVE.solarNowW} W`} hint={solarHint} />
         <Metric label="House" value={`${LIVE.houseW} W`} hint="Live load" />
-        <Metric
-          label="Battery"
-          value={`${Math.abs(LIVE.batteryW)} W`}
-          hint={battHint}
-        />
+        <Metric label="Battery" value={`${Math.abs(LIVE.batteryW)} W`} hint={battHint} />
         <Metric label="Grid" value={`${LIVE.gridW} W`} hint={gridHint} />
       </div>
 
