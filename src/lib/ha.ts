@@ -1,4 +1,4 @@
-import { SNAPSHOT, type HouseLive } from "./house";
+import { SNAPSHOT, type HouseLive } from "./house.ts";
 
 export type HaState = {
   entity_id: string;
@@ -92,36 +92,58 @@ function find(states: HaState[], test: (s: HaState, b: string) => boolean) {
 
 export function autoMap(states: HaState[]): HaMap {
   const map: HaMap = {};
-  const soc = find(
-    states,
-    (s, b) =>
-      (b.includes("soc") || b.includes("state_of_charge") || b.includes("battery_capacity")) &&
-      (b.includes("battery") || b.includes("luna") || b.includes("ess")),
-  );
+
+  // Prefer known Huawei / LUNA entity ids (Chimes-Pi) before fuzzy matching.
+  const prefer = (id: string) =>
+    states.find(
+      (s) =>
+        s.entity_id === id && s.state !== "unavailable" && s.state !== "unknown",
+    );
+
+  const soc =
+    prefer("sensor.battery_1_state_of_capacity") ??
+    find(
+      states,
+      (s, b) =>
+        (b.includes("soc") ||
+          b.includes("state_of_charge") ||
+          b.includes("state_of_capacity") ||
+          b.includes("battery_capacity")) &&
+        (b.includes("battery") || b.includes("luna") || b.includes("ess")),
+    );
   const battW = find(
     states,
     (s, b) =>
       (b.includes("battery") || b.includes("luna")) &&
       (b.includes("power") || b.includes("charge_discharge")) &&
       !b.includes("pv") &&
-      !b.includes("today"),
-  );
-  const solarNow = find(
-    states,
-    (s, b) =>
-      (b.includes("pv") || b.includes("solar") || b.includes("input_power")) &&
-      (b.includes("power") || b.includes("watt")) &&
       !b.includes("today") &&
-      !b.includes("daily") &&
-      !b.includes("battery"),
+      !b.includes("zappi"),
   );
-  const solarToday = find(
-    states,
-    (s, b) =>
-      (b.includes("solar") || b.includes("pv") || b.includes("yield")) &&
-      (b.includes("today") || b.includes("daily")) &&
-      !b.includes("battery"),
-  );
+  // PV DC input — not zappi CT “generation & battery”, not inverter AC active power.
+  const solarNow =
+    prefer("sensor.inverter_input_power") ??
+    find(
+      states,
+      (s, b) =>
+        (b.includes("pv") || b.includes("solar") || b.includes("input_power")) &&
+        (b.includes("power") || b.includes("watt")) &&
+        !b.includes("today") &&
+        !b.includes("daily") &&
+        !b.includes("battery") &&
+        !b.includes("zappi") &&
+        !b.includes("generation"),
+    );
+  const solarToday =
+    prefer("sensor.inverter_daily_yield") ??
+    find(
+      states,
+      (s, b) =>
+        (b.includes("solar") || b.includes("pv") || b.includes("yield")) &&
+        (b.includes("today") || b.includes("daily")) &&
+        !b.includes("battery") &&
+        !b.includes("zappi"),
+    );
   const house = find(
     states,
     (s, b) =>
@@ -137,13 +159,16 @@ export function autoMap(states: HaState[]): HaMap {
       (b.includes("power") || b.includes("watt")) &&
       !b.includes("today"),
   );
-  const inverterW = find(
-    states,
-    (s, b) =>
-      (b.includes("inverter") || b.includes("sun2000") || b.includes("active_power")) &&
-      (b.includes("power") || b.includes("active")) &&
-      !b.includes("battery"),
-  );
+  const inverterW =
+    prefer("sensor.inverter_active_power") ??
+    find(
+      states,
+      (s, b) =>
+        (b.includes("inverter") || b.includes("sun2000") || b.includes("active_power")) &&
+        (b.includes("power") || b.includes("active")) &&
+        !b.includes("battery") &&
+        !b.includes("input_power"),
+    );
   const inverterStatus = find(states, (s, b) => b.includes("inverter") && (b.includes("status") || b.includes("state")));
   const zappiMode = find(states, (s, b) => b.includes("zappi") && b.includes("mode"));
   const zappiPlug = find(
@@ -211,6 +236,11 @@ export function liveFromStates(states: HaState[], map: HaMap, fallback: HouseLiv
     if (charging && batteryW < 0) batteryW = Math.abs(batteryW);
   }
 
+  const sun = byId.get("sun.sun");
+  const sunAboveHorizon = sun
+    ? sun.state === "above_horizon"
+    : fallback.sunAboveHorizon;
+
   return {
     soc: Math.round(n("soc", fallback.soc)),
     batteryW: Math.round(batteryW),
@@ -226,6 +256,7 @@ export function liveFromStates(states: HaState[], map: HaMap, fallback: HouseLiv
     offPeak: flag("offPeak", fallback.offPeak),
     gridCharge: flag("gridCharge", fallback.gridCharge),
     stevieHome: flag("stevieHome", fallback.stevieHome),
+    sunAboveHorizon,
   };
 }
 

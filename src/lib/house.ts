@@ -13,6 +13,8 @@ export type HouseLive = {
   offPeak: boolean;
   gridCharge: boolean;
   stevieHome: boolean;
+  /** From `sun.sun` when available; demo evening snapshot is below horizon. */
+  sunAboveHorizon: boolean;
 };
 
 export const SNAPSHOT: HouseLive = {
@@ -30,6 +32,7 @@ export const SNAPSHOT: HouseLive = {
   offPeak: true,
   gridCharge: false,
   stevieHome: true,
+  sunAboveHorizon: false,
 };
 
 /** Demo snapshot. Live values come from `useLive()`. */

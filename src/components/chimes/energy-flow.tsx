@@ -104,7 +104,13 @@ export function EnergyFlow({
           ring="border-sand"
           value={`${solar} W`}
           label="Solar"
-          hint={solarOn ? "producing" : "after dusk"}
+          hint={
+            solarOn
+              ? "producing"
+              : live.sunAboveHorizon === false
+                ? "after dusk"
+                : "idle"
+          }
           on={solarOn}
         />
         <Node

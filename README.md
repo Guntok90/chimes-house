@@ -2,7 +2,7 @@
 
 Home Assistant dashboard for Dad’s house. Paper-and-teal UI, live energy flow, battery, Zappi, garden, and an iPad overview.
 
-Built to sit on the new Pi. Until you connect, it runs a demo snapshot of the house.
+Built to sit on the new Pi. Until Home Assistant is configured (server token or House Connect), it runs a demo snapshot of the house.
 
 ## Family password (required)
 
@@ -18,7 +18,22 @@ Optional: `CHIMES_SESSION_SECRET` (16+ chars). If omitted, a secret is derived f
 
 After a correct password, the server sets an httpOnly `Secure` `SameSite=Lax` session cookie (~30 days). Sign out is on the **House** page.
 
-## Connect to the house
+## Live Home Assistant (server — preferred)
+
+Tablets get live Overview / Energy Flow without pasting a long-lived token in the browser. Set on the host:
+
+```bash
+HA_URL=https://chimes-pi.tail8e29b8.ts.net   # optional; this is the default
+HA_TOKEN=your-ha-long-lived-access-token     # required for server live mode
+```
+
+With `HA_TOKEN` set, logged-in clients poll `GET /api/ha/live` (family session cookie required). The token never leaves the server. Solar now uses `sensor.inverter_input_power`; solar today uses `sensor.inverter_daily_yield`.
+
+Without `HA_TOKEN`, the app still loads on the demo snapshot (or browser Connect below).
+
+## Connect to the house (optional browser override)
+
+For local/dev without server env, or to override:
 
 1. In Home Assistant: **Profile → Security → Long-lived access tokens**
 2. Open Chimes → **House**
@@ -46,10 +61,10 @@ Kiosk the panel in Chromium on the Pi display.
 
 ```bash
 npm install
-CHIMES_SITE_PASSWORD=dev-password npm run dev
+CHIMES_SITE_PASSWORD=dev-password HA_TOKEN=your-token npm run dev
 ```
 
-Open `/login`, enter the password, then go to **House** and paste the HA token.
+Open `/login`, enter the password. With `HA_TOKEN` set, Overview goes live automatically. Or open **House** and paste a browser token.
 
 ## What’s in here
 
