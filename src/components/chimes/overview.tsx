@@ -15,14 +15,34 @@ import { EnergyFlow } from "./energy-flow";
 
 type Box = { x: number; y: number; w: number; h: number };
 
+/** Match Tailwind `md` — freeform tiles above; stacked scroll below. */
+const STACK_MQ = "(max-width: 767px)";
+
 const MIN_W = 300;
 const MIN_H = 220;
 let zTop = 20;
+
+function useStackedOverview() {
+  const [stacked, setStacked] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(STACK_MQ).matches : true,
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia(STACK_MQ);
+    const sync = () => setStacked(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  return stacked;
+}
 
 export function Overview({ onClose }: { onClose: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
   const live = useLive();
+  const stacked = useStackedOverview();
 
   useEffect(() => {
     const el = video.current;
@@ -50,10 +70,13 @@ export function Overview({ onClose }: { onClose: () => void }) {
     };
   }, [onClose]);
 
+  const flowBadge =
+    live.batteryW < -30 ? "On battery" : live.solarNowW > 30 ? "Solar" : "Idle";
+
   return (
     <div
       className={cn(
-        "fixed inset-0 z-[80] overflow-hidden bg-teal-deep text-sidebar-fg transition-opacity duration-700",
+        "fixed inset-0 z-[80] flex flex-col overflow-hidden bg-teal-deep text-sidebar-fg transition-opacity duration-700",
         ready ? "opacity-100" : "opacity-0",
       )}
     >
@@ -69,15 +92,17 @@ export function Overview({ onClose }: { onClose: () => void }) {
       />
       <div className="overview-wash pointer-events-none absolute inset-0" />
 
-      <header className="relative z-20 flex items-center justify-between gap-4 p-6 md:p-10">
-        <div className="flex items-center gap-3">
-          <img src="/brand/mark.png" alt="" className="size-10 object-contain" />
-          <div>
-            <div className="text-lg font-semibold tracking-tight">Chimes</div>
-            <div className="text-xs uppercase tracking-widest text-sidebar-fg/70">House</div>
+      <header className="relative z-20 flex shrink-0 items-center justify-between gap-2 px-4 py-4 sm:gap-4 sm:p-6 md:p-10">
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+          <img src="/brand/mark.png" alt="" className="size-9 shrink-0 object-contain sm:size-10" />
+          <div className="min-w-0">
+            <div className="truncate text-base font-semibold tracking-tight sm:text-lg">Chimes</div>
+            <div className="text-[0.65rem] uppercase tracking-widest text-sidebar-fg/70 sm:text-xs">
+              House
+            </div>
           </div>
         </div>
-        <OverviewClock />
+        <OverviewClock compact={stacked} />
         <button
           type="button"
           aria-label="Close overview"
@@ -91,24 +116,66 @@ export function Overview({ onClose }: { onClose: () => void }) {
         </button>
       </header>
 
-      <GlassTile
-        storageKey="chimes.overview.graph"
-        title="Today"
-        badge={`${live.solarTodayKwh} kWh solar`}
-        handleOnly
-        fallback={defaultGraph}
-      >
-        <DayGraph />
-      </GlassTile>
+      {stacked ? (
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-4 pb-5">
+          <StackedTile title="Today" badge={`${live.solarTodayKwh} kWh solar`} tall="chart">
+            <DayGraph />
+          </StackedTile>
+          <StackedTile title="Energy flow" badge={flowBadge} tall="flow">
+            <FitFlow />
+          </StackedTile>
+        </div>
+      ) : (
+        <>
+          <GlassTile
+            storageKey="chimes.overview.graph"
+            title="Today"
+            badge={`${live.solarTodayKwh} kWh solar`}
+            handleOnly
+            fallback={defaultGraph}
+          >
+            <DayGraph />
+          </GlassTile>
 
-      <GlassTile
-        storageKey="chimes.overview.flow"
-        title="Energy flow"
-        badge={live.batteryW < -30 ? "On battery" : live.solarNowW > 30 ? "Solar" : "Idle"}
-        fallback={defaultFlow}
-      >
-        <FitFlow />
-      </GlassTile>
+          <GlassTile
+            storageKey="chimes.overview.flow"
+            title="Energy flow"
+            badge={flowBadge}
+            fallback={defaultFlow}
+          >
+            <FitFlow />
+          </GlassTile>
+        </>
+      )}
+    </div>
+  );
+}
+
+function StackedTile({
+  title,
+  badge,
+  children,
+  tall,
+}: {
+  title: string;
+  badge: string;
+  children: ReactNode;
+  tall: "chart" | "flow";
+}) {
+  return (
+    <div
+      className={cn(
+        "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 bg-teal-deep/50 shadow-card backdrop-blur-xl",
+        tall === "chart" ? "h-[min(42dvh,20rem)] min-h-[14rem]" : "h-[min(52dvh,24rem)] min-h-[17.5rem]",
+      )}
+    >
+      <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-2.5">
+        <div className="text-xs font-medium uppercase tracking-widest text-sidebar-fg/70">{title}</div>
+        <div className="rounded-full border border-sidebar-fg/20 px-2 py-0.5 text-xs tabular-nums">
+          {badge}
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 px-2 pb-4">{children}</div>
     </div>
   );
 }
@@ -364,7 +431,7 @@ function writeBox(key: string, box: Box) {
   }
 }
 
-function OverviewClock() {
+function OverviewClock({ compact = false }: { compact?: boolean }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -378,9 +445,9 @@ function OverviewClock() {
   }).format(now);
   const date = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Europe/London",
-    weekday: "long",
+    weekday: compact ? "short" : "long",
     day: "numeric",
-    month: "long",
+    month: compact ? "short" : "long",
   }).format(now);
   const hour = Number(
     new Intl.DateTimeFormat("en-GB", {
@@ -391,11 +458,21 @@ function OverviewClock() {
   );
   const hello = hour < 12 ? "Good morning." : hour < 18 ? "Good afternoon." : "Good evening.";
   return (
-    <div className="text-center">
-      <div className="text-3xl font-medium tracking-tight tabular-nums leading-none md:text-4xl">
+    <div className="min-w-0 flex-1 px-1 text-center sm:flex-none sm:px-0">
+      <div
+        className={cn(
+          "font-medium tracking-tight tabular-nums leading-none",
+          compact ? "text-2xl" : "text-3xl md:text-4xl",
+        )}
+      >
         {time}
       </div>
-      <div className="mt-1 text-xs text-sidebar-fg/75 md:text-sm">
+      <div
+        className={cn(
+          "mt-1 text-sidebar-fg/75",
+          compact ? "truncate text-[0.65rem] leading-snug" : "text-xs md:text-sm",
+        )}
+      >
         {date} · {hello}
       </div>
     </div>
