@@ -1,7 +1,7 @@
 /**
  * Family-password site gate (Shyft / LinksView pattern).
  * Cookie proves knowledge of CHIMES_SITE_PASSWORD.
- * HA live data uses server HA_TOKEN via /api/ha/* — optional browser token stays in localStorage.
+ * HA_TOKEN is delivered only by session-gated GET /api/ha/bootstrap, then kept in localStorage for the tablet WebSocket.
  */
 import crypto from "node:crypto";
 

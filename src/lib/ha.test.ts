@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { autoMap, liveFromStates, type HaState } from "./ha.ts";
-import { EMPTY_LIVE, SNAPSHOT } from "./house.ts";
+import { autoMap, credsForBoot, liveFromStates, wsFailureMessage, type HaState } from "./ha.ts";
+import { EMPTY_LIVE, SNAPSHOT, solarStatusHint } from "./house.ts";
 
 function state(entity_id: string, value: string, friendly_name = ""): HaState {
   return {
@@ -88,12 +88,19 @@ describe("ha autoMap preferences", () => {
   });
 
   it("marks sun below horizon from sun.sun", () => {
-    const states = [
-      state("sensor.inverter_input_power", "0"),
-      state("sun.sun", "below_horizon"),
-    ];
+    const states = [state("sensor.inverter_input_power", "0"), state("sun.sun", "below_horizon")];
     const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
     assert.equal(live.sunAboveHorizon, false);
+  });
+
+  it("says after dusk only for a live sun below the horizon", () => {
+    const day = { ...EMPTY_LIVE, solarNowW: 0, sunAboveHorizon: true };
+    const night = { ...EMPTY_LIVE, solarNowW: 0, sunAboveHorizon: false };
+    assert.equal(solarStatusHint("live", day), "idle");
+    assert.equal(solarStatusHint("live", night), "after dusk");
+    assert.equal(solarStatusHint("live", { ...day, solarNowW: 1239 }), "producing");
+    assert.equal(solarStatusHint("error", night), "not connected");
+    assert.equal(solarStatusHint("demo", SNAPSHOT), "demo");
   });
 
   it("keeps Huawei signed battery power (negative = discharging)", () => {
@@ -104,5 +111,33 @@ describe("ha autoMap preferences", () => {
     const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
     assert.equal(live.batteryW, -250);
     assert.equal(live.soc, 55);
+  });
+});
+
+describe("browser boot creds", () => {
+  it("prefers the session bootstrap over a saved browser token", () => {
+    const creds = credsForBoot(
+      {
+        configured: true,
+        url: "https://chimes-pi.tail8e29b8.ts.net/",
+        token: "server-token",
+      },
+      { url: "http://localhost:8123", token: "old" },
+    );
+    assert.deepEqual(creds, {
+      url: "https://chimes-pi.tail8e29b8.ts.net",
+      token: "server-token",
+    });
+  });
+
+  it("uses a saved token when the host has no HA_TOKEN", () => {
+    const saved = { url: "https://chimes-pi.tail8e29b8.ts.net", token: "pasted" };
+    assert.equal(credsForBoot({ configured: false }, saved), saved);
+    assert.equal(credsForBoot(null, null), null);
+  });
+
+  it("explains a failed socket as a Tailscale reachability problem", () => {
+    assert.match(wsFailureMessage("Could not reach Home Assistant."), /Tailscale/);
+    assert.equal(wsFailureMessage("Token refused."), "Token refused.");
   });
 });

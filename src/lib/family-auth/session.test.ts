@@ -78,6 +78,8 @@ describe("family-auth session", () => {
     assert.equal(isPublicPath("/login"), true);
     assert.equal(isPublicPath("/api/login"), true);
     assert.equal(isPublicPath("/"), false);
+    assert.equal(isPublicPath("/api/ha/bootstrap"), false);
+    assert.equal(isPublicPath("/api/ha/live"), false);
     assert.equal(isAssetPath("/favicon.svg"), true);
     assert.equal(isAssetPath("/assets/index.js"), true);
     assert.equal(isAssetPath("/"), false);

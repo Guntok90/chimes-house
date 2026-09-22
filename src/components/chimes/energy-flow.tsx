@@ -1,6 +1,7 @@
 import type { LucideIcon } from "lucide-react";
 import { BatteryMedium, Car, Home, Sun, Zap } from "lucide-react";
-import { useLive } from "@/lib/house-store";
+import { solarStatusHint } from "@/lib/house";
+import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 
 const P = {
@@ -13,14 +14,10 @@ const P = {
 
 type Tone = "paper" | "glass";
 
-export function EnergyFlow({
-  tone = "paper",
-  bare = false,
-}: {
-  tone?: Tone;
-  bare?: boolean;
-}) {
+export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare?: boolean }) {
   const live = useLive();
+  const status = useHouse((s) => s.status);
+  const solarHint = solarStatusHint(status, live);
   const solar = live.solarNowW;
   const home = live.houseW;
   const batt = Math.abs(live.batteryW);
@@ -38,9 +35,7 @@ export function EnergyFlow({
     <div
       className={cn(
         "relative",
-        bare
-          ? "h-full w-full"
-          : "overflow-hidden rounded-lg border border-line bg-paper-raised",
+        bare ? "h-full w-full" : "overflow-hidden rounded-lg border border-line bg-paper-raised",
       )}
     >
       {bare ? null : (
@@ -67,10 +62,7 @@ export function EnergyFlow({
           />
           <path
             d={q(P.grid, P.home, 430, 150)}
-            className={cn(
-              "flow-line",
-              gridIn || gridOut ? "flow-active stroke-teal-soft" : idle,
-            )}
+            className={cn("flow-line", gridIn || gridOut ? "flow-active stroke-teal-soft" : idle)}
           />
           <path
             d={q(P.home, P.cars, 910, 300)}
@@ -104,13 +96,7 @@ export function EnergyFlow({
           ring="border-sand"
           value={`${solar} W`}
           label="Solar"
-          hint={
-            solarOn
-              ? "producing"
-              : live.sunAboveHorizon === false
-                ? "after dusk"
-                : "idle"
-          }
+          hint={solarHint}
           on={solarOn}
         />
         <Node
@@ -159,12 +145,7 @@ export function EnergyFlow({
   );
 }
 
-function q(
-  a: { x: number; y: number },
-  b: { x: number; y: number },
-  cx: number,
-  cy: number,
-) {
+function q(a: { x: number; y: number }, b: { x: number; y: number }, cx: number, cy: number) {
   return `M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`;
 }
 
@@ -219,7 +200,9 @@ function Node({
           )}
         >
           <div className="text-xs font-medium tracking-wide">{label}</div>
-          <div className={cn("text-xs", glass ? "text-sidebar-fg/65" : "text-ink-soft")}>{hint}</div>
+          <div className={cn("text-xs", glass ? "text-sidebar-fg/65" : "text-ink-soft")}>
+            {hint}
+          </div>
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { fetchHaLive, isHaConfigured } from "@/lib/ha.server";
+import { isHaConfigured } from "@/lib/ha.server";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -20,15 +20,12 @@ export const Route = createFileRoute("/api/ha/live")({
           headers: { "Cache-Control": "no-store" },
         }),
       GET: async () => {
-        // Family session is enforced by start.ts middleware (not a public path).
-        if (!isHaConfigured()) {
-          return json({ configured: false });
-        }
-        const payload = await fetchHaLive();
-        if (payload.error && !payload.live) {
-          return json(payload, 502);
-        }
-        return json(payload);
+        // Do not fetch HA from here. Serverless cannot reach Tailscale.
+        // Logged-in browsers use GET /api/ha/bootstrap, then a WebSocket.
+        return json({
+          configured: isHaConfigured(),
+          transport: "browser-websocket",
+        });
       },
     },
   },

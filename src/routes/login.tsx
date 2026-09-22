@@ -82,8 +82,7 @@ function LoginPage() {
       }
 
       const next = new URLSearchParams(window.location.search).get("next");
-      const target =
-        next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
+      const target = next && next.startsWith("/") && !next.startsWith("//") ? next : "/";
       window.location.assign(target);
     } catch {
       showError("Couldn’t reach the server. Check the connection and try again.");
@@ -146,22 +145,21 @@ function LoginPage() {
               </button>
             </div>
 
-            <p
-              id={errorId}
-              className="shyft-login-error"
-              role="alert"
-              hidden={!error}
-            >
+            <p id={errorId} className="shyft-login-error" role="alert" hidden={!error}>
               {error}
             </p>
 
-            <button type="submit" className={`shyft-enter-btn${busy ? " is-busy" : ""}`} disabled={busy}>
+            <button
+              type="submit"
+              className={`shyft-enter-btn${busy ? " is-busy" : ""}`}
+              disabled={busy}
+            >
               <span className="shyft-enter-label">Enter</span>
               <span className="shyft-enter-spinner" aria-hidden="true" />
             </button>
 
             <p id={hintId} className="shyft-login-hint">
-              After you enter, connect Home Assistant in House if this tablet is new.
+              After you enter, a tablet on Tailscale connects to the Pi on its own.
             </p>
           </form>
         </section>

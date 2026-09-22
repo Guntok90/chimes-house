@@ -3,12 +3,15 @@ import {
   DEFAULT_HA_URL,
   HaSocket,
   autoMap,
+  credsForBoot,
   liveFromStates,
   readCreds,
   readMap,
   switchOn,
   writeCreds,
   writeMap,
+  wsFailureMessage,
+  type HaBootstrapResponse,
   type HaCreds,
   type HaMap,
   type HaState,
@@ -17,17 +20,8 @@ import {
 import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house";
 
 const socket = new HaSocket();
-const SERVER_POLL_MS = 5_000;
 
 type Status = "demo" | "connecting" | "live" | "error";
-
-type ServerLiveResponse = {
-  configured: boolean;
-  live?: HouseLive;
-  switches?: Record<string, boolean>;
-  map?: HaMap;
-  error?: string;
-};
 
 type Store = {
   live: HouseLive;
@@ -42,82 +36,9 @@ type Store = {
   toggle: (id: string) => void;
 };
 
-let serverPollTimer: ReturnType<typeof setInterval> | null = null;
-let serverPollInFlight = false;
-
-function stopServerPoll() {
-  if (serverPollTimer) {
-    clearInterval(serverPollTimer);
-    serverPollTimer = null;
-  }
-}
+let bootInFlight: Promise<void> | null = null;
 
 export const useHouse = create<Store>((set, get) => {
-  async function pollServerOnce() {
-    if (serverPollInFlight) return;
-    if (readCreds()) return;
-    serverPollInFlight = true;
-    try {
-      const res = await fetch("/api/ha/live", {
-        credentials: "include",
-        cache: "no-store",
-      });
-      if (res.status === 401) {
-        set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
-        return;
-      }
-      const data = (await res.json()) as ServerLiveResponse;
-      if (!data.configured) {
-        // No HA_TOKEN on the host — stay on demo until House Connect.
-        set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
-        return;
-      }
-      if (data.error && !data.live) {
-        // Keep last full live frame on a blip — don't flip the badge to Demo.
-        if (get().status === "live") {
-          set({ error: data.error });
-          return;
-        }
-        set({ status: "error", error: data.error, live: { ...SNAPSHOT } });
-        return;
-      }
-      if (data.live) {
-        if (data.map) writeMap(data.map);
-        set({
-          live: data.live,
-          switches: data.switches ?? {},
-          map: data.map ?? get().map,
-          status: "live",
-          error: undefined,
-          url: DEFAULT_HA_URL,
-        });
-      }
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Could not reach live house.";
-      if (get().status === "live") {
-        set({ error: message });
-      } else {
-        set({
-          status: "error",
-          error: message,
-          live: { ...SNAPSHOT },
-        });
-      }
-    } finally {
-      serverPollInFlight = false;
-    }
-  }
-
-  function startServerPoll() {
-    stopServerPoll();
-    set({ status: "connecting", error: undefined });
-    void pollServerOnce();
-    serverPollTimer = setInterval(() => {
-      void pollServerOnce();
-    }, SERVER_POLL_MS);
-  }
-
   return {
     live: { ...SNAPSHOT },
     switches: {},
@@ -126,23 +47,60 @@ export const useHouse = create<Store>((set, get) => {
     url: DEFAULT_HA_URL,
 
     boot() {
-      const creds = readCreds();
-      if (creds) {
-        stopServerPoll();
-        void get().connect(creds);
-        return;
-      }
-      startServerPoll();
+      if (bootInFlight) return;
+      bootInFlight = (async () => {
+        set({ status: "connecting", error: undefined });
+        let bootstrap: HaBootstrapResponse | null = null;
+        let bootstrapFailed = false;
+        try {
+          const res = await fetch("/api/ha/bootstrap", {
+            credentials: "include",
+            cache: "no-store",
+          });
+          if (res.status === 401) {
+            set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
+            return;
+          }
+          if (!res.ok) {
+            bootstrapFailed = true;
+          } else {
+            bootstrap = (await res.json()) as HaBootstrapResponse;
+          }
+        } catch {
+          bootstrapFailed = true;
+        }
+
+        const creds = credsForBoot(bootstrap, readCreds());
+        if (!creds) {
+          set({
+            status: bootstrapFailed ? "error" : "demo",
+            live: { ...SNAPSHOT },
+            error: bootstrapFailed
+              ? "Could not read Pi setup. Connect from House, on Tailscale."
+              : undefined,
+          });
+          return;
+        }
+        await get().connect(creds);
+      })().finally(() => {
+        bootInFlight = null;
+      });
     },
 
     async connect(creds) {
-      stopServerPoll();
       set({ status: "connecting", error: undefined, url: creds.url });
       writeCreds(creds);
       socket.onStatus = (s, err) => {
-        if (s === "live") set({ status: "live", error: undefined });
-        if (s === "connecting") set({ status: "connecting" });
-        if (s === "error") set({ status: "error", error: err });
+        // Stay on "connecting" until the first state payload. A Live badge
+        // with the demo snapshot would read as dusk (0 W, 16.68 kWh).
+        if (s === "connecting") set({ status: "connecting", error: undefined });
+        if (s === "error") {
+          set({
+            status: "error",
+            error: wsFailureMessage(err ?? "Disconnected."),
+            live: { ...SNAPSHOT },
+          });
+        }
       };
       socket.onStates = (states: HaState[]) => {
         const saved = readMap();
@@ -154,14 +112,17 @@ export const useHouse = create<Store>((set, get) => {
           switches: switchOn(states, mapped),
           map: mapped,
           status: "live",
+          error: undefined,
         });
       };
       try {
         await socket.connect(creds.url, creds.token);
       } catch (err) {
+        socket.close();
         set({
           status: "error",
-          error: err instanceof Error ? err.message : "Could not connect.",
+          error: wsFailureMessage(err instanceof Error ? err.message : "Could not connect."),
+          live: { ...SNAPSHOT },
         });
       }
     },
@@ -172,8 +133,6 @@ export const useHouse = create<Store>((set, get) => {
       socket.close();
       writeCreds(null);
       set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
-      // Fall back to server live when the host has HA_TOKEN.
-      startServerPoll();
     },
 
     toggle(id) {

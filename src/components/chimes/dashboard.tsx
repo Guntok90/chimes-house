@@ -136,13 +136,7 @@ export function ChimesDashboard() {
   );
 }
 
-function OverviewButton({
-  onClick,
-  compact = false,
-}: {
-  onClick: () => void;
-  compact?: boolean;
-}) {
+function OverviewButton({ onClick, compact = false }: { onClick: () => void; compact?: boolean }) {
   return (
     <button
       type="button"
@@ -231,23 +225,29 @@ function Greeting() {
 function StatusChips() {
   const live = useLive();
   const status = useHouse((s) => s.status);
+  const error = useHouse((s) => s.error);
   return (
-    <div className="flex flex-wrap gap-1.5">
-      <span className="rounded-full bg-sand/25 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg">
-        {status === "live"
-          ? "Live"
-          : status === "connecting"
-            ? "Connecting"
-            : status === "error"
-              ? "Error"
-              : "Demo"}
-      </span>
-      <span className="rounded-full bg-sidebar-fg/12 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg/80">
-        {live.offPeak ? "Off-peak" : "Peak"}
-      </span>
-      <span className="rounded-full bg-sidebar-fg/12 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg/80">
-        Zappi {live.zappiMode}
-      </span>
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap gap-1.5">
+        <span className="rounded-full bg-sand/25 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg">
+          {status === "live"
+            ? "Live"
+            : status === "connecting"
+              ? "Connecting"
+              : status === "error"
+                ? "Error"
+                : "Demo"}
+        </span>
+        <span className="rounded-full bg-sidebar-fg/12 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg/80">
+          {live.offPeak ? "Off-peak" : "Peak"}
+        </span>
+        <span className="rounded-full bg-sidebar-fg/12 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg/80">
+          Zappi {live.zappiMode}
+        </span>
+      </div>
+      {status === "error" && error ? (
+        <p className="text-xs leading-snug text-sidebar-fg/80">{error}</p>
+      ) : null}
     </div>
   );
 }
@@ -320,13 +320,7 @@ function NavButton({
   );
 }
 
-function HomeView({
-  on,
-  toggle,
-}: {
-  on: Record<string, boolean>;
-  toggle: (id: string) => void;
-}) {
+function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
   const live = useLive();
   return (
     <div className="space-y-8">
@@ -338,13 +332,7 @@ function HomeView({
       </div>
       <Room title="Lights">
         <Tile id="lamp" label="Lamp" state={on.lamp} onToggle={toggle} icon={Lamp} />
-        <Tile
-          id="kitchen"
-          label="Kitchen"
-          state={on.kitchen}
-          onToggle={toggle}
-          icon={Lightbulb}
-        />
+        <Tile id="kitchen" label="Kitchen" state={on.kitchen} onToggle={toggle} icon={Lightbulb} />
         <Tile id="pergola" label="Pergola" state={on.pergola} onToggle={toggle} icon={Sun} />
       </Room>
       <div>
@@ -365,13 +353,7 @@ function HomeView({
   );
 }
 
-function GardenView({
-  on,
-  toggle,
-}: {
-  on: Record<string, boolean>;
-  toggle: (id: string) => void;
-}) {
+function GardenView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
   return (
     <div className="space-y-8">
       <PageTitle>Garden</PageTitle>
@@ -384,26 +366,14 @@ function GardenView({
   );
 }
 
-function HouseView({
-  on,
-  toggle,
-}: {
-  on: Record<string, boolean>;
-  toggle: (id: string) => void;
-}) {
+function HouseView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
   return (
     <div className="space-y-8">
       <PageTitle>House</PageTitle>
       <PiSetup />
       <Room title="Lights">
         <Tile id="lamp" label="Lamp" state={on.lamp} onToggle={toggle} icon={Lamp} />
-        <Tile
-          id="kitchen"
-          label="Kitchen"
-          state={on.kitchen}
-          onToggle={toggle}
-          icon={Lightbulb}
-        />
+        <Tile id="kitchen" label="Kitchen" state={on.kitchen} onToggle={toggle} icon={Lightbulb} />
         <Tile id="pergola" label="Pergola" state={on.pergola} onToggle={toggle} icon={Sun} />
       </Room>
       <Room title="Plugs">

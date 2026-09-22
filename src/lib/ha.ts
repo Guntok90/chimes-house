@@ -84,6 +84,37 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
 
 export type HaCreds = { url: string; token: string };
 
+export type HaBootstrapResponse = {
+  configured: boolean;
+  url?: string;
+  token?: string;
+};
+
+/**
+ * Server bootstrap wins when HA_TOKEN is set.
+ * Otherwise a token saved from House → Connect is used.
+ */
+export function credsForBoot(
+  bootstrap: HaBootstrapResponse | null,
+  saved: HaCreds | null,
+): HaCreds | null {
+  if (bootstrap?.configured && bootstrap.url && bootstrap.token) {
+    return { url: bootstrap.url.replace(/\/$/, ""), token: bootstrap.token };
+  }
+  return saved;
+}
+
+export function wsFailureMessage(message: string): string {
+  if (
+    message === "Could not reach Home Assistant." ||
+    message === "Home Assistant did not answer." ||
+    message === "Disconnected."
+  ) {
+    return "Could not reach the Pi. This tablet needs Tailscale or the house Wi-Fi.";
+  }
+  return message;
+}
+
 export function readCreds(): HaCreds | null {
   try {
     const raw = localStorage.getItem(CREDS);
@@ -221,7 +252,10 @@ export function autoMap(states: HaState[]): HaMap {
         b.includes("load_power") ||
         (b.includes("load") && b.includes("power")) ||
         (b.includes("consumption") && b.includes("power"))) &&
-      (b.includes("power") || b.includes("watt") || b.includes("load") || b.includes("consumption")) &&
+      (b.includes("power") ||
+        b.includes("watt") ||
+        b.includes("load") ||
+        b.includes("consumption")) &&
       !b.includes("battery") &&
       !b.includes("solar") &&
       !b.includes("pv") &&
@@ -324,8 +358,7 @@ export function autoMap(states: HaState[]): HaMap {
 
   const stevie = find(
     states,
-    (s, b) =>
-      s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")),
+    (s, b) => s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")),
   );
 
   if (soc) map.soc = soc.entity_id;
@@ -423,8 +456,7 @@ export function liveFromStates(
       v === "false";
     zappiPlugged = negative
       ? false
-      : flag("zappiPlugged", false) ||
-        /\b(plugged|connected|charging)\b/.test(v);
+      : flag("zappiPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
   }
 
   return {
@@ -472,8 +504,12 @@ export class HaSocket {
     this.onStatus?.("connecting");
     const ws = new WebSocket(toWs(url));
     this.ws = ws;
+    let handshake = true;
     await new Promise<void>((resolve, reject) => {
-      const timer = window.setTimeout(() => reject(new Error("Home Assistant did not answer.")), 8000);
+      const timer = window.setTimeout(
+        () => reject(new Error("Home Assistant did not answer.")),
+        8000,
+      );
       ws.onmessage = (ev) => {
         const msg = JSON.parse(String(ev.data)) as Msg;
         if (msg.type === "auth_required") {
@@ -482,6 +518,7 @@ export class HaSocket {
         }
         if (msg.type === "auth_ok") {
           window.clearTimeout(timer);
+          handshake = false;
           resolve();
           return;
         }
@@ -511,9 +548,17 @@ export class HaSocket {
       };
       ws.onerror = () => {
         window.clearTimeout(timer);
+        if (this.ws !== ws) return;
         reject(new Error("Could not reach Home Assistant."));
       };
       ws.onclose = () => {
+        if (this.ws !== ws) return;
+        this.ws = null;
+        if (handshake) {
+          window.clearTimeout(timer);
+          reject(new Error("Could not reach Home Assistant."));
+          return;
+        }
         this.onStatus?.("error", "Disconnected.");
       };
     });
@@ -526,8 +571,7 @@ export class HaSocket {
 
   async call(entityId: string, turnOn?: boolean) {
     const [domain] = entityId.split(".");
-    const service =
-      turnOn === undefined ? "toggle" : turnOn ? "turn_on" : "turn_off";
+    const service = turnOn === undefined ? "toggle" : turnOn ? "turn_on" : "turn_off";
     await this.send("call_service", {
       domain,
       service,
@@ -544,9 +588,14 @@ export class HaSocket {
   }
 
   close() {
-    this.ws?.close();
+    const ws = this.ws;
     this.ws = null;
     this.pending.clear();
+    if (!ws) return;
+    ws.onmessage = null;
+    ws.onerror = null;
+    ws.onclose = null;
+    ws.close();
   }
 }
 

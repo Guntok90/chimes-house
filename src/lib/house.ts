@@ -64,6 +64,19 @@ export const SNAPSHOT: HouseLive = {
 /** Demo snapshot. Live values come from `useLive()`. */
 export const LIVE = SNAPSHOT;
 
+export type ConnectionStatus = "demo" | "connecting" | "live" | "error";
+
+/**
+ * Solar caption. “after dusk” only while a live socket says sun.sun is below
+ * the horizon — never for a failed connect or the demo snapshot.
+ */
+export function solarStatusHint(status: ConnectionStatus, live: HouseLive): string {
+  if (status !== "live") return status === "error" ? "not connected" : "demo";
+  if (live.solarNowW > 30) return "producing";
+  if (live.sunAboveHorizon === false) return "after dusk";
+  return "idle";
+}
+
 export type DayPoint = {
   key: string;
   label: string;
