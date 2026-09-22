@@ -117,7 +117,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
       </header>
 
       {stacked ? (
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain px-4 pb-5">
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 pb-5">
           <StackedTile title="Today" badge={`${live.solarTodayKwh} kWh solar`} tall="chart">
             <DayGraph />
           </StackedTile>
