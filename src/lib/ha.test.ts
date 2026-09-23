@@ -40,6 +40,8 @@ const CHIMES_PI: HaState[] = [
   state("sensor.power_meter_active_power", "40", "", "W"),
   state("sensor.power_meter_consumption", "128450.2", "", "kWh"),
   state("sensor.myenergi_chimes_power_grid", "40", "", "W"),
+  state("sensor.myenergi_chimes_home_consumption", "7", "Home consumption", "W"),
+  state("sensor.myenergi_chimes_power_charging", "0", "Power charging", "W"),
   state("select.myenergi_zappi_25435526_charge_mode", "Eco+"),
   state("sensor.myenergi_zappi_25435526_status", "Not Connected"),
   state("sensor.myenergi_zappi_25435526_plug_status", "Not Connected"),
@@ -68,18 +70,22 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.inverterStatus, "sensor.inverter_device_status");
     assert.equal(map.soc, "sensor.battery_1_state_of_capacity");
     assert.equal(map.batteryW, "sensor.batteries_charge_discharge_power");
-    assert.equal(map.gridW, "sensor.power_meter_active_power");
+    assert.equal(map.gridW, "sensor.myenergi_chimes_power_grid");
     assert.equal(map.zappiMode, "select.myenergi_zappi_25435526_charge_mode");
     assert.equal(map.zappiPlugged, "sensor.myenergi_zappi_25435526_plug_status");
-    assert.equal(map.zappiW, "sensor.myenergi_zappi_25435526_power_ct_internal");
+    assert.equal(map.zappiW, "sensor.myenergi_chimes_power_charging");
     assert.notEqual(map.zappiW, "sensor.myenergi_zappi_25435526_power_generation");
     assert.equal(map.stevieHome, "person.stevie_w");
     assert.equal(map.offPeak, "binary_sensor.octopus_off_peak");
     assert.equal(map.intelligent, "binary_sensor.octopus_intelligent_ready");
-    // No true house-load W → leave unmapped (derive later); never lifetime kWh.
+    // No true house-load W → leave unmapped (derive later); never lifetime kWh or myenergi home.
+    assert.equal(map.houseW, undefined);
     assert.notEqual(map.houseW, "sensor.power_meter_consumption");
+    assert.notEqual(map.houseW, "sensor.myenergi_chimes_home_consumption");
     assert.equal(HOUSE_W_BLOCKLIST.includes("sensor.power_meter_consumption"), true);
+    assert.equal(HOUSE_W_BLOCKLIST.includes("sensor.myenergi_chimes_home_consumption"), true);
     assert.equal(PREFERRED.houseW?.includes("sensor.power_meter_consumption"), false);
+    assert.equal(PREFERRED.houseW?.includes("sensor.myenergi_chimes_home_consumption"), false);
 
     const live = liveFromStates(CHIMES_PI, map, EMPTY_LIVE);
     assert.equal(live.solarNowW, 1150);
@@ -96,10 +102,12 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
     assert.equal(live.sunAboveHorizon, true);
-    // houseW = solar + grid − battery = 1150 + 40 − (−380) = 1570
-    assert.equal(live.houseW, deriveHouseW(1150, 40, -380));
+    // houseW = solar + grid − battery − zappi = 1150 + 40 − (−380) − 0 = 1570
+    assert.equal(live.houseW, deriveHouseW(1150, 40, -380, 0));
     assert.equal(live.houseW, 1570);
     assert.notEqual(live.solarTodayKwh, SNAPSHOT.solarTodayKwh);
+    assert.notEqual(live.houseW, 7);
+    assert.notEqual(live.houseW, SNAPSHOT.houseW);
   });
 
   it("maps preferred switch entity ids (kitchen stays unmapped)", () => {
@@ -125,8 +133,9 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.solarTodayKwh, 0);
     assert.notEqual(live.solarTodayKwh, SNAPSHOT.solarTodayKwh);
     assert.equal(live.soc, 0);
-    // Derived from solar only: 1100 + 0 − 0
+    // Derived from solar only: 1100 + 0 − 0 − 0
     assert.equal(live.houseW, 1100);
+    assert.notEqual(live.houseW, SNAPSHOT.houseW);
   });
 
   it("rejects lifetime kWh as houseW and derives instead", () => {
@@ -139,8 +148,61 @@ describe("ha autoMap preferences", () => {
     const map = autoMap(states);
     assert.notEqual(map.houseW, "sensor.power_meter_consumption");
     const live = liveFromStates(states, map, EMPTY_LIVE);
-    assert.equal(live.houseW, deriveHouseW(500, 100, -200));
+    assert.equal(live.houseW, deriveHouseW(500, 100, -200, 0));
     assert.equal(live.houseW, 800);
+  });
+
+  it("never maps myenergi home consumption as houseW", () => {
+    const states = [
+      state("sensor.inverter_input_power", "392", "", "W"),
+      state("sensor.batteries_charge_discharge_power", "-4819", "", "W"),
+      state("sensor.myenergi_chimes_power_grid", "3015", "", "W"),
+      state("sensor.myenergi_chimes_home_consumption", "7", "Home consumption", "W"),
+      state("sensor.myenergi_chimes_power_charging", "7533", "", "W"),
+      state("sensor.power_meter_active_power", "-999", "", "W"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.houseW, undefined);
+    assert.notEqual(map.houseW, "sensor.myenergi_chimes_home_consumption");
+    assert.equal(map.gridW, "sensor.myenergi_chimes_power_grid");
+    assert.equal(map.zappiW, "sensor.myenergi_chimes_power_charging");
+    assert.equal(map.solarNowW, "sensor.inverter_input_power");
+
+    // Stale map pointing at myenergi home must still derive, not use 7 W.
+    const staleMap = {
+      ...map,
+      houseW: "sensor.myenergi_chimes_home_consumption",
+    };
+    const live = liveFromStates(states, staleMap, EMPTY_LIVE);
+    // 392 + 3015 − (−4819) − 7533 = 693
+    assert.equal(live.houseW, deriveHouseW(392, 3015, -4819, 7533));
+    assert.equal(live.houseW, 693);
+    assert.notEqual(live.houseW, 7);
+  });
+
+  it("derives houseW excluding zappi when car is charging", () => {
+    const states = [
+      state("sensor.inverter_input_power", "392", "", "W"),
+      state("sensor.batteries_charge_discharge_power", "-4819", "", "W"),
+      state("sensor.myenergi_chimes_power_grid", "3015", "", "W"),
+      state("sensor.myenergi_chimes_power_charging", "7533", "", "W"),
+    ];
+    const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
+    assert.equal(live.zappiW, 7533);
+    assert.equal(live.houseW, 693);
+  });
+
+  it("when zappiW is 0, houseW = solar + grid − battery", () => {
+    const states = [
+      state("sensor.inverter_input_power", "1000", "", "W"),
+      state("sensor.batteries_charge_discharge_power", "200", "", "W"),
+      state("sensor.myenergi_chimes_power_grid", "-300", "", "W"),
+      state("sensor.myenergi_chimes_power_charging", "0", "", "W"),
+    ];
+    const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
+    assert.equal(live.zappiW, 0);
+    assert.equal(live.houseW, deriveHouseW(1000, -300, 200, 0));
+    assert.equal(live.houseW, 500);
   });
 
   it("does not treat low watts as dusk without sun.sun below horizon", () => {
@@ -182,15 +244,18 @@ describe("ha autoMap preferences", () => {
 });
 
 describe("deriveHouseW energy balance", () => {
-  it("solar + grid − battery (charging positive, discharging negative)", () => {
+  it("solar + grid − battery − zappi (charging positive, discharging negative)", () => {
     assert.equal(deriveHouseW(1000, -300, 200), 500);
     assert.equal(deriveHouseW(0, 0, -400), 400);
     assert.equal(deriveHouseW(0, 500, 0), 500);
     assert.equal(deriveHouseW(200, 50, -100), 350);
+    assert.equal(deriveHouseW(392, 3015, -4819, 7533), 693);
+    assert.equal(deriveHouseW(1000, -300, 200, 0), 500);
   });
 
   it("clamps noise below zero to 0", () => {
     assert.equal(deriveHouseW(0, -100, 50), 0);
+    assert.equal(deriveHouseW(100, 0, 0, 200), 0);
   });
 });
 
