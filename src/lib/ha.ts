@@ -1,3 +1,4 @@
+import { deriveHouseW } from "./energy-balance.ts";
 import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house.ts";
 
 export type HaState = {
@@ -27,9 +28,24 @@ export const SWITCHES: { id: SwitchId; label: string; match: string[] }[] = [
   { id: "pond-2", label: "Pond 2", match: ["pond 2", "pond_2", "pond2"] },
   { id: "telly", label: "Telly", match: ["telly", "tv", "television"] },
   { id: "fish", label: "Fish", match: ["fish", "aquarium"] },
-  { id: "stevie-blanket", label: "Stevie’s blanket", match: ["stevie", "blanket"] },
-  { id: "baby-blanket", label: "Baby’s blanket", match: ["baby", "blanket"] },
+  { id: "stevie-blanket", label: "Stevie’s blanket", match: ["stevie"] },
+  { id: "baby-blanket", label: "Baby’s blanket", match: ["baby"] },
 ];
+
+/**
+ * Exact switch entity ids on Chimes-Pi (friendly names → smart_switch_* / garden).
+ * Kitchen has no clear switch in the live inventory — leave unmapped.
+ */
+export const PREFERRED_SWITCHES: Partial<Record<SwitchId, string[]>> = {
+  lamp: ["switch.smart_switch_4"],
+  telly: ["switch.smart_switch"],
+  "stevie-blanket": ["switch.smart_switch_2"],
+  "baby-blanket": ["switch.smart_switch_5"],
+  fish: ["switch.smart_switch_6"],
+  pergola: ["switch.pergola_switch_1"],
+  "pond-1": ["switch.pond_1_switch_1"],
+  "pond-2": ["switch.pond_2_switch_1"],
+};
 
 const CREDS = "chimes.ha.creds";
 const MAP = "chimes.ha.map";
@@ -37,7 +53,10 @@ const MAP = "chimes.ha.map";
 /** Dad’s Pi Home Assistant via Tailscale Serve HTTPS (dashboard is HTTPS → avoid mixed content). */
 export const DEFAULT_HA_URL = "https://chimes-pi.tail8e29b8.ts.net";
 
-/** Preferred entity ids for Chimes-Pi (Huawei / LUNA / myenergi / Octopus). */
+/**
+ * Preferred entity ids for Chimes-Pi (Huawei / LUNA / myenergi / Octopus).
+ * Never list lifetime-energy sensors (e.g. power_meter_consumption kWh) under houseW.
+ */
 export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   soc: [
     "sensor.battery_1_state_of_capacity",
@@ -45,6 +64,7 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.luna2000_state_of_capacity",
   ],
   batteryW: [
+    "sensor.batteries_charge_discharge_power",
     "sensor.battery_1_charge_discharge_power",
     "sensor.battery_charge_discharge_power",
     "sensor.battery_1_power",
@@ -54,8 +74,8 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   solarTodayKwh: ["sensor.inverter_daily_yield", "sensor.daily_yield"],
   inverterW: ["sensor.inverter_active_power"],
   inverterStatus: [
-    "sensor.inverter_status",
     "sensor.inverter_device_status",
+    "sensor.inverter_status",
     "sensor.inverter_state",
   ],
   houseW: [
@@ -64,23 +84,42 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.load_power",
     "sensor.home_load_power",
     "sensor.home_power",
-    "sensor.power_meter_consumption",
+    "sensor.myenergi_chimes_home_consumption",
   ],
   gridW: [
+    "sensor.power_meter_active_power",
+    "sensor.myenergi_chimes_power_grid",
     "sensor.grid_active_power",
     "sensor.grid_power",
-    "sensor.power_meter_active_power",
     "sensor.meter_active_power",
     "sensor.active_power",
   ],
-  zappiMode: [],
-  zappiPlugged: [],
-  zappiW: [],
+  zappiMode: ["select.myenergi_zappi_25435526_charge_mode"],
+  zappiPlugged: [
+    "sensor.myenergi_zappi_25435526_plug_status",
+    "sensor.myenergi_zappi_25435526_status",
+  ],
+  // Charge power = internal CT / EV session watts — never generation or battery CT.
+  zappiW: [
+    "sensor.myenergi_zappi_25435526_power_ct_internal",
+    "sensor.myenergi_zappi_25435526_power_internal_load",
+    "sensor.myenergi_zappi_25435526_internal_load_ct1",
+    "sensor.myenergi_zappi_25435526_ct_internal",
+  ],
   offPeak: [],
   intelligent: [],
   gridCharge: [],
-  stevieHome: [],
+  stevieHome: ["person.stevie_w"],
 };
+
+/** Lifetime / energy totals that must never be treated as live house watts. */
+export const HOUSE_W_BLOCKLIST = [
+  "sensor.power_meter_consumption",
+  "sensor.power_meter_consumption_2",
+  "sensor.house_consumption_daily",
+  "sensor.house_consumption_monthly",
+  "sensor.house_consumption_yearly",
+];
 
 export type HaCreds = { url: string; token: string };
 
@@ -166,14 +205,40 @@ function available(s: HaState) {
   return s.state !== "unavailable" && s.state !== "unknown";
 }
 
+function unitOf(s: HaState) {
+  return String(s.attributes.unit_of_measurement ?? "").toLowerCase();
+}
+
+/** True when the state looks like energy (kWh), not live watts. */
+export function isEnergyUnit(s: HaState) {
+  const u = unitOf(s);
+  return (
+    u === "kwh" ||
+    u === "wh" ||
+    u.includes("kwh") ||
+    u.includes("watt-hour") ||
+    u.includes("watt hour")
+  );
+}
+
+export function isPowerUnit(s: HaState) {
+  const u = unitOf(s);
+  if (!u) return true;
+  return u === "w" || u === "kw" || u.includes("watt");
+}
+
 function find(states: HaState[], test: (s: HaState, b: string) => boolean) {
   return states.find((s) => available(s) && test(s, blob(s)));
 }
 
-function prefer(states: HaState[], ids: string[] | undefined) {
+function prefer(
+  states: HaState[],
+  ids: string[] | undefined,
+  ok: (s: HaState) => boolean = () => true,
+) {
   if (!ids?.length) return undefined;
   for (const id of ids) {
-    const hit = states.find((s) => s.entity_id === id && available(s));
+    const hit = states.find((s) => s.entity_id === id && available(s) && ok(s));
     if (hit) return hit;
   }
   return undefined;
@@ -184,8 +249,15 @@ function resolve(
   states: HaState[],
   key: keyof HouseLive,
   fuzzy: (s: HaState, b: string) => boolean,
+  ok: (s: HaState) => boolean = () => true,
 ) {
-  return prefer(states, PREFERRED[key]) ?? find(states, fuzzy);
+  return prefer(states, PREFERRED[key], ok) ?? find(states, (s, b) => ok(s) && fuzzy(s, b));
+}
+
+function isLiveHouseWatts(s: HaState) {
+  if (HOUSE_W_BLOCKLIST.includes(s.entity_id)) return false;
+  if (isEnergyUnit(s)) return false;
+  return isPowerUnit(s);
 }
 
 export function autoMap(states: HaState[]): HaMap {
@@ -249,6 +321,7 @@ export function autoMap(states: HaState[]): HaMap {
     (_s, b) =>
       (b.includes("house") ||
         b.includes("home_load") ||
+        b.includes("home_consumption") ||
         b.includes("load_power") ||
         (b.includes("load") && b.includes("power")) ||
         (b.includes("consumption") && b.includes("power"))) &&
@@ -263,7 +336,9 @@ export function autoMap(states: HaState[]): HaMap {
       !b.includes("grid") &&
       !b.includes("inverter") &&
       !b.includes("today") &&
-      !b.includes("daily"),
+      !b.includes("daily") &&
+      !b.includes("meter_consumption"),
+    isLiveHouseWatts,
   );
 
   const grid = resolve(
@@ -279,6 +354,7 @@ export function autoMap(states: HaState[]): HaMap {
       !b.includes("charge") &&
       !b.includes("export_today") &&
       !b.includes("import_today"),
+    (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
   const inverterW = resolve(
@@ -302,8 +378,9 @@ export function autoMap(states: HaState[]): HaMap {
       !b.includes("yield"),
   );
 
-  const zappiMode = find(
+  const zappiMode = resolve(
     states,
+    "zappiMode",
     (s, b) =>
       b.includes("zappi") &&
       (b.includes("mode") || b.includes("charge_mode")) &&
@@ -312,24 +389,37 @@ export function autoMap(states: HaState[]): HaMap {
         s.entity_id.startsWith("binary_sensor.")),
   );
 
-  const zappiPlug = find(
+  const zappiPlug = resolve(
     states,
+    "zappiPlugged",
     (s, b) =>
       b.includes("zappi") &&
       (b.includes("plug") ||
         b.includes("connected") ||
         b.includes("car_connected") ||
-        (b.includes("status") && !b.includes("mode"))),
+        (b.includes("status") && !b.includes("mode") && !b.includes("device"))),
   );
 
-  const zappiW = find(
+  const zappiW = resolve(
     states,
+    "zappiW",
     (_s, b) =>
       b.includes("zappi") &&
       (b.includes("charge_rate") ||
         b.includes("charging_power") ||
         b.includes("charge_power") ||
-        (b.includes("power") && !b.includes("generation") && !b.includes("battery"))),
+        b.includes("ct_internal") ||
+        b.includes("internal_load") ||
+        (b.includes("power") &&
+          b.includes("internal") &&
+          !b.includes("generation") &&
+          !b.includes("battery") &&
+          !b.includes("grid"))) &&
+      !b.includes("generation") &&
+      !b.includes("battery") &&
+      !b.includes("today") &&
+      !b.includes("added"),
+    (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
   const offPeak = find(
@@ -356,8 +446,9 @@ export function autoMap(states: HaState[]): HaMap {
       b.includes("forcible_charge"),
   );
 
-  const stevie = find(
+  const stevie = resolve(
     states,
+    "stevieHome",
     (s, b) => s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")),
   );
 
@@ -378,6 +469,11 @@ export function autoMap(states: HaState[]): HaMap {
   if (stevie) map.stevieHome = stevie.entity_id;
 
   for (const sw of SWITCHES) {
+    const preferred = prefer(states, PREFERRED_SWITCHES[sw.id]);
+    if (preferred) {
+      map[sw.id] = preferred.entity_id;
+      continue;
+    }
     const hit = states.find((s) => {
       if (!s.entity_id.startsWith("light.") && !s.entity_id.startsWith("switch.")) return false;
       const b = blob(s);
@@ -391,6 +487,9 @@ export function autoMap(states: HaState[]): HaMap {
 /**
  * Build HouseLive from HA states. Pass EMPTY_LIVE (default) so missing entities
  * become zeros/false — never demo SNAPSHOT leftovers like 16.68 kWh.
+ *
+ * When no live house-load watt sensor is mapped, houseW is derived via
+ * `deriveHouseW(solar, grid, battery)` — never from SNAPSHOT or kWh totals.
  */
 export function liveFromStates(
   states: HaState[],
@@ -459,13 +558,34 @@ export function liveFromStates(
       : flag("zappiPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
   }
 
+  const solarNowW = Math.round(n("solarNowW", fallback.solarNowW));
+  const gridW = Math.round(n("gridW", fallback.gridW));
+  batteryW = Math.round(batteryW);
+
+  const houseState = take("houseW");
+  const houseMappedOk =
+    Boolean(houseState) &&
+    !HOUSE_W_BLOCKLIST.includes(houseState!.entity_id) &&
+    !isEnergyUnit(houseState!) &&
+    isPowerUnit(houseState!);
+
+  let houseW: number;
+  if (houseMappedOk) {
+    houseW = Math.round(n("houseW", fallback.houseW));
+  } else if (map.solarNowW || map.gridW || map.batteryW) {
+    // Derive from the energy balance when no true house-load W sensor exists.
+    houseW = deriveHouseW(solarNowW, gridW, batteryW);
+  } else {
+    houseW = Math.round(fallback.houseW);
+  }
+
   return {
     soc: Math.round(n("soc", fallback.soc)),
-    batteryW: Math.round(batteryW),
+    batteryW,
     inverterW: Math.round(n("inverterW", fallback.inverterW)),
-    solarNowW: Math.round(n("solarNowW", fallback.solarNowW)),
-    houseW: Math.round(n("houseW", fallback.houseW)),
-    gridW: Math.round(n("gridW", fallback.gridW)),
+    solarNowW,
+    houseW,
+    gridW,
     solarTodayKwh: Number(n("solarTodayKwh", fallback.solarTodayKwh).toFixed(2)),
     inverterStatus: take("inverterStatus")?.state ?? fallback.inverterStatus,
     zappiMode: zappiModeState ?? fallback.zappiMode,
@@ -579,10 +699,65 @@ export class HaSocket {
     });
   }
 
-  private send(type: string, extra: Record<string, unknown> = {}) {
+  /**
+   * HA recorder history for chart series. Returns [] when the Pi has no data or
+   * the command is unsupported — callers must not fall back to demo curves.
+   */
+  async historyDuringPeriod(entityIds: string[], start: string, end: string) {
+    if (!entityIds.length || !this.ws) return [];
+    try {
+      const result = await this.send("history/history_during_period", {
+        start_time: start,
+        end_time: end,
+        entity_ids: entityIds,
+        include_start_time_state: true,
+        significant_changes_only: false,
+        minimal_response: true,
+        no_attributes: true,
+      });
+      return result;
+    } catch {
+      return [];
+    }
+  }
+
+  async statisticsDuringPeriod(
+    statisticIds: string[],
+    start: string,
+    end: string,
+    period: "hour" | "day" = "day",
+  ) {
+    if (!statisticIds.length || !this.ws) return {};
+    try {
+      return await this.send("recorder/statistics_during_period", {
+        start_time: start,
+        end_time: end,
+        statistic_ids: statisticIds,
+        period,
+        types: ["change", "state", "mean", "sum"],
+      });
+    } catch {
+      return {};
+    }
+  }
+
+  private send(type: string, extra: Record<string, unknown> = {}, timeoutMs = 20_000) {
     const id = this.id++;
     return new Promise((ok, err) => {
-      this.pending.set(id, { ok, err });
+      const timer = window.setTimeout(() => {
+        this.pending.delete(id);
+        err(new Error("Home Assistant request timed out."));
+      }, timeoutMs);
+      this.pending.set(id, {
+        ok: (v) => {
+          window.clearTimeout(timer);
+          ok(v);
+        },
+        err: (e) => {
+          window.clearTimeout(timer);
+          err(e);
+        },
+      });
       this.ws?.send(JSON.stringify({ id, type, ...extra }));
     });
   }
@@ -599,4 +774,4 @@ export class HaSocket {
   }
 }
 
-export { EMPTY_LIVE, SNAPSHOT };
+export { EMPTY_LIVE, SNAPSHOT, deriveHouseW };

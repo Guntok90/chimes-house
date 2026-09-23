@@ -104,6 +104,7 @@ export function Tile({
   state,
   onToggle,
   icon: Icon,
+  available = true,
 }: {
   id: string;
   label: string;
@@ -111,28 +112,43 @@ export function Tile({
   state?: boolean;
   onToggle: (id: string) => void;
   icon: LucideIcon;
+  /** When false (live + unmapped), show Unavailable and do not toggle. */
+  available?: boolean;
 }) {
   const active = Boolean(state);
   return (
     <button
       type="button"
-      onClick={() => onToggle(id)}
+      disabled={!available}
+      onClick={() => {
+        if (available) onToggle(id);
+      }}
       className={cn(
         "flex min-h-16 items-center gap-3 rounded-md border px-3.5 py-3 text-left transition-colors duration-150",
-        active ? "border-line bg-paper-raised" : "border-line bg-white/55",
+        !available
+          ? "cursor-not-allowed border-line bg-white/40 opacity-70"
+          : active
+            ? "border-line bg-paper-raised"
+            : "border-line bg-white/55",
       )}
     >
       <span
         className={cn(
           "grid size-9 place-items-center rounded-sm",
-          active ? "bg-terra/15 text-terra" : "bg-teal/10 text-teal",
+          !available
+            ? "bg-paper-deep text-ink-soft"
+            : active
+              ? "bg-terra/15 text-terra"
+              : "bg-teal/10 text-teal",
         )}
       >
         <Icon className="size-4" strokeWidth={1.7} />
       </span>
       <span>
         <span className="block font-medium">{label}</span>
-        <span className="text-sm text-ink-soft">{detail ?? (active ? "On" : "Off")}</span>
+        <span className="text-sm text-ink-soft">
+          {detail ?? (!available ? "Unavailable" : active ? "On" : "Off")}
+        </span>
       </span>
     </button>
   );

@@ -8,10 +8,11 @@ import {
 } from "react";
 import { Minimize2 } from "lucide-react";
 import { HOURS } from "@/lib/house";
-import { useLive } from "@/lib/house-store";
+import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 import { DayAllChart } from "./charts";
 import { EnergyFlow } from "./energy-flow";
+import { NoHistoryYet } from "./no-history";
 
 type Box = { x: number; y: number; w: number; h: number };
 
@@ -317,10 +318,25 @@ function GlassTile({
 }
 
 function DayGraph() {
+  const status = useHouse((s) => s.status);
+  const historyStatus = useHouse((s) => s.historyStatus);
+  const historyHours = useHouse((s) => s.historyHours);
+  const liveMode = status === "live";
+  const data = liveMode ? historyHours : HOURS;
+  const ready = !liveMode || (historyStatus === "ready" && data.length > 0);
+
+  if (!ready) {
+    return (
+      <div className="flex h-full flex-col justify-center px-2">
+        <NoHistoryYet label="24h graph" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       <div className="min-h-0 flex-1">
-        <DayAllChart data={HOURS} />
+        <DayAllChart data={data} />
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-1 text-xs text-sidebar-fg/70">
         <Key color="#e6d2c0" label="Solar" />

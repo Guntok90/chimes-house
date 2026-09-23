@@ -322,6 +322,9 @@ function NavButton({
 
 function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
   const live = useLive();
+  const status = useHouse((s) => s.status);
+  const map = useHouse((s) => s.map);
+  const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
   return (
     <div className="space-y-8">
       <PageTitle>Home</PageTitle>
@@ -331,9 +334,30 @@ function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: st
         <Metric label="House" value={`${live.houseW} W`} />
       </div>
       <Room title="Lights">
-        <Tile id="lamp" label="Lamp" state={on.lamp} onToggle={toggle} icon={Lamp} />
-        <Tile id="kitchen" label="Kitchen" state={on.kitchen} onToggle={toggle} icon={Lightbulb} />
-        <Tile id="pergola" label="Pergola" state={on.pergola} onToggle={toggle} icon={Sun} />
+        <Tile
+          id="lamp"
+          label="Lamp"
+          state={on.lamp}
+          onToggle={toggle}
+          icon={Lamp}
+          available={mapped("lamp")}
+        />
+        <Tile
+          id="kitchen"
+          label="Kitchen"
+          state={on.kitchen}
+          onToggle={toggle}
+          icon={Lightbulb}
+          available={mapped("kitchen")}
+        />
+        <Tile
+          id="pergola"
+          label="Pergola"
+          state={on.pergola}
+          onToggle={toggle}
+          icon={Sun}
+          available={mapped("pergola")}
+        />
       </Room>
       <div>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-soft">
@@ -354,37 +378,100 @@ function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: st
 }
 
 function GardenView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
+  const status = useHouse((s) => s.status);
+  const map = useHouse((s) => s.map);
+  const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
   return (
     <div className="space-y-8">
       <PageTitle>Garden</PageTitle>
       <Room title="Back garden">
-        <Tile id="pergola" label="Pergola" state={on.pergola} onToggle={toggle} icon={Sun} />
-        <Tile id="pond-1" label="Pond 1" state={on["pond-1"]} onToggle={toggle} icon={Waves} />
-        <Tile id="pond-2" label="Pond 2" state={on["pond-2"]} onToggle={toggle} icon={Waves} />
+        <Tile
+          id="pergola"
+          label="Pergola"
+          state={on.pergola}
+          onToggle={toggle}
+          icon={Sun}
+          available={mapped("pergola")}
+        />
+        <Tile
+          id="pond-1"
+          label="Pond 1"
+          state={on["pond-1"]}
+          onToggle={toggle}
+          icon={Waves}
+          available={mapped("pond-1")}
+        />
+        <Tile
+          id="pond-2"
+          label="Pond 2"
+          state={on["pond-2"]}
+          onToggle={toggle}
+          icon={Waves}
+          available={mapped("pond-2")}
+        />
       </Room>
     </div>
   );
 }
 
 function HouseView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
+  const status = useHouse((s) => s.status);
+  const map = useHouse((s) => s.map);
+  const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
   return (
     <div className="space-y-8">
       <PageTitle>House</PageTitle>
       <PiSetup />
       <Room title="Lights">
-        <Tile id="lamp" label="Lamp" state={on.lamp} onToggle={toggle} icon={Lamp} />
-        <Tile id="kitchen" label="Kitchen" state={on.kitchen} onToggle={toggle} icon={Lightbulb} />
-        <Tile id="pergola" label="Pergola" state={on.pergola} onToggle={toggle} icon={Sun} />
+        <Tile
+          id="lamp"
+          label="Lamp"
+          state={on.lamp}
+          onToggle={toggle}
+          icon={Lamp}
+          available={mapped("lamp")}
+        />
+        <Tile
+          id="kitchen"
+          label="Kitchen"
+          state={on.kitchen}
+          onToggle={toggle}
+          icon={Lightbulb}
+          available={mapped("kitchen")}
+        />
+        <Tile
+          id="pergola"
+          label="Pergola"
+          state={on.pergola}
+          onToggle={toggle}
+          icon={Sun}
+          available={mapped("pergola")}
+        />
       </Room>
       <Room title="Plugs">
-        <Tile id="telly" label="Telly" state={on.telly} onToggle={toggle} icon={Tv} />
-        <Tile id="fish" label="Fish" state={on.fish} onToggle={toggle} icon={Fish} />
+        <Tile
+          id="telly"
+          label="Telly"
+          state={on.telly}
+          onToggle={toggle}
+          icon={Tv}
+          available={mapped("telly")}
+        />
+        <Tile
+          id="fish"
+          label="Fish"
+          state={on.fish}
+          onToggle={toggle}
+          icon={Fish}
+          available={mapped("fish")}
+        />
         <Tile
           id="stevie-blanket"
           label="Stevie’s blanket"
           state={on["stevie-blanket"]}
           onToggle={toggle}
           icon={Sun}
+          available={mapped("stevie-blanket")}
         />
         <Tile
           id="baby-blanket"
@@ -392,6 +479,7 @@ function HouseView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: s
           state={on["baby-blanket"]}
           onToggle={toggle}
           icon={Sun}
+          available={mapped("baby-blanket")}
         />
       </Room>
     </div>
