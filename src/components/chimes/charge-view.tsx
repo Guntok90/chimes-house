@@ -1,12 +1,15 @@
 import { Car, PlugZap, Zap } from "lucide-react";
 import { WEEK } from "@/lib/house";
-import { useLive } from "@/lib/house-store";
+import { useHouse, useLive } from "@/lib/house-store";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
 import { cn } from "@/lib/utils";
 
 export function ChargeView() {
   const live = useLive();
-  const today = WEEK[WEEK.length - 1];
+  const status = useHouse((s) => s.status);
+  const historyWeek = useHouse((s) => s.historyWeek);
+  const week = status === "live" ? historyWeek : WEEK;
+  const today = week[week.length - 1];
   return (
     <div className="space-y-8">
       <PageTitle>Charge</PageTitle>
@@ -98,8 +101,8 @@ export function ChargeView() {
           <Surface className="px-5">
             <Row label="Dispatch" value={live.intelligent ? "Armed" : "Off"} />
             <Row label="Off-peak" value={live.offPeak ? "Yes" : "No"} />
-            <Row label="Today import" value={`${today.gridIn} kWh`} />
-            <Row label="Today cost" value={`£${today.cost.toFixed(2)}`} />
+            <Row label="Today import" value={today ? `${today.gridIn} kWh` : "—"} />
+            <Row label="Today cost" value={today ? `£${today.cost.toFixed(2)}` : "—"} />
           </Surface>
         </section>
         <section>

@@ -1,5 +1,12 @@
 import { create } from "zustand";
 import {
+  daysFromStatistics,
+  historyEntityIds,
+  hoursFromHistory,
+  normalizeHistoryResult,
+  type HaStatisticsBag,
+} from "./ha-history";
+import {
   DEFAULT_HA_URL,
   HaSocket,
   autoMap,
@@ -17,11 +24,12 @@ import {
   type HaState,
   type SwitchId,
 } from "./ha";
-import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house";
+import { EMPTY_LIVE, SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
 
 const socket = new HaSocket();
 
 type Status = "demo" | "connecting" | "live" | "error";
+type HistoryStatus = "idle" | "loading" | "ready" | "empty";
 
 type Store = {
   live: HouseLive;
@@ -30,13 +38,20 @@ type Store = {
   error?: string;
   map: HaMap;
   url: string;
+  /** Live HA history only — never demo WEEK/HOURS while status === "live". */
+  historyHours: HourPoint[];
+  historyWeek: DayPoint[];
+  historyMonth: DayPoint[];
+  historyStatus: HistoryStatus;
   connect: (creds: HaCreds) => Promise<void>;
   disconnect: () => void;
   boot: () => void;
   toggle: (id: string) => void;
+  refreshHistory: () => Promise<void>;
 };
 
 let bootInFlight: Promise<void> | null = null;
+let historyInFlight: Promise<void> | null = null;
 
 export const useHouse = create<Store>((set, get) => {
   return {
@@ -45,6 +60,10 @@ export const useHouse = create<Store>((set, get) => {
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
+    historyHours: [],
+    historyWeek: [],
+    historyMonth: [],
+    historyStatus: "idle",
 
     boot() {
       if (bootInFlight) return;
@@ -58,7 +77,7 @@ export const useHouse = create<Store>((set, get) => {
             cache: "no-store",
           });
           if (res.status === 401) {
-            set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
+            set({ status: "demo", live: { ...SNAPSHOT }, error: undefined, historyStatus: "idle" });
             return;
           }
           if (!res.ok) {
@@ -78,6 +97,7 @@ export const useHouse = create<Store>((set, get) => {
             error: bootstrapFailed
               ? "Could not read Pi setup. Connect from House, on Tailscale."
               : undefined,
+            historyStatus: "idle",
           });
           return;
         }
@@ -88,7 +108,15 @@ export const useHouse = create<Store>((set, get) => {
     },
 
     async connect(creds) {
-      set({ status: "connecting", error: undefined, url: creds.url });
+      set({
+        status: "connecting",
+        error: undefined,
+        url: creds.url,
+        historyHours: [],
+        historyWeek: [],
+        historyMonth: [],
+        historyStatus: "idle",
+      });
       writeCreds(creds);
       socket.onStatus = (s, err) => {
         // Stay on "connecting" until the first state payload. A Live badge
@@ -99,6 +127,10 @@ export const useHouse = create<Store>((set, get) => {
             status: "error",
             error: wsFailureMessage(err ?? "Disconnected."),
             live: { ...SNAPSHOT },
+            historyHours: [],
+            historyWeek: [],
+            historyMonth: [],
+            historyStatus: "idle",
           });
         }
       };
@@ -107,6 +139,7 @@ export const useHouse = create<Store>((set, get) => {
         // autoMap wins over stale localStorage so preferred Pi entities stick.
         const mapped = { ...saved, ...autoMap(states) };
         writeMap(mapped);
+        const wasLive = get().status === "live";
         set({
           live: liveFromStates(states, mapped, EMPTY_LIVE),
           switches: switchOn(states, mapped),
@@ -114,6 +147,7 @@ export const useHouse = create<Store>((set, get) => {
           status: "live",
           error: undefined,
         });
+        if (!wasLive) void get().refreshHistory();
       };
       try {
         await socket.connect(creds.url, creds.token);
@@ -123,8 +157,61 @@ export const useHouse = create<Store>((set, get) => {
           status: "error",
           error: wsFailureMessage(err instanceof Error ? err.message : "Could not connect."),
           live: { ...SNAPSHOT },
+          historyStatus: "idle",
         });
       }
+    },
+
+    async refreshHistory() {
+      if (historyInFlight) return historyInFlight;
+      if (get().status !== "live") return;
+      const map = get().map;
+      const ids = historyEntityIds(map);
+      if (!ids.length) {
+        set({ historyStatus: "empty", historyHours: [], historyWeek: [], historyMonth: [] });
+        return;
+      }
+      set({ historyStatus: "loading" });
+      historyInFlight = (async () => {
+        try {
+          const end = new Date();
+          const start24 = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+          const start28 = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1000);
+          const raw = await socket.historyDuringPeriod(
+            ids,
+            start24.toISOString(),
+            end.toISOString(),
+          );
+          const bag = normalizeHistoryResult(raw);
+          const hours = hoursFromHistory(bag, map, end);
+
+          const stats = (await socket.statisticsDuringPeriod(
+            ids,
+            start28.toISOString(),
+            end.toISOString(),
+            "day",
+          )) as HaStatisticsBag;
+          const week = daysFromStatistics(stats, map, 7, end);
+          const month = daysFromStatistics(stats, map, 28, end);
+          const empty = hours.length === 0 && week.length === 0;
+          set({
+            historyHours: hours,
+            historyWeek: week,
+            historyMonth: month,
+            historyStatus: empty ? "empty" : "ready",
+          });
+        } catch {
+          set({
+            historyHours: [],
+            historyWeek: [],
+            historyMonth: [],
+            historyStatus: "empty",
+          });
+        } finally {
+          historyInFlight = null;
+        }
+      })();
+      return historyInFlight;
     },
 
     disconnect() {
@@ -132,14 +219,23 @@ export const useHouse = create<Store>((set, get) => {
       socket.onStates = null;
       socket.close();
       writeCreds(null);
-      set({ status: "demo", live: { ...SNAPSHOT }, error: undefined });
+      set({
+        status: "demo",
+        live: { ...SNAPSHOT },
+        error: undefined,
+        historyHours: [],
+        historyWeek: [],
+        historyMonth: [],
+        historyStatus: "idle",
+      });
     },
 
     toggle(id) {
-      const { map, switches } = get();
+      const { map, switches, status } = get();
       const entity = map[id as SwitchId];
+      if (!entity) return;
       set({ switches: { ...switches, [id]: !switches[id] } });
-      if (entity && get().status === "live" && readCreds()) {
+      if (status === "live" && readCreds()) {
         void socket.call(entity);
       }
     },

@@ -1,13 +1,22 @@
 import { HOURS, WEEK } from "@/lib/house";
-import { useLive } from "@/lib/house-store";
+import { useHouse, useLive } from "@/lib/house-store";
 import { LineArea } from "./charts";
+import { NoHistoryYet } from "./no-history";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
 
 export function BatteryView() {
   const live = useLive();
-  const today = WEEK[WEEK.length - 1];
+  const status = useHouse((s) => s.status);
+  const historyStatus = useHouse((s) => s.historyStatus);
+  const historyHours = useHouse((s) => s.historyHours);
+  const historyWeek = useHouse((s) => s.historyWeek);
+  const liveMode = status === "live";
+  const week = liveMode ? historyWeek : WEEK;
+  const hoursSrc = liveMode ? historyHours : HOURS;
+  const chartsReady = !liveMode || (historyStatus === "ready" && hoursSrc.length > 0);
+  const today = week[week.length - 1];
   const discharging = live.batteryW < 0;
-  const hours = HOURS.map((h) => ({
+  const hours = hoursSrc.map((h) => ({
     hour: h.hour,
     SOC: h.soc,
     Power: h.battW,
@@ -25,18 +34,18 @@ export function BatteryView() {
           <Metric
             accent
             label="State"
-            value={discharging ? "Discharging" : "Charging"}
+            value={discharging ? "Discharging" : live.batteryW > 30 ? "Charging" : "Idle"}
             hint={`${Math.abs(live.batteryW)} W`}
           />
           <Metric label="Capacity" value={`${live.soc}%`} hint="Pack 1" />
           <Metric
             label="Charged today"
-            value={`${today.battCharge} kWh`}
+            value={today ? `${today.battCharge} kWh` : "—"}
             hint="Into the pack"
           />
           <Metric
             label="Used today"
-            value={`${today.battDischarge} kWh`}
+            value={today ? `${today.battDischarge} kWh` : "—"}
             hint="Out to the house"
           />
         </div>
@@ -45,27 +54,35 @@ export function BatteryView() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section>
           <SectionLabel>State of charge · 24 h</SectionLabel>
-          <Surface className="h-56 p-3">
-            <LineArea
-              data={hours}
-              dataKey="SOC"
-              name="SOC"
-              color="var(--color-teal)"
-              unit="%"
-            />
-          </Surface>
+          {chartsReady ? (
+            <Surface className="h-56 p-3">
+              <LineArea
+                data={hours}
+                dataKey="SOC"
+                name="SOC"
+                color="var(--color-teal)"
+                unit="%"
+              />
+            </Surface>
+          ) : (
+            <NoHistoryYet label="SOC chart" />
+          )}
         </section>
         <section>
           <SectionLabel>Power · 24 h</SectionLabel>
-          <Surface className="h-56 p-3">
-            <LineArea
-              data={hours}
-              dataKey="Power"
-              name="Battery"
-              color="var(--color-terra)"
-              unit=" W"
-            />
-          </Surface>
+          {chartsReady ? (
+            <Surface className="h-56 p-3">
+              <LineArea
+                data={hours}
+                dataKey="Power"
+                name="Battery"
+                color="var(--color-terra)"
+                unit=" W"
+              />
+            </Surface>
+          ) : (
+            <NoHistoryYet label="power chart" />
+          )}
         </section>
       </div>
 
@@ -85,14 +102,28 @@ export function BatteryView() {
           <Surface className="px-5">
             <Row
               label="Charged"
-              value={`${WEEK.reduce((s, d) => s + d.battCharge, 0).toFixed(1)} kWh`}
+              value={
+                week.length
+                  ? `${week.reduce((s, d) => s + d.battCharge, 0).toFixed(1)} kWh`
+                  : "—"
+              }
             />
             <Row
               label="Discharged"
-              value={`${WEEK.reduce((s, d) => s + d.battDischarge, 0).toFixed(1)} kWh`}
+              value={
+                week.length
+                  ? `${week.reduce((s, d) => s + d.battDischarge, 0).toFixed(1)} kWh`
+                  : "—"
+              }
             />
-            <Row label="Highest SOC" value={`${Math.max(...HOURS.map((h) => h.soc))}%`} />
-            <Row label="Lowest SOC" value={`${Math.min(...HOURS.map((h) => h.soc))}%`} />
+            <Row
+              label="Highest SOC"
+              value={hoursSrc.length ? `${Math.max(...hoursSrc.map((h) => h.soc))}%` : "—"}
+            />
+            <Row
+              label="Lowest SOC"
+              value={hoursSrc.length ? `${Math.min(...hoursSrc.map((h) => h.soc))}%` : "—"}
+            />
             <Row label="Now" value={`${live.soc}%`} />
           </Surface>
         </section>
@@ -131,7 +162,7 @@ function SocRing({ soc, watts }: { soc: number; watts: number }) {
         <div>
           <div className="text-4xl font-medium tracking-tight tabular-nums">{soc}%</div>
           <div className="mt-1 text-sm text-ink-soft">
-            {watts < 0 ? "Discharging" : "Charging"}
+            {watts < -30 ? "Discharging" : watts > 30 ? "Charging" : "Idle"}
           </div>
         </div>
       </div>

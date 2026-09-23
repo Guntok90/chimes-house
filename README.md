@@ -33,16 +33,23 @@ After login the app calls `GET /api/ha/bootstrap` (family session cookie require
 
 Mapped when present (preferred ids first):
 
-| Field                          | Preferred entity                                                           |
-| ------------------------------ | -------------------------------------------------------------------------- |
-| Solar now                      | `sensor.inverter_input_power`                                              |
-| Solar today                    | `sensor.inverter_daily_yield`                                              |
-| Inverter W                     | `sensor.inverter_active_power`                                             |
-| Battery SOC                    | `sensor.battery_1_state_of_capacity`                                       |
-| Battery W                      | `sensor.battery_1_charge_discharge_power` (signed; negative = discharging) |
-| House / grid / Zappi / Octopus | fuzzy + common Huawei / myenergi / Octopus names                           |
+| Field           | Preferred entity                                                                 |
+| --------------- | -------------------------------------------------------------------------------- |
+| Solar now       | `sensor.inverter_input_power`                                                    |
+| Solar today     | `sensor.inverter_daily_yield`                                                    |
+| Inverter W      | `sensor.inverter_active_power`                                                   |
+| Inverter status | `sensor.inverter_device_status`                                                  |
+| Battery SOC     | `sensor.battery_1_state_of_capacity`                                             |
+| Battery W       | `sensor.batteries_charge_discharge_power` (signed; negative = discharging)       |
+| Grid W          | `sensor.power_meter_active_power` (also `sensor.myenergi_chimes_power_grid`)     |
+| House W         | Real load W if present; else **derived** `solar + grid − battery` (never kWh)    |
+| Zappi mode      | `select.myenergi_zappi_25435526_charge_mode`                                     |
+| Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
+| Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
+| Stevie          | `person.stevie_w`                                                                |
+| Switches        | Lamp/Telly/blankets/Fish/Pergola/Ponds → `switch.smart_switch_*` / garden ids    |
 
-Live values use neutral zeros for unmapped fields — they never mix demo numbers (e.g. 16.68 kWh) with partial live data. “After dusk” only when a live `sun.sun` is `below_horizon`. If bootstrap is unconfigured, or the WebSocket cannot reach the Pi, the app stays on the demo snapshot and shows a connect error.
+Live values use neutral zeros for unmapped fields — they never mix demo numbers (e.g. 16.68 kWh) with partial live data. History / Overview charts use HA recorder history over the same WebSocket when available; otherwise they show **No history yet** (never fake WEEK/HOURS curves while Live). “After dusk” only when a live `sun.sun` is `below_horizon`. If bootstrap is unconfigured, or the WebSocket cannot reach the Pi, the app stays on the demo snapshot and shows a connect error.
 
 ## Connect to the house (manual)
 
