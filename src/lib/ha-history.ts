@@ -51,6 +51,7 @@ export function hoursFromHistory(bag: HaHistoryBag, map: HaMap, now = new Date()
   const socId = map.soc;
   const gridId = map.gridW;
   const houseId = map.houseW;
+  const zappiId = map.zappiW;
   if (!solarId && !battId && !socId && !gridId) return [];
 
   const out: HourPoint[] = [];
@@ -64,9 +65,12 @@ export function hoursFromHistory(bag: HaHistoryBag, map: HaMap, now = new Date()
     const battW = sampleAt(battId ? bag[battId] : undefined, at) ?? 0;
     const soc = sampleAt(socId ? bag[socId] : undefined, at) ?? 0;
     const gridW = sampleAt(gridId ? bag[gridId] : undefined, at) ?? 0;
+    const zappiW = sampleAt(zappiId ? bag[zappiId] : undefined, at) ?? 0;
     const houseMapped = houseId ? sampleAt(bag[houseId], at) : null;
     const houseW =
-      houseMapped != null ? Math.max(0, Math.round(houseMapped)) : deriveHouseW(solarW, gridW, battW);
+      houseMapped != null
+        ? Math.max(0, Math.round(houseMapped))
+        : deriveHouseW(solarW, gridW, battW, zappiW);
     out.push({
       hour: `${String(t.getHours()).padStart(2, "0")}:00`,
       soc: Math.round(soc),
@@ -136,9 +140,15 @@ export function daysFromStatistics(
 }
 
 export function historyEntityIds(map: HaMap): string[] {
-  return [map.solarNowW, map.batteryW, map.soc, map.gridW, map.houseW, map.solarTodayKwh].filter(
-    (id): id is string => Boolean(id),
-  );
+  return [
+    map.solarNowW,
+    map.batteryW,
+    map.soc,
+    map.gridW,
+    map.houseW,
+    map.zappiW,
+    map.solarTodayKwh,
+  ].filter((id): id is string => Boolean(id));
 }
 
 /** Normalise HA history/history_during_period result into entity_id → points. */

@@ -78,17 +78,19 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.inverter_status",
     "sensor.inverter_state",
   ],
+  // Only known-good live house-load W sensors — never myenergi “home consumption”
+  // (unreliable / can be ~0 or negative while the house is drawing). Prefer derive.
   houseW: [
-    "sensor.house_consumption",
     "sensor.house_power",
     "sensor.load_power",
     "sensor.home_load_power",
     "sensor.home_power",
-    "sensor.myenergi_chimes_home_consumption",
   ],
+  // Prefer myenergi grid (matches Octopus demand when importing). Huawei
+  // power_meter_active_power often disagrees in sign on this install.
   gridW: [
-    "sensor.power_meter_active_power",
     "sensor.myenergi_chimes_power_grid",
+    "sensor.power_meter_active_power",
     "sensor.grid_active_power",
     "sensor.grid_power",
     "sensor.meter_active_power",
@@ -99,8 +101,9 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_plug_status",
     "sensor.myenergi_zappi_25435526_status",
   ],
-  // Charge power = internal CT / EV session watts — never generation or battery CT.
+  // Charge power = site EV session watts / internal CT — never generation or battery CT.
   zappiW: [
+    "sensor.myenergi_chimes_power_charging",
     "sensor.myenergi_zappi_25435526_power_ct_internal",
     "sensor.myenergi_zappi_25435526_power_internal_load",
     "sensor.myenergi_zappi_25435526_internal_load_ct1",
@@ -112,8 +115,12 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   stevieHome: ["person.stevie_w"],
 };
 
-/** Lifetime / energy totals that must never be treated as live house watts. */
+/**
+ * Never treat these as live house watts.
+ * Includes lifetime kWh totals and myenergi’s unreliable “home consumption”.
+ */
 export const HOUSE_W_BLOCKLIST = [
+  "sensor.myenergi_chimes_home_consumption",
   "sensor.power_meter_consumption",
   "sensor.power_meter_consumption_2",
   "sensor.house_consumption_daily",
@@ -256,6 +263,11 @@ function resolve(
 
 function isLiveHouseWatts(s: HaState) {
   if (HOUSE_W_BLOCKLIST.includes(s.entity_id)) return false;
+  const b = blob(s);
+  // myenergi “home consumption” is unreliable (can read ~0 W or go negative).
+  if (b.includes("myenergi") && (b.includes("home_consumption") || b.includes("home consumption"))) {
+    return false;
+  }
   if (isEnergyUnit(s)) return false;
   return isPowerUnit(s);
 }
@@ -321,14 +333,11 @@ export function autoMap(states: HaState[]): HaMap {
     (_s, b) =>
       (b.includes("house") ||
         b.includes("home_load") ||
-        b.includes("home_consumption") ||
         b.includes("load_power") ||
-        (b.includes("load") && b.includes("power")) ||
-        (b.includes("consumption") && b.includes("power"))) &&
-      (b.includes("power") ||
-        b.includes("watt") ||
-        b.includes("load") ||
-        b.includes("consumption")) &&
+        (b.includes("load") && b.includes("power"))) &&
+      (b.includes("power") || b.includes("watt") || b.includes("load")) &&
+      !b.includes("myenergi") &&
+      !b.includes("home_consumption") &&
       !b.includes("battery") &&
       !b.includes("solar") &&
       !b.includes("pv") &&
@@ -404,10 +413,11 @@ export function autoMap(states: HaState[]): HaMap {
     states,
     "zappiW",
     (_s, b) =>
-      b.includes("zappi") &&
+      (b.includes("zappi") || (b.includes("myenergi") && b.includes("power_charging"))) &&
       (b.includes("charge_rate") ||
         b.includes("charging_power") ||
         b.includes("charge_power") ||
+        b.includes("power_charging") ||
         b.includes("ct_internal") ||
         b.includes("internal_load") ||
         (b.includes("power") &&
@@ -418,7 +428,8 @@ export function autoMap(states: HaState[]): HaMap {
       !b.includes("generation") &&
       !b.includes("battery") &&
       !b.includes("today") &&
-      !b.includes("added"),
+      !b.includes("added") &&
+      !b.includes("home_consumption"),
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
@@ -489,7 +500,8 @@ export function autoMap(states: HaState[]): HaMap {
  * become zeros/false — never demo SNAPSHOT leftovers like 16.68 kWh.
  *
  * When no live house-load watt sensor is mapped, houseW is derived via
- * `deriveHouseW(solar, grid, battery)` — never from SNAPSHOT or kWh totals.
+ * `deriveHouseW(solar, grid, battery, zappi)` — household load excluding Zappi,
+ * never from SNAPSHOT, kWh totals, or myenergi home consumption.
  */
 export function liveFromStates(
   states: HaState[],
@@ -560,21 +572,22 @@ export function liveFromStates(
 
   const solarNowW = Math.round(n("solarNowW", fallback.solarNowW));
   const gridW = Math.round(n("gridW", fallback.gridW));
+  const zappiW = Math.round(n("zappiW", fallback.zappiW));
   batteryW = Math.round(batteryW);
 
   const houseState = take("houseW");
   const houseMappedOk =
     Boolean(houseState) &&
-    !HOUSE_W_BLOCKLIST.includes(houseState!.entity_id) &&
+    isLiveHouseWatts(houseState!) &&
     !isEnergyUnit(houseState!) &&
     isPowerUnit(houseState!);
 
   let houseW: number;
   if (houseMappedOk) {
     houseW = Math.round(n("houseW", fallback.houseW));
-  } else if (map.solarNowW || map.gridW || map.batteryW) {
-    // Derive from the energy balance when no true house-load W sensor exists.
-    houseW = deriveHouseW(solarNowW, gridW, batteryW);
+  } else if (map.solarNowW || map.gridW || map.batteryW || map.zappiW) {
+    // Derive household load (excludes Zappi) when no true house-load W sensor exists.
+    houseW = deriveHouseW(solarNowW, gridW, batteryW, zappiW);
   } else {
     houseW = Math.round(fallback.houseW);
   }
@@ -590,7 +603,7 @@ export function liveFromStates(
     inverterStatus: take("inverterStatus")?.state ?? fallback.inverterStatus,
     zappiMode: zappiModeState ?? fallback.zappiMode,
     zappiPlugged,
-    zappiW: Math.round(n("zappiW", fallback.zappiW)),
+    zappiW,
     intelligent: flag("intelligent", fallback.intelligent),
     offPeak: flag("offPeak", fallback.offPeak),
     gridCharge: flag("gridCharge", fallback.gridCharge),
