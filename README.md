@@ -102,4 +102,4 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 
 ## Note
 
-The cinematic overview video is not in this repo (too large). Drop `house.mp4` in `public/media/` if you have it.
+Dad’s house timelapse (`public/media/house.mp4`) loops behind the Overview glass tiles at `/media/house.mp4`.
