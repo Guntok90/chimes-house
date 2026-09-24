@@ -14,6 +14,7 @@ import {
   SCROLL_DAYS,
   WEEK_HOURS,
   YEAR,
+  usesDemoCharts,
   type DayPoint,
   type HourPoint,
 } from "@/lib/house";
@@ -460,7 +461,7 @@ function OverviewGraph({
   const historyDays = useHouse((s) => s.historyDays);
   const historyMonth = useHouse((s) => s.historyMonth);
   const historyYear = useHouse((s) => s.historyYear);
-  const liveMode = status === "live";
+  const liveMode = !usesDemoCharts(status);
 
   const showCars = !liveMode || Boolean(map.zappiW);
 

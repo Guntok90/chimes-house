@@ -9,6 +9,8 @@ import type { ReactNode } from "react";
  * its `useSession()` works standalone — so this is a passthrough today. It's
  * kept as the single, stable mount point for any future client-side providers
  * (e.g. a toast or theme provider) without churning the root shell.
+ *
+ * HA WebSocket lifecycle lives in `HaProvider` (sibling under root), not here.
  */
 export function AuthProvider({ children }: { children: ReactNode }) {
   return <>{children}</>;
