@@ -3,6 +3,7 @@ import {
   daysFromStatistics,
   historyEntityIds,
   hoursFromHistory,
+  monthsFromStatistics,
   normalizeHistoryResult,
   type HaStatisticsBag,
 } from "./ha-history";
@@ -10,27 +11,43 @@ import {
   CHARGE_LIMIT_DEFAULTS,
   DEFAULT_HA_URL,
   HaSocket,
-  autoMap,
+  areaSwitchesFromStates,
   chargeLimitMetaMap,
   credsForBoot,
-  liveFromStates,
+  demoAreaSwitches,
   readCreds,
-  readMap,
-  switchOn,
   writeCreds,
-  writeMap,
   wsFailureMessage,
+  type AreaSwitch,
   type ChargeLimitKey,
+  type HaArea,
   type HaBootstrapResponse,
   type HaCreds,
+  type HaEntityReg,
   type HaMap,
   type HaState,
   type NumberControlMeta,
   type SwitchId,
 } from "./ha";
-import { EMPTY_LIVE, SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
+import { applyLiveStates } from "./live-updates";
+import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
 
 const socket = new HaSocket();
+
+let areasCache: HaArea[] = [];
+let entityRegCache: HaEntityReg[] = [];
+let lastStates: HaState[] = [];
+
+function rebuildAreaSwitches(states: HaState[]) {
+  return areaSwitchesFromStates(states, areasCache, entityRegCache);
+}
+
+/** Hourly points for Overview day tab (past week, scrollable). */
+export const HISTORY_HOUR_COUNT = 7 * 24;
+/** Daily points kept for week scroll + month tab. */
+export const HISTORY_DAY_COUNT = 56;
+/** Monthly points for year tab. */
+export const HISTORY_YEAR_COUNT = 12;
 
 type Status = "demo" | "connecting" | "live" | "error";
 type HistoryStatus = "idle" | "loading" | "ready" | "empty";
@@ -43,14 +60,22 @@ const DEMO_CHARGE_META: Record<ChargeLimitKey, NumberControlMeta> = {
 type Store = {
   live: HouseLive;
   switches: Record<string, boolean>;
+  /** All controllable switches/lights by HA area (Home). */
+  areaSwitches: AreaSwitch[];
   status: Status;
   error?: string;
   map: HaMap;
   url: string;
   /** Live HA history only — never demo WEEK/HOURS while status === "live". */
+  /** Past-week hourly (≤168). Battery view uses the last 24. */
   historyHours: HourPoint[];
+  /** Longer daily series for Overview week scroll (≤56). */
+  historyDays: DayPoint[];
+  /** Last 7 days — History view + Overview week window. */
   historyWeek: DayPoint[];
   historyMonth: DayPoint[];
+  /** Last 12 months from period:month statistics. */
+  historyYear: DayPoint[];
   historyStatus: HistoryStatus;
   /** Min/max/step for mapped Huawei charge-limit number entities. */
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
@@ -64,22 +89,33 @@ type Store = {
   applyChargeLimit: (key: ChargeLimitKey, value: number) => Promise<boolean>;
   /** Explicit Apply: turn charge-from-grid switch on/off. */
   applyGridCharge: (allow: boolean) => Promise<boolean>;
+  /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
+  toggleEntity: (entityId: string) => void;
   refreshHistory: () => Promise<void>;
 };
 
 let bootInFlight: Promise<void> | null = null;
 let historyInFlight: Promise<void> | null = null;
 
+function emptyHistory() {
+  return {
+    historyHours: [] as HourPoint[],
+    historyDays: [] as DayPoint[],
+    historyWeek: [] as DayPoint[],
+    historyMonth: [] as DayPoint[],
+    historyYear: [] as DayPoint[],
+  };
+}
+
 export const useHouse = create<Store>((set, get) => {
   return {
     live: { ...SNAPSHOT },
     switches: {},
+    areaSwitches: demoAreaSwitches({}),
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
-    historyHours: [],
-    historyWeek: [],
-    historyMonth: [],
+    ...emptyHistory(),
     historyStatus: "idle",
     chargeLimitMeta: DEMO_CHARGE_META,
 
@@ -95,7 +131,13 @@ export const useHouse = create<Store>((set, get) => {
             cache: "no-store",
           });
           if (res.status === 401) {
-            set({ status: "demo", live: { ...SNAPSHOT }, error: undefined, historyStatus: "idle" });
+            set({
+              status: "demo",
+              live: { ...SNAPSHOT },
+              areaSwitches: demoAreaSwitches({}),
+              error: undefined,
+              historyStatus: "idle",
+            });
             return;
           }
           if (!res.ok) {
@@ -130,43 +172,38 @@ export const useHouse = create<Store>((set, get) => {
         status: "connecting",
         error: undefined,
         url: creds.url,
-        historyHours: [],
-        historyWeek: [],
-        historyMonth: [],
+        ...emptyHistory(),
         historyStatus: "idle",
       });
       writeCreds(creds);
+      socket.interest = null;
       socket.onStatus = (s, err) => {
         // Stay on "connecting" until the first state payload. A Live badge
         // with the demo snapshot would read as dusk (0 W, 16.68 kWh).
         if (s === "connecting") set({ status: "connecting", error: undefined });
         if (s === "error") {
+          socket.interest = null;
           set({
             status: "error",
             error: wsFailureMessage(err ?? "Disconnected."),
             live: { ...SNAPSHOT },
-            historyHours: [],
-            historyWeek: [],
-            historyMonth: [],
+            ...emptyHistory(),
             historyStatus: "idle",
           });
         }
       };
-      socket.onStates = (states: HaState[]) => {
-        const saved = readMap();
-        // autoMap wins over stale localStorage so preferred Pi entities stick.
-        const mapped = { ...saved, ...autoMap(states) };
-        writeMap(mapped);
+      socket.onStates = (states) => {
+        const list = states instanceof Map ? Array.from(states.values()) : states;
+        lastStates = list;
         const wasLive = get().status === "live";
+        applyLiveStates(states, get, set, socket);
         set({
-          live: liveFromStates(states, mapped, EMPTY_LIVE),
-          switches: switchOn(states, mapped),
-          map: mapped,
-          chargeLimitMeta: chargeLimitMetaMap(states, mapped),
-          status: "live",
-          error: undefined,
+          areaSwitches: rebuildAreaSwitches(list),
+          chargeLimitMeta: chargeLimitMetaMap(list, get().map),
         });
-        if (!wasLive) void get().refreshHistory();
+        if (!wasLive && get().status === "live") {
+          void refreshRegistries();
+        }
       };
       try {
         await socket.connect(creds.url, creds.token);
@@ -187,28 +224,32 @@ export const useHouse = create<Store>((set, get) => {
       const map = get().map;
       const ids = historyEntityIds(map);
       if (!ids.length) {
-        set({ historyStatus: "empty", historyHours: [], historyWeek: [], historyMonth: [] });
+        set({ historyStatus: "empty", ...emptyHistory() });
         return;
       }
       set({ historyStatus: "loading" });
       historyInFlight = (async () => {
         try {
           const end = new Date();
-          const start24 = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-          const start28 = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1000);
+          const startHours = new Date(end.getTime() - HISTORY_HOUR_COUNT * 60 * 60 * 1000);
+          const startDays = new Date(end.getTime() - HISTORY_DAY_COUNT * 24 * 60 * 60 * 1000);
+          const startYear = new Date(end.getFullYear(), end.getMonth() - (HISTORY_YEAR_COUNT - 1), 1);
+
           let hours: HourPoint[] = [];
+          let days: DayPoint[] = [];
           let week: DayPoint[] = [];
           let month: DayPoint[] = [];
+          let year: DayPoint[] = [];
 
           // Hourly and daily paths are independent — a stats parse throw must
-          // not wipe an otherwise-valid 24h series (and never invent demo data).
+          // not wipe an otherwise-valid series (and never invent demo data).
           try {
             const raw = await socket.historyDuringPeriod(
               ids,
-              start24.toISOString(),
+              startHours.toISOString(),
               end.toISOString(),
             );
-            hours = hoursFromHistory(normalizeHistoryResult(raw), map, end);
+            hours = hoursFromHistory(normalizeHistoryResult(raw), map, end, HISTORY_HOUR_COUNT);
           } catch {
             hours = [];
           }
@@ -216,22 +257,63 @@ export const useHouse = create<Store>((set, get) => {
           try {
             const stats = (await socket.statisticsDuringPeriod(
               ids,
-              start28.toISOString(),
+              startDays.toISOString(),
               end.toISOString(),
               "day",
             )) as HaStatisticsBag;
-            week = daysFromStatistics(stats, map, 7, end);
-            month = daysFromStatistics(stats, map, 28, end);
+
+            // Hourly grid import for cheap/peak spend split (Intelligent Go window).
+            let hourStats: HaStatisticsBag = {};
+            if (map.gridW) {
+              try {
+                hourStats = (await socket.statisticsDuringPeriod(
+                  [map.gridW],
+                  startDays.toISOString(),
+                  end.toISOString(),
+                  "hour",
+                )) as HaStatisticsBag;
+              } catch {
+                hourStats = {};
+              }
+            }
+
+            const live = get().live;
+            const rates = {
+              lowGbpPerKwh: live.cheapRateGbp,
+              highGbpPerKwh: live.peakRateGbp,
+            };
+            const opts = { hourStats, rates };
+            days = daysFromStatistics(stats, map, HISTORY_DAY_COUNT, end, opts);
+            week = days.length ? days.slice(-7) : daysFromStatistics(stats, map, 7, end, opts);
+            month = days.length
+              ? days.slice(-28)
+              : daysFromStatistics(stats, map, 28, end, opts);
           } catch {
+            days = [];
             week = [];
             month = [];
           }
 
-          const empty = hours.length === 0 && week.length === 0;
+          try {
+            const yearStats = (await socket.statisticsDuringPeriod(
+              ids,
+              startYear.toISOString(),
+              end.toISOString(),
+              "month",
+            )) as HaStatisticsBag;
+            year = monthsFromStatistics(yearStats, map, HISTORY_YEAR_COUNT, end);
+          } catch {
+            year = [];
+          }
+
+          const empty =
+            hours.length === 0 && days.length === 0 && week.length === 0 && year.length === 0;
           set({
             historyHours: hours,
+            historyDays: days,
             historyWeek: week,
             historyMonth: month,
+            historyYear: year,
             historyStatus: empty ? "empty" : "ready",
           });
         } finally {
@@ -244,17 +326,17 @@ export const useHouse = create<Store>((set, get) => {
     disconnect() {
       socket.onStatus = null;
       socket.onStates = null;
+      socket.interest = null;
       socket.close();
       writeCreds(null);
       set({
         status: "demo",
         live: { ...SNAPSHOT },
+        areaSwitches: demoAreaSwitches({}),
         error: undefined,
         writeError: undefined,
         chargeLimitMeta: DEMO_CHARGE_META,
-        historyHours: [],
-        historyWeek: [],
-        historyMonth: [],
+        ...emptyHistory(),
         historyStatus: "idle",
       });
     },
@@ -313,8 +395,67 @@ export const useHouse = create<Store>((set, get) => {
         return false;
       }
     },
+
+    toggleEntity(entityId) {
+      const { areaSwitches, status, map } = get();
+      const hit = areaSwitches.find((s) => s.entityId === entityId);
+      if (!hit || !hit.available) return;
+
+      const nextOn = !hit.on;
+      const nextArea = areaSwitches.map((s) =>
+        s.entityId === entityId ? { ...s, on: nextOn } : s,
+      );
+
+      // Keep curated SwitchId map in sync when this entity is one of them.
+      const nextSwitches = { ...get().switches };
+      for (const [key, mapped] of Object.entries(map)) {
+        if (mapped === entityId && SWITCH_IDS.has(key)) {
+          nextSwitches[key] = nextOn;
+          break;
+        }
+      }
+      if (entityId.startsWith("demo.")) {
+        nextSwitches[entityId.slice("demo.".length)] = nextOn;
+      }
+
+      set({ areaSwitches: nextArea, switches: nextSwitches });
+
+      if (entityId.startsWith("demo.")) return;
+      if (status === "live" && readCreds()) {
+        void socket.call(entityId, nextOn);
+      }
+    },
   };
 });
+
+const SWITCH_IDS = new Set<string>([
+  "lamp",
+  "kitchen",
+  "pergola",
+  "pond-1",
+  "pond-2",
+  "telly",
+  "fish",
+  "stevie-blanket",
+  "baby-blanket",
+]);
+
+async function refreshRegistries() {
+  try {
+    const [areas, entities] = await Promise.all([
+      socket.listAreas(),
+      socket.listEntityRegistry(),
+    ]);
+    areasCache = areas;
+    entityRegCache = entities;
+  } catch {
+    // Keep empty caches — switches still list under Spares from states alone.
+  }
+  if (useHouse.getState().status !== "live") return;
+  useHouse.setState({
+    areaSwitches: rebuildAreaSwitches(lastStates),
+  });
+}
 
 export function useLive() {
   return useHouse((s) => s.live);

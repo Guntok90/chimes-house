@@ -19,8 +19,9 @@ export function BatteryView() {
   const chartsReady = !liveMode || (historyStatus === "ready" && hoursSrc.length > 0);
   const today = week[week.length - 1];
   const discharging = live.batteryW < 0;
-  const hours = hoursSrc.map((h) => ({
-    hour: h.hour,
+  const lastDay = hoursSrc.slice(-24);
+  const hours = lastDay.map((h) => ({
+    hour: h.hour.includes(" ") ? h.hour.split(" ").pop()! : h.hour,
     SOC: h.soc,
     Power: h.battW,
   }));
@@ -135,11 +136,15 @@ export function BatteryView() {
             />
             <Row
               label="Highest SOC"
-              value={hoursSrc.length ? `${Math.max(...hoursSrc.map((h) => h.soc))}%` : "—"}
+              value={
+                lastDay.length ? `${Math.max(...lastDay.map((h) => h.soc))}%` : "—"
+              }
             />
             <Row
               label="Lowest SOC"
-              value={hoursSrc.length ? `${Math.min(...hoursSrc.map((h) => h.soc))}%` : "—"}
+              value={
+                lastDay.length ? `${Math.min(...lastDay.map((h) => h.soc))}%` : "—"
+              }
             />
             <Row label="Now" value={`${live.soc}%`} />
           </Surface>

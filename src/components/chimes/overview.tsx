@@ -1,27 +1,95 @@
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { Minimize2 } from "lucide-react";
-import { HOURS } from "@/lib/house";
+import {
+  HOURS,
+  SCROLL_DAYS,
+  WEEK_HOURS,
+  YEAR,
+  type DayPoint,
+  type HourPoint,
+} from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
-import { DayAllChart } from "./charts";
+import {
+  ChartScroll,
+  DayAllChart,
+  EnergyMetersChart,
+  METER_COLORS,
+} from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
 
 type Box = { x: number; y: number; w: number; h: number };
+type ChartRange = "day" | "week" | "month" | "year";
 
 /** Match Tailwind `md` — freeform tiles above; stacked scroll below. */
 const STACK_MQ = "(max-width: 767px)";
 
 const MIN_W = 300;
 const MIN_H = 220;
+const GLASS_OPACITY_KEY = "chimes.overview.glassOpacity";
+const GLASS_OPACITY_MIN = 25;
+const GLASS_OPACITY_MAX = 100;
+const GLASS_OPACITY_DEFAULT = 50;
 let zTop = 20;
+
+const RANGE_OPTS: { id: ChartRange; label: string }[] = [
+  { id: "day", label: "Day" },
+  { id: "week", label: "Week" },
+  { id: "month", label: "Month" },
+  { id: "year", label: "Year" },
+];
+
+/** Teal-deep #1c3940 — glass fill only; content stays fully opaque. */
+function glassFill(pct: number): string {
+  return `rgb(28 57 64 / ${pct / 100})`;
+}
+
+function readGlassOpacity(): number {
+  try {
+    const raw = localStorage.getItem(GLASS_OPACITY_KEY);
+    if (!raw) return GLASS_OPACITY_DEFAULT;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return GLASS_OPACITY_DEFAULT;
+    return Math.min(GLASS_OPACITY_MAX, Math.max(GLASS_OPACITY_MIN, Math.round(n)));
+  } catch {
+    return GLASS_OPACITY_DEFAULT;
+  }
+}
+
+function writeGlassOpacity(pct: number) {
+  try {
+    localStorage.setItem(GLASS_OPACITY_KEY, String(pct));
+  } catch {
+    /* private mode */
+  }
+}
+
+function useGlassOpacity() {
+  const [opacity, setOpacity] = useState(GLASS_OPACITY_DEFAULT);
+
+  useEffect(() => {
+    setOpacity(readGlassOpacity());
+  }, []);
+
+  function setAndPersist(next: number) {
+    const clamped = Math.min(GLASS_OPACITY_MAX, Math.max(GLASS_OPACITY_MIN, Math.round(next)));
+    setOpacity(clamped);
+    writeGlassOpacity(clamped);
+  }
+
+  return [opacity, setAndPersist] as const;
+}
+
 
 function useStackedOverview() {
   const [stacked, setStacked] = useState(() =>
@@ -42,6 +110,8 @@ function useStackedOverview() {
 export function Overview({ onClose }: { onClose: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
+  const [range, setRange] = useState<ChartRange>("day");
+  const [glassOpacity, setGlassOpacity] = useGlassOpacity();
   const live = useLive();
   const stacked = useStackedOverview();
 
@@ -73,6 +143,17 @@ export function Overview({ onClose }: { onClose: () => void }) {
 
   const flowBadge =
     live.batteryW < -30 ? "On battery" : live.solarNowW > 30 ? "Solar" : "Idle";
+  const graphTitle =
+    range === "day" ? "Day" : range === "week" ? "Week" : range === "month" ? "Month" : "Year";
+  const graphBadge =
+    range === "day"
+      ? `${live.solarTodayKwh} kWh solar`
+      : range === "week"
+        ? "Scroll for history"
+        : range === "month"
+          ? "28 days"
+          : "12 months";
+  const tileStyle = { backgroundColor: glassFill(glassOpacity) } satisfies CSSProperties;
 
   return (
     <div
@@ -93,7 +174,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
       />
       <div className="overview-wash pointer-events-none absolute inset-0" />
 
-      <header className="relative z-20 flex shrink-0 items-center justify-between gap-2 px-4 py-4 sm:gap-4 sm:p-6 md:p-10">
+      <header className="relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-3 px-4 py-4 sm:gap-4 sm:p-6 md:p-10">
         <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <img src="/brand/mark.png" alt="" className="size-9 shrink-0 object-contain sm:size-10" />
           <div className="min-w-0">
@@ -104,25 +185,28 @@ export function Overview({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <OverviewClock compact={stacked} />
-        <button
-          type="button"
-          aria-label="Close overview"
-          onPointerDown={(event) => {
-            if (event.button === 0) onClose();
-          }}
-          onClick={onClose}
-          className="grid size-11 shrink-0 place-items-center rounded-md border border-sidebar-fg/25 bg-teal-deep/40 text-sidebar-fg backdrop-blur-sm"
-        >
-          <Minimize2 className="size-5" strokeWidth={1.7} />
-        </button>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <GlassOpacitySlider value={glassOpacity} onChange={setGlassOpacity} compact={stacked} />
+          <button
+            type="button"
+            aria-label="Close overview"
+            onPointerDown={(event) => {
+              if (event.button === 0) onClose();
+            }}
+            onClick={onClose}
+            className="grid size-11 shrink-0 place-items-center rounded-md border border-sidebar-fg/25 bg-teal-deep/40 text-sidebar-fg backdrop-blur-sm"
+          >
+            <Minimize2 className="size-5" strokeWidth={1.7} />
+          </button>
+        </div>
       </header>
 
       {stacked ? (
         <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 pb-5">
-          <StackedTile title="Today" badge={`${live.solarTodayKwh} kWh solar`} tall="chart">
-            <DayGraph />
+          <StackedTile title={graphTitle} badge={graphBadge} tall="chart" style={tileStyle}>
+            <OverviewGraph range={range} onRangeChange={setRange} />
           </StackedTile>
-          <StackedTile title="Energy flow" badge={flowBadge} tall="flow">
+          <StackedTile title="Energy flow" badge={flowBadge} tall="flow" style={tileStyle}>
             <FitFlow />
           </StackedTile>
         </div>
@@ -130,12 +214,13 @@ export function Overview({ onClose }: { onClose: () => void }) {
         <>
           <GlassTile
             storageKey="chimes.overview.graph"
-            title="Today"
-            badge={`${live.solarTodayKwh} kWh solar`}
+            title={graphTitle}
+            badge={graphBadge}
             handleOnly
             fallback={defaultGraph}
+            style={tileStyle}
           >
-            <DayGraph />
+            <OverviewGraph range={range} onRangeChange={setRange} />
           </GlassTile>
 
           <GlassTile
@@ -143,6 +228,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
             title="Energy flow"
             badge={flowBadge}
             fallback={defaultFlow}
+            style={tileStyle}
           >
             <FitFlow />
           </GlassTile>
@@ -152,21 +238,62 @@ export function Overview({ onClose }: { onClose: () => void }) {
   );
 }
 
+function GlassOpacitySlider({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  compact?: boolean;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex items-center gap-2 rounded-md border border-sidebar-fg/20 bg-teal-deep/40 px-2.5 py-1.5 backdrop-blur-sm",
+        compact ? "max-w-[11rem]" : "max-w-[14rem]",
+      )}
+    >
+      <span className="shrink-0 text-[0.65rem] uppercase tracking-widest text-sidebar-fg/70">
+        Glass
+      </span>
+      <input
+        type="range"
+        min={GLASS_OPACITY_MIN}
+        max={GLASS_OPACITY_MAX}
+        step={1}
+        value={value}
+        aria-label="Info box glass opacity"
+        aria-valuemin={GLASS_OPACITY_MIN}
+        aria-valuemax={GLASS_OPACITY_MAX}
+        aria-valuenow={value}
+        aria-valuetext={`${value} percent`}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="overview-glass-slider h-1.5 w-full min-w-0 cursor-pointer appearance-none rounded-full bg-sidebar-fg/25 accent-sand"
+      />
+      <span className="w-8 shrink-0 text-right text-xs tabular-nums text-sidebar-fg/85">{value}%</span>
+    </label>
+  );
+}
+
 function StackedTile({
   title,
   badge,
   children,
   tall,
+  style,
 }: {
   title: string;
   badge: string;
   children: ReactNode;
   tall: "chart" | "flow";
+  style: CSSProperties;
 }) {
   return (
     <div
+      style={style}
       className={cn(
-        "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 bg-teal-deep/50 shadow-card backdrop-blur-xl",
+        "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card backdrop-blur-xl",
         tall === "chart" ? "h-[min(42dvh,20rem)] min-h-[14rem]" : "h-[min(52dvh,24rem)] min-h-[17.5rem]",
       )}
     >
@@ -188,6 +315,7 @@ function GlassTile({
   children,
   fallback,
   handleOnly = false,
+  style,
 }: {
   storageKey: string;
   title: string;
@@ -195,6 +323,7 @@ function GlassTile({
   children: ReactNode;
   fallback: () => Box;
   handleOnly?: boolean;
+  style: CSSProperties;
 }) {
   const tile = useRef<HTMLDivElement>(null);
   const mode = useRef<"drag" | "resize" | null>(null);
@@ -283,9 +412,9 @@ function GlassTile({
   return (
     <div
       ref={tile}
-      style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: z }}
+      style={{ ...style, left: box.x, top: box.y, width: box.w, height: box.h, zIndex: z }}
       className={cn(
-        "absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 bg-teal-deep/50 shadow-card backdrop-blur-xl",
+        "absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card backdrop-blur-xl",
         grab ? "cursor-grabbing" : handleOnly ? "" : "cursor-grab",
       )}
       onPointerDown={handleOnly ? undefined : (event) => begin(event, "drag")}
@@ -317,34 +446,122 @@ function GlassTile({
   );
 }
 
-function DayGraph() {
+function OverviewGraph({
+  range,
+  onRangeChange,
+}: {
+  range: ChartRange;
+  onRangeChange: (r: ChartRange) => void;
+}) {
   const status = useHouse((s) => s.status);
+  const map = useHouse((s) => s.map);
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyHours = useHouse((s) => s.historyHours);
+  const historyDays = useHouse((s) => s.historyDays);
+  const historyMonth = useHouse((s) => s.historyMonth);
+  const historyYear = useHouse((s) => s.historyYear);
   const liveMode = status === "live";
-  const data = liveMode ? historyHours : HOURS;
-  const ready = !liveMode || (historyStatus === "ready" && data.length > 0);
 
-  if (!ready) {
-    return (
-      <div className="flex h-full flex-col justify-center px-2">
-        <NoHistoryYet label="24h graph" />
-      </div>
-    );
-  }
+  const showCars = !liveMode || Boolean(map.zappiW);
+
+  const hours: HourPoint[] = liveMode ? historyHours : WEEK_HOURS;
+  const days: DayPoint[] = liveMode
+    ? historyDays.length
+      ? historyDays
+      : historyMonth
+    : SCROLL_DAYS;
+  const monthRows: DayPoint[] = liveMode ? historyMonth : SCROLL_DAYS.slice(-28);
+  const yearRows: DayPoint[] = liveMode ? historyYear : YEAR;
+
+  const energyData =
+    range === "week" ? days : range === "month" ? monthRows : range === "year" ? yearRows : null;
+
+  const ready = useMemo(() => {
+    if (!liveMode) return true;
+    if (historyStatus === "loading" || historyStatus === "idle") return false;
+    if (range === "day") return historyStatus === "ready" && hours.length > 0;
+    if (range === "week") return historyStatus === "ready" && days.length > 0;
+    if (range === "month") return historyStatus === "ready" && monthRows.length > 0;
+    return historyStatus === "ready" && yearRows.length > 0;
+  }, [liveMode, historyStatus, range, hours.length, days.length, monthRows.length, yearRows.length]);
+
+  const scrollWidth = useMemo(() => {
+    if (range === "day") return Math.max(hours.length * 18, 420);
+    if (range === "week") return Math.max(days.length * 48, 420);
+    if (range === "month") return Math.max(monthRows.length * 28, 420);
+    return Math.max(yearRows.length * 56, 420);
+  }, [range, hours.length, days.length, monthRows.length, yearRows.length]);
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="min-h-0 flex-1">
-        <DayAllChart data={data} />
+    <div className="flex h-full flex-col gap-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2">
+        <GlassRangeTabs value={range} onChange={onRangeChange} />
       </div>
-      <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-1 text-xs text-sidebar-fg/70">
-        <Key color="#e6d2c0" label="Solar" />
-        <Key color="#ae593c" label="House" />
-        <Key color="#7eb8c0" label="Battery" />
-        <Key color="#c4a484" label="Grid" />
-        <Key color="#f4efe8" label="SOC" dashed />
-      </div>
+      {!ready ? (
+        <div className="flex min-h-0 flex-1 flex-col justify-center px-2">
+          <NoHistoryYet label={historyStatus === "loading" ? "graph (loading)" : "graph"} />
+        </div>
+      ) : (
+        <>
+          <div className="min-h-0 flex-1">
+            {range === "day" ? (
+              <ChartScroll widthPx={scrollWidth}>
+                <DayAllChart data={hours.length ? hours : HOURS} showCars={showCars} />
+              </ChartScroll>
+            ) : energyData && energyData.length > 0 ? (
+              <ChartScroll widthPx={scrollWidth}>
+                <EnergyMetersChart data={energyData} showCars={showCars} />
+              </ChartScroll>
+            ) : (
+              <div className="flex h-full flex-col justify-center px-2">
+                <NoHistoryYet label={`${range} graph`} />
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-xs text-sidebar-fg/70">
+            <Key color={METER_COLORS.solar} label="Solar" />
+            <Key color={METER_COLORS.house} label="House" />
+            <Key color={METER_COLORS.battery} label="Battery" />
+            <Key color={METER_COLORS.grid} label="Grid" />
+            {showCars ? <Key color={METER_COLORS.cars} label="Cars" /> : null}
+            {range === "day" ? <Key color={METER_COLORS.soc} label="SOC" dashed /> : null}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function GlassRangeTabs({
+  value,
+  onChange,
+}: {
+  value: ChartRange;
+  onChange: (v: ChartRange) => void;
+}) {
+  return (
+    <div
+      className="inline-flex rounded-md border border-sidebar-fg/20 bg-teal-deep/40 p-0.5"
+      role="tablist"
+      aria-label="Chart range"
+    >
+      {RANGE_OPTS.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          role="tab"
+          aria-selected={value === opt.id}
+          onClick={() => onChange(opt.id)}
+          className={cn(
+            "min-h-7 rounded-sm px-2.5 text-[0.7rem] font-medium uppercase tracking-wider transition-colors",
+            value === opt.id
+              ? "bg-sidebar-fg/15 text-sidebar-fg"
+              : "text-sidebar-fg/55 hover:text-sidebar-fg/80",
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -370,11 +587,11 @@ function FitFlow() {
     const el = host.current;
     if (!el) return;
     const fit = () => {
-      const s = Math.min(el.clientWidth / 1000, el.clientHeight / 560);
+      const s = Math.min(el.clientWidth / 1000, el.clientHeight / 580);
       setScale(s);
       setOffset({
         x: (el.clientWidth - 1000 * s) / 2,
-        y: (el.clientHeight - 560 * s) / 2,
+        y: (el.clientHeight - 580 * s) / 2,
       });
     };
     fit();
@@ -389,7 +606,7 @@ function FitFlow() {
         className="origin-top-left"
         style={{
           width: 1000,
-          height: 560,
+          height: 580,
           transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
         }}
       >

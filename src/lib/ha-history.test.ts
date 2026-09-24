@@ -2,13 +2,19 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   dayKeyFromStart,
+  daySpendGbp,
   daysFromStatistics,
   hoursFromHistory,
   localDayKey,
+  localMonthKey,
+  monthKeyFromStart,
+  monthsFromStatistics,
   normalizeHistoryResult,
+  splitGridImportForDay,
   type HaStatisticsBag,
 } from "./ha-history.ts";
 import type { HaMap } from "./ha.ts";
+import { DEFAULT_TARIFF } from "./octopus.ts";
 
 describe("ha history helpers", () => {
   const map: HaMap = {
@@ -16,15 +22,17 @@ describe("ha history helpers", () => {
     batteryW: "sensor.batteries_charge_discharge_power",
     soc: "sensor.battery_1_state_of_capacity",
     gridW: "sensor.power_meter_active_power",
+    zappiW: "sensor.myenergi_chimes_power_charging",
   };
 
-  it("builds hourly points and derives houseW", () => {
+  it("builds hourly points and derives houseW including carW", () => {
     const now = new Date("2026-09-23T12:00:00Z");
     const bag = {
       "sensor.inverter_input_power": [{ s: "800", lu: now.getTime() / 1000 - 60 }],
       "sensor.batteries_charge_discharge_power": [{ s: "-200", lu: now.getTime() / 1000 - 60 }],
       "sensor.battery_1_state_of_capacity": [{ s: "70", lu: now.getTime() / 1000 - 60 }],
       "sensor.power_meter_active_power": [{ s: "50", lu: now.getTime() / 1000 - 60 }],
+      "sensor.myenergi_chimes_power_charging": [{ s: "1500", lu: now.getTime() / 1000 - 60 }],
     };
     const hours = hoursFromHistory(bag, map, now);
     assert.equal(hours.length, 24);
@@ -32,7 +40,19 @@ describe("ha history helpers", () => {
     assert.equal(last.solarW, 800);
     assert.equal(last.battW, -200);
     assert.equal(last.soc, 70);
-    assert.equal(last.houseW, 1050);
+    assert.equal(last.carW, 1500);
+    // house = solar + grid − battery − zappi = 800 + 50 − (−200) − 1500 = −450 → 0
+    assert.equal(last.houseW, 0);
+  });
+
+  it("builds multi-day hourly series for Overview day scroll", () => {
+    const now = new Date("2026-09-23T12:00:00Z");
+    const bag = {
+      "sensor.inverter_input_power": [{ s: "100", lu: now.getTime() / 1000 - 60 }],
+    };
+    const hours = hoursFromHistory(bag, { solarNowW: map.solarNowW }, now, 48);
+    assert.equal(hours.length, 48);
+    assert.match(hours[0].hour, / /); // weekday label when multi-day
   });
 
   it("returns empty days when statistics are all zero", () => {
@@ -60,20 +80,30 @@ describe("ha history helpers", () => {
     assert.equal(dayKeyFromStart(String(noon.getTime())), "2026-09-17");
   });
 
+  it("monthKeyFromStart accepts epoch milliseconds", () => {
+    const mid = new Date(2026, 8, 15, 12, 0, 0, 0);
+    assert.equal(monthKeyFromStart(mid.getTime()), "2026-09");
+    assert.equal(monthKeyFromStart("2026-09-01T00:00:00.000Z"), "2026-09");
+  });
+
   it("builds 7-day series from Pi-shaped stats (epoch ms start, mean set, change null)", () => {
     const now = new Date(2026, 8, 23, 15, 0, 0, 0); // local afternoon
     const solarId = "sensor.inverter_daily_yield";
     const gridId = "sensor.myenergi_chimes_power_grid";
     const houseId = "sensor.inverter_input_power";
+    const battId = "sensor.batteries_charge_discharge_power";
+    const carId = "sensor.myenergi_chimes_power_charging";
     const liveMap: HaMap = {
       solarTodayKwh: solarId,
       solarNowW: houseId,
       gridW: gridId,
       houseW: houseId,
+      batteryW: battId,
+      zappiW: carId,
     };
 
     const stats: HaStatisticsBag = {};
-    for (const id of [solarId, gridId, houseId]) {
+    for (const id of [solarId, gridId, houseId, battId, carId]) {
       stats[id] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
@@ -82,7 +112,10 @@ describe("ha history helpers", () => {
         stats[id].push({
           start: d.getTime(),
           end: d.getTime() + 24 * 60 * 60 * 1000,
-          mean: id === houseId || id === gridId ? 400 + i * 10 : null,
+          mean:
+            id === houseId || id === gridId || id === battId || id === carId
+              ? 400 + i * 10
+              : null,
           change: id === solarId ? 8.5 + i * 0.1 : null,
           state: null,
           sum: null,
@@ -93,6 +126,8 @@ describe("ha history helpers", () => {
     const week = daysFromStatistics(stats, liveMap, 7, now);
     assert.equal(week.length, 7);
     assert.ok(week.every((d) => d.solar > 0));
+    assert.ok(week.every((d) => d.cars > 0));
+    assert.ok(week.every((d) => d.battCharge > 0));
     assert.equal(week[week.length - 1].key, localDayKey(now));
 
     const month = daysFromStatistics(stats, liveMap, 28, now);
@@ -116,5 +151,84 @@ describe("ha history helpers", () => {
     const today = week[week.length - 1];
     assert.equal(today.solar, 12.3);
     assert.equal(today.gridIn, 12); // 500 W mean → 12 kWh
+    assert.equal(today.cars, 0);
+  });
+
+  it("builds monthly year series from epoch-ms month starts", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const solarId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = { solarTodayKwh: solarId, zappiW: "sensor.car" };
+    const stats: HaStatisticsBag = { [solarId]: [], "sensor.car": [] };
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1, 0, 0, 0, 0);
+      stats[solarId].push({ start: d.getTime(), change: 120 + i, mean: null, state: null });
+      stats["sensor.car"].push({ start: d.getTime(), mean: 200, change: null, state: null });
+    }
+    const year = monthsFromStatistics(stats, liveMap, 12, now);
+    assert.equal(year.length, 12);
+    assert.equal(year[year.length - 1].key, localMonthKey(now));
+    assert.ok(year.every((m) => m.solar > 0));
+    assert.ok(year.every((m) => m.cars > 0));
+  });
+
+  it("splits hourly grid import into cheap vs peak using Intelligent Go window", () => {
+    const day = new Date(2026, 8, 23, 0, 0, 0, 0);
+    const key = localDayKey(day);
+    const rows = [];
+    for (let h = 0; h < 24; h++) {
+      const start = new Date(2026, 8, 23, h, 0, 0, 0);
+      // 1 kWh import every hour
+      rows.push({ start: start.getTime(), change: 1, mean: null, state: null });
+    }
+    const split = splitGridImportForDay(rows, key);
+    assert.ok(split);
+    // Cheap: 00–04 full (5) + 05 half (0.5) + 23 half (0.5) = 6
+    assert.equal(split!.lowKwh, 6);
+    assert.equal(split!.highKwh, 18);
+  });
+
+  it("day spend uses low×cheap + high×peak from hourly grid, not flat peak×total", () => {
+    const day = new Date(2026, 8, 23, 0, 0, 0, 0);
+    const key = localDayKey(day);
+    const rows = [];
+    for (let h = 0; h < 24; h++) {
+      rows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 1,
+        mean: null,
+        state: null,
+      });
+    }
+    // 6×0.07 + 18×0.226 = 0.42 + 4.068 = 4.49
+    assert.equal(daySpendGbp(24, key, rows, DEFAULT_TARIFF), 4.49);
+    assert.notEqual(daySpendGbp(24, key, rows, DEFAULT_TARIFF), Number((24 * 0.226).toFixed(2)));
+  });
+
+  it("daysFromStatistics prefers hourly grid split for cost", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const key = localDayKey(now);
+    const gridId = "sensor.myenergi_chimes_power_grid";
+    const solarId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = { solarTodayKwh: solarId, gridW: gridId };
+    const stats: HaStatisticsBag = {
+      [solarId]: [{ start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(), change: 5, mean: null }],
+      [gridId]: [{ start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(), change: 24, mean: null }],
+    };
+    const hourRows = [];
+    for (let h = 0; h < 24; h++) {
+      hourRows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 1,
+        mean: null,
+        state: null,
+      });
+    }
+    const week = daysFromStatistics(stats, liveMap, 7, now, {
+      hourStats: { [gridId]: hourRows },
+      rates: DEFAULT_TARIFF,
+    });
+    const today = week.find((d) => d.key === key)!;
+    assert.equal(today.gridIn, 24);
+    assert.equal(today.cost, 4.49); // not 24 * 0.226 = 5.42
   });
 });

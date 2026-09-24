@@ -4,12 +4,21 @@ import { solarStatusHint } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 
+/**
+ * Default Energy Flow node positions (SVG viewBox 1000×560).
+ * Overview does not persist per-node placement — only the glass tile box
+ * (`chimes.overview.flow`). Driveway layout matches the house photo / Site
+ * scene: Range Rover on the left bay, Zappi (driveway charger) on the right.
+ */
 const P = {
   solar: { x: 500, y: 100 },
   grid: { x: 140, y: 258 },
   battery: { x: 355, y: 392 },
   home: { x: 800, y: 202 },
-  cars: { x: 800, y: 392 },
+  /** Left driveway bay — Range Rover (was off / front-garden). */
+  rangeRover: { x: 700, y: 430 },
+  /** Right driveway bay — Zappi / Cupra charger side. */
+  zappi: { x: 900, y: 430 },
 } as const;
 
 type Tone = "paper" | "glass";
@@ -17,6 +26,7 @@ type Tone = "paper" | "glass";
 export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare?: boolean }) {
   const live = useLive();
   const status = useHouse((s) => s.status);
+  const map = useHouse((s) => s.map);
   const solarHint = solarStatusHint(status, live);
   const solar = live.solarNowW;
   const home = live.houseW;
@@ -26,29 +36,51 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
   const solarOn = solar > 30;
   const gridIn = live.gridW > 30;
   const gridOut = live.gridW < -30;
-  const carOn = live.zappiW > 30;
+  const zappiOn = live.zappiW > 30;
+  const roverOn = live.rangeRoverW > 30;
+  const roverMapped = Boolean(map.rangeRoverW || map.rangeRoverSoc || map.rangeRoverPlugged);
   const glass = tone === "glass";
-  const idle = glass ? "flow-idle stroke-sidebar-fg/35" : "flow-idle stroke-line";
+  const idle = glass ? "flow-idle stroke-sidebar-fg/45" : "flow-idle stroke-teal-soft/55";
   const badge = battOut ? "On battery" : solarOn && home > 0 ? "Solar" : "Idle";
+
+  const roverValue = map.rangeRoverW
+    ? `${live.rangeRoverW} W`
+    : map.rangeRoverSoc
+      ? `${live.rangeRoverSoc}%`
+      : "—";
+  const roverHint = !roverMapped
+    ? status === "live"
+      ? "no sensor"
+      : "driveway"
+    : roverOn
+      ? "charging"
+      : live.rangeRoverPlugged
+        ? "plugged"
+        : map.rangeRoverSoc
+          ? "parked"
+          : "driveway";
 
   return (
     <div
       className={cn(
         "relative",
-        bare ? "h-full w-full" : "overflow-hidden rounded-lg border border-line bg-paper-raised",
+        bare
+          ? "h-full w-full"
+          : "overflow-hidden rounded-lg border border-teal/25 bg-gradient-to-br from-sand/55 via-paper-raised to-teal/[0.1] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.55)]",
       )}
     >
       {bare ? null : (
         <div className="flex items-start justify-between gap-3 px-5 pt-5">
           <div>
-            <div className="text-xs font-medium uppercase tracking-widest text-ink-soft">
+            <div className="text-xs font-medium uppercase tracking-widest text-teal">
               Energy flow
             </div>
             <div className="mt-1 text-sm tabular-nums text-ink">
-              {solar} W solar · {home} W home · {live.zappiW} W car
+              {solar} W solar · {home} W home · {live.zappiW} W Zappi
+              {map.rangeRoverW ? ` · ${live.rangeRoverW} W Rover` : ""}
             </div>
           </div>
-          <div className="rounded-full border border-line bg-white/70 px-2.5 py-1 text-xs font-medium text-ink">
+          <div className="rounded-full border border-teal/25 bg-teal/10 px-2.5 py-1 text-xs font-medium text-teal">
             {badge}
           </div>
         </div>
@@ -56,25 +88,102 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
 
       <div className={cn("relative", bare ? "h-full" : "h-[28rem] md:h-[34rem]")}>
         <svg viewBox="0 0 1000 560" className="absolute inset-0 h-full w-full" aria-hidden>
-          <path
+          <defs>
+            <marker
+              id="flow-arrow-sand"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-sand" />
+            </marker>
+            <marker
+              id="flow-arrow-teal"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-teal-soft" />
+            </marker>
+            <marker
+              id="flow-arrow-terra"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-terra" />
+            </marker>
+            <marker
+              id="flow-arrow-umber"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-umber" />
+            </marker>
+          </defs>
+
+          <FlowPath
             d={q(P.solar, P.home, 700, 60)}
-            className={cn("flow-line", solarOn ? "flow-active stroke-sand" : idle)}
+            active={solarOn}
+            idle={idle}
+            stroke="stroke-sand"
+            fill="fill-sand"
+            marker="url(#flow-arrow-sand)"
           />
-          <path
+          <FlowPath
             d={q(P.grid, P.home, 430, 150)}
-            className={cn("flow-line", gridIn || gridOut ? "flow-active stroke-teal-soft" : idle)}
+            active={gridIn || gridOut}
+            reverse={gridOut}
+            idle={idle}
+            stroke="stroke-teal-soft"
+            fill="fill-teal-soft"
+            marker={gridOut ? undefined : "url(#flow-arrow-teal)"}
+            markerStart={gridOut ? "url(#flow-arrow-teal)" : undefined}
           />
-          <path
-            d={q(P.home, P.cars, 910, 300)}
-            className={cn("flow-line", carOn ? "flow-active stroke-umber" : idle)}
+          <FlowPath
+            d={q(P.home, P.rangeRover, 780, 320)}
+            active={roverOn}
+            idle={idle}
+            stroke="stroke-umber"
+            fill="fill-umber"
+            marker="url(#flow-arrow-umber)"
           />
-          <path
+          <FlowPath
+            d={q(P.home, P.zappi, 920, 300)}
+            active={zappiOn}
+            idle={idle}
+            stroke="stroke-umber"
+            fill="fill-umber"
+            marker="url(#flow-arrow-umber)"
+          />
+          <FlowPath
             d={q(P.solar, P.battery, 340, 220)}
-            className={cn("flow-line", solarOn && battIn ? "flow-active stroke-sand" : idle)}
+            active={solarOn && battIn}
+            idle={idle}
+            stroke="stroke-sand"
+            fill="fill-sand"
+            marker="url(#flow-arrow-sand)"
           />
-          <path
+          <FlowPath
             d={q(P.battery, P.home, 540, 250)}
-            className={cn("flow-line", battOut ? "flow-active stroke-terra" : idle)}
+            active={battOut}
+            idle={idle}
+            stroke="stroke-terra"
+            fill="fill-terra"
+            marker="url(#flow-arrow-terra)"
           />
         </svg>
 
@@ -121,7 +230,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[80%] top-[36%]"
+          at="left-[78%] top-[32%]"
           icon={Home}
           ring="border-teal"
           fill
@@ -132,16 +241,87 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[80%] top-[70%]"
+          at="left-[70%] top-[77%]"
           icon={Car}
           ring="border-umber"
+          value={roverValue}
+          label="Range Rover"
+          hint={roverHint}
+          on={roverOn || live.rangeRoverPlugged}
+        />
+        <Node
+          tone={tone}
+          at="left-[90%] top-[77%]"
+          icon={Zap}
+          ring="border-umber"
           value={`${live.zappiW} W`}
-          label="Cars"
-          hint={carOn ? "charging" : "waiting"}
-          on={carOn}
+          label="Zappi"
+          hint={zappiOn ? "charging" : live.zappiPlugged ? "plugged in" : "driveway"}
+          on={zappiOn}
         />
       </div>
     </div>
+  );
+}
+
+function FlowPath({
+  d,
+  active,
+  reverse = false,
+  idle,
+  stroke,
+  fill,
+  marker,
+  markerStart,
+}: {
+  d: string;
+  active: boolean;
+  reverse?: boolean;
+  idle: string;
+  stroke: string;
+  fill: string;
+  marker?: string;
+  markerStart?: string;
+}) {
+  return (
+    <g>
+      <path
+        d={d}
+        className={cn(
+          "flow-line",
+          active
+            ? cn("flow-active", reverse && "flow-active-rev", stroke)
+            : idle,
+        )}
+        markerEnd={active && marker ? marker : undefined}
+        markerStart={active && markerStart ? markerStart : undefined}
+      />
+      {active ? (
+        <>
+          <circle r="5" className={cn("flow-particle", fill)}>
+            <animateMotion
+              dur="0.9s"
+              repeatCount="indefinite"
+              path={d}
+              keyPoints={reverse ? "1;0" : "0;1"}
+              keyTimes="0;1"
+              calcMode="linear"
+            />
+          </circle>
+          <circle r="3.2" className={cn("flow-particle flow-particle-soft", fill)}>
+            <animateMotion
+              dur="0.9s"
+              begin="0.3s"
+              repeatCount="indefinite"
+              path={d}
+              keyPoints={reverse ? "1;0" : "0;1"}
+              keyTimes="0;1"
+              calcMode="linear"
+            />
+          </circle>
+        </>
+      ) : null}
+    </g>
   );
 }
 
