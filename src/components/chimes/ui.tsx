@@ -6,9 +6,44 @@ export function PageTitle({ children }: { children: ReactNode }) {
   return <h1 className="text-2xl font-semibold tracking-tight">{children}</h1>;
 }
 
-export function SectionLabel({ children }: { children: ReactNode }) {
+type Tint = "teal" | "terra" | "sand" | "umber";
+
+const labelTone: Record<Tint, string> = {
+  teal: "text-teal",
+  terra: "text-terra",
+  sand: "text-umber",
+  umber: "text-umber",
+};
+
+const surfaceTone: Record<Tint, string> = {
+  teal: "border-teal/25 bg-gradient-to-br from-teal/[0.07] to-white/55",
+  terra: "border-terra/25 bg-gradient-to-br from-terra/[0.08] to-white/55",
+  sand: "border-sand bg-gradient-to-br from-sand/50 to-white/55",
+  umber: "border-umber/20 bg-gradient-to-br from-umber/[0.06] to-white/55",
+};
+
+const metricTone: Record<Tint, string> = {
+  teal: "border-teal/25 bg-gradient-to-br from-teal/[0.08] to-white/60",
+  terra: "border-terra/25 bg-gradient-to-br from-terra/[0.09] to-white/60",
+  sand: "border-sand bg-gradient-to-br from-sand/45 to-white/60",
+  umber: "border-umber/20 bg-gradient-to-br from-umber/[0.07] to-white/60",
+};
+
+export function SectionLabel({
+  children,
+  tone,
+}: {
+  children: ReactNode;
+  /** Soft colour cue instead of flat grey — used on Energy and similar pages. */
+  tone?: Tint;
+}) {
   return (
-    <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-soft">
+    <h2
+      className={cn(
+        "mb-3 text-xs font-semibold uppercase tracking-widest",
+        tone ? labelTone[tone] : "text-ink-soft",
+      )}
+    >
       {children}
     </h2>
   );
@@ -17,12 +52,22 @@ export function SectionLabel({ children }: { children: ReactNode }) {
 export function Surface({
   children,
   className,
+  tone,
 }: {
   children: ReactNode;
   className?: string;
+  tone?: Tint;
 }) {
   return (
-    <div className={cn("rounded-lg border border-line bg-white/60", className)}>{children}</div>
+    <div
+      className={cn(
+        "rounded-lg border backdrop-blur-sm",
+        tone ? surfaceTone[tone] : "border-line bg-white/60",
+        className,
+      )}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -31,23 +76,30 @@ export function Metric({
   value,
   hint,
   accent = false,
+  tone,
 }: {
   label: string;
   value: string;
   hint?: string;
   accent?: boolean;
+  /** Soft border/wash when not the solid teal accent card. */
+  tone?: Tint;
 }) {
   return (
     <div
       className={cn(
-        "rounded-md px-4 py-4",
-        accent ? "bg-teal text-paper" : "border border-line bg-white/60",
+        "rounded-md px-4 py-4 backdrop-blur-sm",
+        accent
+          ? "bg-teal text-paper"
+          : tone
+            ? cn("border", metricTone[tone])
+            : "border border-line bg-white/60",
       )}
     >
       <div
         className={cn(
           "text-xs uppercase tracking-widest",
-          accent ? "text-paper/70" : "text-ink-soft",
+          accent ? "text-paper/70" : tone ? labelTone[tone] : "text-ink-soft",
         )}
       >
         {label}

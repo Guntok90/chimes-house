@@ -1,8 +1,8 @@
-import { Car, PlugZap, Zap } from "lucide-react";
+import { PlugZap, Zap } from "lucide-react";
 import { WEEK } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
-import { cn } from "@/lib/utils";
+import { VehiclesSection } from "./vehicles";
 
 export function ChargeView() {
   const live = useLive();
@@ -76,24 +76,7 @@ export function ChargeView() {
         </section>
       </div>
 
-      <section>
-        <SectionLabel>Vehicles</SectionLabel>
-        <div className="grid gap-2.5 md:grid-cols-2">
-          <VehicleCard
-            icon={Zap}
-            name="Zappi"
-            place="Driveway"
-            status={live.zappiPlugged ? "Plugged in" : "Unplugged"}
-            live
-          />
-          <VehicleCard
-            icon={Car}
-            name="Range Rover"
-            place="Front garden"
-            status="Plug off"
-          />
-        </div>
-      </section>
+      <VehiclesSection />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section>
@@ -134,37 +117,5 @@ function Step({ n, title, body }: { n: string; title: string; body: string }) {
         {body}
       </span>
     </li>
-  );
-}
-
-function VehicleCard({
-  icon: Icon,
-  name,
-  place,
-  status,
-  live = false,
-}: {
-  icon: typeof Car;
-  name: string;
-  place: string;
-  status: string;
-  live?: boolean;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-md border border-line bg-white/60 px-4 py-4">
-      <span
-        className={cn(
-          "grid size-11 place-items-center rounded-md",
-          live ? "bg-terra/15 text-terra" : "bg-teal/10 text-teal",
-        )}
-      >
-        <Icon className="size-5" strokeWidth={1.7} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="font-medium">{name}</div>
-        <div className="text-sm text-ink-soft">{place}</div>
-      </div>
-      <div className="text-sm font-medium">{status}</div>
-    </div>
   );
 }

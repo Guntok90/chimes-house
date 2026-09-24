@@ -100,7 +100,7 @@ export function mountEnergyScene(host: HTMLElement): () => void {
   scene.add(makeBattery());
   scene.add(makeGrid());
   scene.add(makeCar(new THREE.Vector3(-1.85, 0, 3.35), C.umber, true, "Range Rover"));
-  scene.add(makeCar(new THREE.Vector3(1.85, 0, 3.4), C.teal, false, "Driveway"));
+  scene.add(makeCar(new THREE.Vector3(1.85, 0, 3.4), C.teal, false, "Zappi"));
   scene.add(makeTree(-4.35, 2.55));
   scene.add(makeTree(5.35, -3.15));
   scene.add(makeTree(-3.15, -3.85));

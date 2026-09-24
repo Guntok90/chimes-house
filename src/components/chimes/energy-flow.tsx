@@ -9,7 +9,8 @@ const P = {
   grid: { x: 140, y: 258 },
   battery: { x: 355, y: 392 },
   home: { x: 800, y: 202 },
-  cars: { x: 800, y: 392 },
+  zappi: { x: 700, y: 410 },
+  rover: { x: 900, y: 410 },
 } as const;
 
 type Tone = "paper" | "glass";
@@ -26,36 +27,38 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
   const solarOn = solar > 30;
   const gridIn = live.gridW > 30;
   const gridOut = live.gridW < -30;
-  const carOn = live.zappiW > 30;
+  const zappiOn = live.zappiW > 30;
   const glass = tone === "glass";
-  const idle = glass ? "flow-idle stroke-sidebar-fg/35" : "flow-idle stroke-line";
+  const idle = glass ? "flow-idle stroke-sidebar-fg/40" : "flow-idle stroke-teal-soft/45";
   const badge = battOut ? "On battery" : solarOn && home > 0 ? "Solar" : "Idle";
 
   return (
     <div
       className={cn(
         "relative",
-        bare ? "h-full w-full" : "overflow-hidden rounded-lg border border-line bg-paper-raised",
+        bare
+          ? "h-full w-full"
+          : "overflow-hidden rounded-lg border border-teal/20 bg-gradient-to-br from-sand/35 via-paper-raised to-teal/[0.06] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.55)]",
       )}
     >
       {bare ? null : (
         <div className="flex items-start justify-between gap-3 px-5 pt-5">
           <div>
-            <div className="text-xs font-medium uppercase tracking-widest text-ink-soft">
+            <div className="text-xs font-medium uppercase tracking-widest text-teal">
               Energy flow
             </div>
             <div className="mt-1 text-sm tabular-nums text-ink">
-              {solar} W solar · {home} W home · {live.zappiW} W car
+              {solar} W solar · {home} W home · {live.zappiW} W Zappi
             </div>
           </div>
-          <div className="rounded-full border border-line bg-white/70 px-2.5 py-1 text-xs font-medium text-ink">
+          <div className="rounded-full border border-teal/25 bg-teal/10 px-2.5 py-1 text-xs font-medium text-teal">
             {badge}
           </div>
         </div>
       )}
 
-      <div className={cn("relative", bare ? "h-full" : "h-[28rem] md:h-[34rem]")}>
-        <svg viewBox="0 0 1000 560" className="absolute inset-0 h-full w-full" aria-hidden>
+      <div className={cn("relative", bare ? "h-full" : "h-[30rem] md:h-[36rem]")}>
+        <svg viewBox="0 0 1000 580" className="absolute inset-0 h-full w-full" aria-hidden>
           <path
             d={q(P.solar, P.home, 700, 60)}
             className={cn("flow-line", solarOn ? "flow-active stroke-sand" : idle)}
@@ -65,8 +68,12 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             className={cn("flow-line", gridIn || gridOut ? "flow-active stroke-teal-soft" : idle)}
           />
           <path
-            d={q(P.home, P.cars, 910, 300)}
-            className={cn("flow-line", carOn ? "flow-active stroke-umber" : idle)}
+            d={q(P.home, P.zappi, 720, 300)}
+            className={cn("flow-line", zappiOn ? "flow-active stroke-terra" : idle)}
+          />
+          <path
+            d={q(P.home, P.rover, 920, 300)}
+            className={cn("flow-line", idle)}
           />
           <path
             d={q(P.solar, P.battery, 340, 220)}
@@ -132,13 +139,23 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[80%] top-[70%]"
+          at="left-[70%] top-[73%]"
+          icon={Zap}
+          ring="border-terra"
+          value={`${live.zappiW} W`}
+          label="Zappi"
+          hint={zappiOn ? "charging" : live.zappiPlugged ? "plugged in" : "driveway"}
+          on={zappiOn || live.zappiPlugged}
+        />
+        <Node
+          tone={tone}
+          at="left-[90%] top-[73%]"
           icon={Car}
           ring="border-umber"
-          value={`${live.zappiW} W`}
-          label="Cars"
-          hint={carOn ? "charging" : "waiting"}
-          on={carOn}
+          value="—"
+          label="Range Rover"
+          hint="front garden"
+          on={false}
         />
       </div>
     </div>
@@ -182,7 +199,7 @@ function Node({
               ? "bg-teal text-paper"
               : glass
                 ? "bg-teal-deep/55 text-sidebar-fg backdrop-blur-md"
-                : "bg-paper-raised text-ink",
+                : "bg-paper-raised/90 text-ink backdrop-blur-sm",
             on && !fill ? "shadow-[0_0_0_6px_rgb(174_89_60_/_0.18)]" : "",
           )}
         >
