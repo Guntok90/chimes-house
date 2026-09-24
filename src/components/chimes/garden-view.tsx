@@ -1,13 +1,17 @@
 import { Bot, Car, Sun, TreeDeciduous, Waves } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useMemo } from "react";
-import { frontGardenSwitches, isRangeRoverHybridSwitch, type AreaSwitch } from "@/lib/ha";
+import {
+  isRangeRoverHybridSwitch,
+  resolveFrontGardenTiles,
+  type AreaSwitch,
+} from "@/lib/ha";
 import { useHouse } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 import { PageTitle, Room, SectionLabel, Tile } from "./ui";
 
 /**
- * Front: Willow Tree + Range Rover Hybrid plugs (same toggle path as Home).
+ * Front: always Willow Tree + Range Rover Hybrid (curated slots + HA map).
  * Back: curated Pergola / ponds + Frank placeholder — layout left alone.
  */
 export function GardenView({
@@ -20,10 +24,14 @@ export function GardenView({
   const status = useHouse((s) => s.status);
   const map = useHouse((s) => s.map);
   const areaSwitches = useHouse((s) => s.areaSwitches);
+  const switches = useHouse((s) => s.switches);
   const toggleEntity = useHouse((s) => s.toggleEntity);
   const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
 
-  const front = useMemo(() => frontGardenSwitches(areaSwitches), [areaSwitches]);
+  const front = useMemo(
+    () => resolveFrontGardenTiles(areaSwitches, map, status, switches),
+    [areaSwitches, map, status, switches],
+  );
 
   return (
     <div className="space-y-8">

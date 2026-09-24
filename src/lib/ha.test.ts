@@ -15,6 +15,7 @@ import {
   frontGardenSwitches,
   groupSwitchesByArea,
   hideHomeSwitch,
+  resolveFrontGardenTiles,
   interestFromMap,
   liveFromStates,
   sameLive,
@@ -741,6 +742,57 @@ describe("Front garden switch filter", () => {
       },
     ]);
     assert.equal(list.length, 0);
+  });
+
+  it("maps preferred Willow + Range Rover Hybrid when those switches exist", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      state("switch.willow_tree", "on", "Willow Tree"),
+      state("switch.range_rover_hybrid", "off", "Range Rover Hybrid"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map["willow-tree"], "switch.willow_tree");
+    assert.equal(map["range-rover-hybrid"], "switch.range_rover_hybrid");
+    assert.equal(PREFERRED_SWITCHES["willow-tree"]?.[0], "switch.willow_tree");
+    assert.equal(PREFERRED_SWITCHES["range-rover-hybrid"]?.[0], "switch.range_rover_hybrid");
+  });
+
+  it("resolveFrontGardenTiles always returns Willow + Range Rover Hybrid", () => {
+    const demo = resolveFrontGardenTiles([], {}, "demo", { "willow-tree": true });
+    assert.equal(demo.length, 2);
+    assert.deepEqual(
+      demo.map((s) => s.label),
+      ["Willow Tree", "Range Rover Hybrid"],
+    );
+    assert.equal(demo[0]?.on, true);
+    assert.equal(demo[0]?.entityId, "demo.willow-tree");
+  });
+
+  it("restores Willow from curated map when area list omitted it (e.g. registry-hidden)", () => {
+    const area = [
+      {
+        entityId: "switch.range_rover_hybrid",
+        label: "Range Rover Hybrid",
+        area: "Front garden",
+        on: false,
+        available: true,
+      },
+    ];
+    const tiles = resolveFrontGardenTiles(
+      area,
+      {
+        "willow-tree": "switch.willow_tree",
+        "range-rover-hybrid": "switch.range_rover_hybrid",
+      },
+      "live",
+      { "willow-tree": true },
+    );
+    assert.equal(tiles.length, 2);
+    assert.equal(tiles[0]?.entityId, "switch.willow_tree");
+    assert.equal(tiles[0]?.label, "Willow Tree");
+    assert.equal(tiles[0]?.on, true);
+    assert.equal(tiles[0]?.available, true);
+    assert.equal(tiles[1]?.entityId, "switch.range_rover_hybrid");
   });
 });
 

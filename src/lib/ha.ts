@@ -21,7 +21,9 @@ export type SwitchId =
   | "telly"
   | "fish"
   | "stevie-blanket"
-  | "baby-blanket";
+  | "baby-blanket"
+  | "willow-tree"
+  | "range-rover-hybrid";
 
 export const SWITCHES: { id: SwitchId; label: string; match: string[] }[] = [
   { id: "lamp", label: "Lamp", match: ["lamp", "lounge lamp", "living lamp"] },
@@ -33,11 +35,23 @@ export const SWITCHES: { id: SwitchId; label: string; match: string[] }[] = [
   { id: "fish", label: "Fish", match: ["fish", "aquarium"] },
   { id: "stevie-blanket", label: "Stevie’s blanket", match: ["stevie"] },
   { id: "baby-blanket", label: "Baby’s blanket", match: ["baby"] },
+  { id: "willow-tree", label: "Willow Tree", match: ["willow"] },
+  {
+    id: "range-rover-hybrid",
+    label: "Range Rover Hybrid",
+    match: [
+      "range_rover_hybrid",
+      "range rover hybrid",
+      "rangerover hybrid",
+      "range-rover hybrid",
+    ],
+  },
 ];
 
 /**
  * Exact switch entity ids on Chimes-Pi (friendly names → smart_switch_* / garden).
  * Kitchen has no clear switch in the live inventory — leave unmapped.
+ * Front garden plugs: ids from PR #23 filter tests / HA naming (not invented brands).
  */
 export const PREFERRED_SWITCHES: Partial<Record<SwitchId, string[]>> = {
   lamp: ["switch.smart_switch_4"],
@@ -48,7 +62,18 @@ export const PREFERRED_SWITCHES: Partial<Record<SwitchId, string[]>> = {
   pergola: ["switch.pergola_switch_1"],
   "pond-1": ["switch.pond_1_switch_1"],
   "pond-2": ["switch.pond_2_switch_1"],
+  "willow-tree": ["switch.willow_tree"],
+  "range-rover-hybrid": ["switch.range_rover_hybrid"],
 };
+
+/** Curated Front garden slots — always shown (Willow + Range Rover Hybrid only). */
+export const FRONT_GARDEN_SLOTS: {
+  id: Extract<SwitchId, "willow-tree" | "range-rover-hybrid">;
+  label: string;
+}[] = [
+  { id: "willow-tree", label: "Willow Tree" },
+  { id: "range-rover-hybrid", label: "Range Rover Hybrid" },
+];
 
 const CREDS = "chimes.ha.creds";
 const MAP = "chimes.ha.map";
@@ -1239,6 +1264,8 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
     fish: "Living room",
     "stevie-blanket": "Bedrooms",
     "baby-blanket": "Bedrooms",
+    "willow-tree": "Front garden",
+    "range-rover-hybrid": "Front garden",
   };
   const curated = SWITCHES.map((sw) => ({
     entityId: `demo.${sw.id}`,
@@ -1247,22 +1274,6 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
     on: Boolean(on[sw.id]),
     available: true,
   }));
-  const frontGarden: AreaSwitch[] = [
-    {
-      entityId: "demo.willow-tree",
-      label: "Willow Tree",
-      area: "Front garden",
-      on: Boolean(on["willow-tree"]),
-      available: true,
-    },
-    {
-      entityId: "demo.range-rover-hybrid",
-      label: "Range Rover Hybrid",
-      area: "Front garden",
-      on: Boolean(on["range-rover-hybrid"]),
-      available: true,
-    },
-  ];
   const spares: AreaSwitch[] = [
     {
       entityId: "demo.spare-1",
@@ -1279,7 +1290,7 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
       available: true,
     },
   ];
-  return [...curated, ...frontGarden, ...spares];
+  return [...curated, ...spares];
 }
 
 /** Group area switches; Spares last (Home hides that heading). */
@@ -1326,6 +1337,60 @@ export function isRangeRoverHybridSwitch(sw: Pick<AreaSwitch, "label" | "entityI
 /** Front garden controllable plugs — Willow Tree + Range Rover Hybrid only. */
 export function frontGardenSwitches(switches: AreaSwitch[]): AreaSwitch[] {
   return switches.filter((sw) => isWillowSwitch(sw) || isRangeRoverHybridSwitch(sw));
+}
+
+/**
+ * Always return Willow Tree + Range Rover Hybrid tiles for Garden Front.
+ *
+ * Live `areaSwitches` can drop Willow when the entity is registry-hidden or
+ * renamed away from a fuzzy "willow" label. Prefer (1) area list hit,
+ * (2) curated HaMap slot from PREFERRED / fuzzy autoMap, (3) demo.* off-live,
+ * (4) preferred entity id shell (unavailable) so the control never disappears.
+ */
+export function resolveFrontGardenTiles(
+  areaSwitches: AreaSwitch[],
+  map: HaMap,
+  status: "demo" | "connecting" | "live" | "error",
+  switchState: Record<string, boolean> = {},
+): AreaSwitch[] {
+  return FRONT_GARDEN_SLOTS.map((slot) => {
+    const fromArea = areaSwitches.find((sw) =>
+      slot.id === "willow-tree" ? isWillowSwitch(sw) : isRangeRoverHybridSwitch(sw),
+    );
+    if (fromArea) {
+      return { ...fromArea, label: slot.label, area: "Front garden" };
+    }
+
+    const mapped = map[slot.id];
+    if (mapped) {
+      return {
+        entityId: mapped,
+        label: slot.label,
+        area: "Front garden",
+        on: Boolean(switchState[slot.id]),
+        available: true,
+      };
+    }
+
+    if (status !== "live") {
+      return {
+        entityId: `demo.${slot.id}`,
+        label: slot.label,
+        area: "Front garden",
+        on: Boolean(switchState[slot.id]),
+        available: true,
+      };
+    }
+
+    const preferred = PREFERRED_SWITCHES[slot.id]?.[0];
+    return {
+      entityId: preferred ?? `demo.${slot.id}`,
+      label: slot.label,
+      area: "Front garden",
+      on: false,
+      available: false,
+    };
+  });
 }
 
 type Msg = { id?: number; type: string; [k: string]: unknown };
