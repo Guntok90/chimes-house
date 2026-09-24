@@ -1,12 +1,14 @@
-import { Bot, Camera, Car, Sun, TreeDeciduous, Waves } from "lucide-react";
+import { Bot, Car, Sun, TreeDeciduous, Waves } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { useMemo } from "react";
+import { frontGardenSwitches, isRangeRoverHybridSwitch, type AreaSwitch } from "@/lib/ha";
 import { useHouse } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 import { PageTitle, Room, SectionLabel, Tile } from "./ui";
 
 /**
- * Front / Back garden shell. Cameras and Frank are placeholders until HA
- * entities exist — never invent live streams here.
+ * Front: Willow Tree + Range Rover Hybrid plugs (same toggle path as Home).
+ * Back: curated Pergola / ponds + Frank placeholder — layout left alone.
  */
 export function GardenView({
   on,
@@ -17,7 +19,11 @@ export function GardenView({
 }) {
   const status = useHouse((s) => s.status);
   const map = useHouse((s) => s.map);
+  const areaSwitches = useHouse((s) => s.areaSwitches);
+  const toggleEntity = useHouse((s) => s.toggleEntity);
   const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
+
+  const front = useMemo(() => frontGardenSwitches(areaSwitches), [areaSwitches]);
 
   return (
     <div className="space-y-8">
@@ -26,18 +32,17 @@ export function GardenView({
       <section>
         <SectionLabel>Front garden</SectionLabel>
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
-          <PlaceCard
-            icon={TreeDeciduous}
-            label="Willow Tree"
-            detail="Camera soon"
-            hint="Front garden · feed not linked yet"
-          />
-          <PlaceCard
-            icon={Car}
-            label="Range Rover"
-            detail="Camera soon"
-            hint="Front garden · feed not linked yet"
-          />
+          {front.map((sw) => (
+            <Tile
+              key={sw.entityId}
+              id={sw.entityId}
+              label={sw.label}
+              state={sw.on}
+              onToggle={toggleEntity}
+              icon={iconForFront(sw)}
+              available={sw.available}
+            />
+          ))}
         </div>
       </section>
 
@@ -78,6 +83,11 @@ export function GardenView({
   );
 }
 
+function iconForFront(sw: AreaSwitch): LucideIcon {
+  if (isRangeRoverHybridSwitch(sw)) return Car;
+  return TreeDeciduous;
+}
+
 function PlaceCard({
   icon: Icon,
   label,
@@ -101,13 +111,6 @@ function PlaceCard({
     >
       <span className="relative grid size-9 place-items-center rounded-sm bg-paper-deep text-ink-soft">
         <Icon className="size-4" strokeWidth={1.7} />
-        {!disabled ? (
-          <Camera
-            className="absolute -bottom-0.5 -right-0.5 size-3 text-ink-soft"
-            strokeWidth={2}
-            aria-hidden
-          />
-        ) : null}
       </span>
       <span className="min-w-0">
         <span className="block font-medium">{label}</span>

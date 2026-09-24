@@ -12,6 +12,7 @@ import {
   chargeLimitMeta,
   credsForBoot,
   demoAreaSwitches,
+  frontGardenSwitches,
   groupSwitchesByArea,
   interestFromMap,
   liveFromStates,
@@ -558,6 +559,73 @@ describe("area-grouped switches (Home)", () => {
     const demo = demoAreaSwitches({ lamp: true });
     assert.ok(demo.some((s) => s.area === SPARES_AREA));
     assert.equal(demo.find((s) => s.entityId === "demo.lamp")?.on, true);
+  });
+
+  it("demo list includes Front garden Willow + Range Rover Hybrid", () => {
+    const demo = demoAreaSwitches({ "willow-tree": true });
+    const front = frontGardenSwitches(demo);
+    assert.equal(front.length, 2);
+    assert.ok(front.some((s) => s.label === "Willow Tree" && s.on));
+    assert.ok(front.some((s) => s.label === "Range Rover Hybrid"));
+  });
+});
+
+describe("Front garden switch filter", () => {
+  it("keeps only Willow Tree and Range Rover Hybrid plugs", () => {
+    const list = frontGardenSwitches([
+      {
+        entityId: "switch.willow_tree",
+        label: "Willow Tree",
+        area: "Spares",
+        on: true,
+        available: true,
+      },
+      {
+        entityId: "switch.range_rover_hybrid",
+        label: "Range Rover Hybrid",
+        area: "Front garden",
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.pergola_switch_1",
+        label: "Pergola",
+        area: "Garden",
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.smart_switch_4",
+        label: "Lamp",
+        area: "Living room",
+        on: true,
+        available: true,
+      },
+    ]);
+    assert.deepEqual(
+      list.map((s) => s.entityId),
+      ["switch.willow_tree", "switch.range_rover_hybrid"],
+    );
+  });
+
+  it("does not match Range Rover without hybrid (or hybrid alone)", () => {
+    const list = frontGardenSwitches([
+      {
+        entityId: "switch.range_rover_plug",
+        label: "Range Rover",
+        area: "Spares",
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.garage_hybrid",
+        label: "Garage Hybrid",
+        area: "Spares",
+        on: false,
+        available: true,
+      },
+    ]);
+    assert.equal(list.length, 0);
   });
 });
 

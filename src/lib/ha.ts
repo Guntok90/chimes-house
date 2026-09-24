@@ -1102,6 +1102,22 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
     on: Boolean(on[sw.id]),
     available: true,
   }));
+  const frontGarden: AreaSwitch[] = [
+    {
+      entityId: "demo.willow-tree",
+      label: "Willow Tree",
+      area: "Front garden",
+      on: Boolean(on["willow-tree"]),
+      available: true,
+    },
+    {
+      entityId: "demo.range-rover-hybrid",
+      label: "Range Rover Hybrid",
+      area: "Front garden",
+      on: Boolean(on["range-rover-hybrid"]),
+      available: true,
+    },
+  ];
   const spares: AreaSwitch[] = [
     {
       entityId: "demo.spare-1",
@@ -1118,7 +1134,7 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
       available: true,
     },
   ];
-  return [...curated, ...spares];
+  return [...curated, ...frontGarden, ...spares];
 }
 
 /** Group area switches preserving Spares last among equal sort. */
@@ -1138,6 +1154,33 @@ export function groupSwitchesByArea(switches: AreaSwitch[]): { area: string; ite
     return a.localeCompare(b, undefined, { sensitivity: "base" });
   });
   return order.map((area) => ({ area, items: bags.get(area)! }));
+}
+
+/** True when label/entity_id is the Willow Tree front-garden plug. */
+export function isWillowSwitch(sw: Pick<AreaSwitch, "label" | "entityId">): boolean {
+  const b = `${sw.label} ${sw.entityId}`.toLowerCase();
+  return b.includes("willow");
+}
+
+/**
+ * True when label/entity_id is the Range Rover Hybrid front-garden plug.
+ * Requires both a Range Rover token and "hybrid" so driveway EV sensors
+ * (power/SOC) never match if they ever appear as switch/light.
+ */
+export function isRangeRoverHybridSwitch(sw: Pick<AreaSwitch, "label" | "entityId">): boolean {
+  const b = `${sw.label} ${sw.entityId}`.toLowerCase();
+  if (!b.includes("hybrid")) return false;
+  return (
+    b.includes("range_rover") ||
+    b.includes("range rover") ||
+    b.includes("rangerover") ||
+    b.includes("range-rover")
+  );
+}
+
+/** Front garden controllable plugs — Willow Tree + Range Rover Hybrid only. */
+export function frontGardenSwitches(switches: AreaSwitch[]): AreaSwitch[] {
+  return switches.filter((sw) => isWillowSwitch(sw) || isRangeRoverHybridSwitch(sw));
 }
 
 type Msg = { id?: number; type: string; [k: string]: unknown };
