@@ -47,6 +47,7 @@ const CHIMES_PI: HaState[] = [
   state("sensor.myenergi_zappi_25435526_plug_status", "Not Connected"),
   state("sensor.myenergi_zappi_25435526_power_ct_internal", "0", "", "W"),
   state("sensor.myenergi_zappi_25435526_power_generation", "900", "Generation", "W"),
+  state("sensor.myenergi_zappi_25435526_energy_used_today", "6.35", "Energy used today", "kWh"),
   state("binary_sensor.octopus_off_peak", "on"),
   state("binary_sensor.octopus_intelligent_ready", "off"),
   state("person.stevie_w", "home"),
@@ -75,6 +76,8 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.zappiPlugged, "sensor.myenergi_zappi_25435526_plug_status");
     assert.equal(map.zappiW, "sensor.myenergi_chimes_power_charging");
     assert.notEqual(map.zappiW, "sensor.myenergi_zappi_25435526_power_generation");
+    assert.equal(map.zappiTodayKwh, "sensor.myenergi_zappi_25435526_energy_used_today");
+    assert.equal(map.rangeRoverTodayKwh, undefined);
     assert.equal(map.stevieHome, "person.stevie_w");
     assert.equal(map.offPeak, "binary_sensor.octopus_off_peak");
     assert.equal(map.intelligent, "binary_sensor.octopus_intelligent_ready");
@@ -98,6 +101,8 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.zappiMode, "Eco+");
     assert.equal(live.zappiPlugged, false);
     assert.equal(live.zappiW, 0);
+    assert.equal(live.zappiTodayKwh, 6.35);
+    assert.equal(live.rangeRoverTodayKwh, null);
     assert.equal(live.stevieHome, true);
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
@@ -240,6 +245,37 @@ describe("ha autoMap preferences", () => {
     const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
     assert.equal(live.batteryW, -250);
     assert.equal(live.soc, 55);
+  });
+
+  it("maps Zappi energy used today and leaves Range Rover null when missing", () => {
+    const states = [
+      state("sensor.myenergi_zappi_25435526_energy_used_today", "3.2", "", "kWh"),
+      state("select.myenergi_zappi_25435526_charge_mode", "Eco+"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.zappiTodayKwh, "sensor.myenergi_zappi_25435526_energy_used_today");
+    assert.equal(map.rangeRoverTodayKwh, undefined);
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.zappiTodayKwh, 3.2);
+    assert.equal(live.rangeRoverTodayKwh, null);
+  });
+
+  it("maps Range Rover daily kWh when a today energy entity exists", () => {
+    const states = [
+      state("sensor.range_rover_energy_charged_today", "9.5", "Range Rover charged today", "kWh"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_energy_charged_today");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverTodayKwh, 9.5);
+  });
+
+  it("converts Wh Zappi today sensors to kWh", () => {
+    const states = [
+      state("sensor.myenergi_zappi_25435526_energy_used_today", "2500", "", "Wh"),
+    ];
+    const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
+    assert.equal(live.zappiTodayKwh, 2.5);
   });
 });
 

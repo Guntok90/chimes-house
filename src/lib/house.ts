@@ -11,6 +11,13 @@ export type HouseLive = {
   zappiPlugged: boolean;
   /** Zappi charge power (W) when a myenergi power entity is present. */
   zappiW: number;
+  /** Energy charged via Zappi today (kWh). `null` when no today sensor is mapped. */
+  zappiTodayKwh: number | null;
+  /**
+   * Energy charged into the Range Rover today (kWh).
+   * `null` when no daily kWh entity is present — UI shows "—".
+   */
+  rangeRoverTodayKwh: number | null;
   intelligent: boolean;
   offPeak: boolean;
   gridCharge: boolean;
@@ -35,6 +42,8 @@ export const EMPTY_LIVE: HouseLive = {
   zappiMode: "—",
   zappiPlugged: false,
   zappiW: 0,
+  zappiTodayKwh: null,
+  rangeRoverTodayKwh: null,
   intelligent: false,
   offPeak: false,
   gridCharge: false,
@@ -54,6 +63,8 @@ export const SNAPSHOT: HouseLive = {
   zappiMode: "Eco+",
   zappiPlugged: false,
   zappiW: 0,
+  zappiTodayKwh: 8.4,
+  rangeRoverTodayKwh: 12.1,
   intelligent: true,
   offPeak: true,
   gridCharge: false,
