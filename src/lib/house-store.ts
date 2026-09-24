@@ -223,11 +223,33 @@ export const useHouse = create<Store>((set, get) => {
               end.toISOString(),
               "day",
             )) as HaStatisticsBag;
-            days = daysFromStatistics(stats, map, HISTORY_DAY_COUNT, end);
-            week = days.length ? days.slice(-7) : daysFromStatistics(stats, map, 7, end);
+
+            // Hourly grid import for cheap/peak spend split (Intelligent Go window).
+            let hourStats: HaStatisticsBag = {};
+            if (map.gridW) {
+              try {
+                hourStats = (await socket.statisticsDuringPeriod(
+                  [map.gridW],
+                  startDays.toISOString(),
+                  end.toISOString(),
+                  "hour",
+                )) as HaStatisticsBag;
+              } catch {
+                hourStats = {};
+              }
+            }
+
+            const live = get().live;
+            const rates = {
+              lowGbpPerKwh: live.cheapRateGbp,
+              highGbpPerKwh: live.peakRateGbp,
+            };
+            const opts = { hourStats, rates };
+            days = daysFromStatistics(stats, map, HISTORY_DAY_COUNT, end, opts);
+            week = days.length ? days.slice(-7) : daysFromStatistics(stats, map, 7, end, opts);
             month = days.length
               ? days.slice(-28)
-              : daysFromStatistics(stats, map, 28, end);
+              : daysFromStatistics(stats, map, 28, end, opts);
           } catch {
             days = [];
             week = [];

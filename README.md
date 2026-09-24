@@ -46,6 +46,9 @@ Mapped when present (preferred ids first):
 | Zappi mode      | `select.myenergi_zappi_25435526_charge_mode`                                     |
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
+| Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
+| Range Rover     | Fuzzy only when entity id/name already contains `range_rover` / `range rover` (W, SOC, plug). No invented brand ids — Energy Flow shows a labeled node with `—` until mapped. |
+| Range Rover kWh | Optional daily energy entity if present; otherwise “—” on Charge                 |
 | Stevie          | `person.stevie_w`                                                                |
 | Switches        | Lamp/Telly/blankets/Fish/Pergola/Ponds → `switch.smart_switch_*` / garden ids    |
 
@@ -91,12 +94,12 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
 | Home     | Solar today, battery, house load, lights, Stevie       |
-| Energy   | Live 5-node flow + inverter / Octopus                  |
+| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + inverter / Octopus |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge                               |
 | Charge   | Zappi Eco+, Intelligent                                |
 | History  | 7 / 28 day solar, house, grid, spend                   |
-| Garden   | Pergola, ponds                                         |
+| Garden   | Front (Willow, Range Rover cams) · Back (Pergola, ponds, Frank) |
 | House    | Lights, plugs, **Pi connection**, sign out             |
 | Overview | iPad wall — house film, glass tiles (flow + 24h graph) |
 

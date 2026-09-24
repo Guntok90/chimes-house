@@ -1,6 +1,13 @@
 import { deriveHouseW } from "./energy-balance.ts";
 import type { HaMap } from "./ha.ts";
 import type { DayPoint, HourPoint } from "./house.ts";
+import {
+  DEFAULT_TARIFF,
+  cheapFractionInLocalHour,
+  gridSpendGbp,
+  splitDailyImportByWindow,
+  type TariffRates,
+} from "./octopus.ts";
 
 type HistPoint = {
   state?: string;
@@ -25,6 +32,13 @@ export type HaStatRow = {
 };
 
 export type HaStatisticsBag = Record<string, HaStatRow[]>;
+
+export type DaysFromStatisticsOpts = {
+  /** Hourly grid statistics for the same entity as map.gridW (preferred for spend). */
+  hourStats?: HaStatisticsBag;
+  /** £/kWh cheap + peak — from HA rate sensors when mapped, else Intelligent Go fallbacks. */
+  rates?: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh">;
+};
 
 function num(v: string | number | null | undefined) {
   if (typeof v === "number") return Number.isFinite(v) ? v : null;
@@ -218,7 +232,7 @@ function metersForPeriod(
   map: HaMap,
   key: string,
   valueFn: (rows: HaStatRow[] | undefined, key: string) => number,
-): Omit<DayPoint, "key" | "label"> {
+): Omit<DayPoint, "key" | "label" | "cost"> {
   const solarId = map.solarTodayKwh ?? map.solarNowW;
   const solar = valueFn(solarId ? stats[solarId] : undefined, key);
   const house = valueFn(map.houseW ? stats[map.houseW] : undefined, key);
@@ -238,7 +252,6 @@ function metersForPeriod(
     battCharge,
     battDischarge,
     cars,
-    cost: Number((gridIn * 0.226).toFixed(2)),
   };
 }
 
@@ -254,15 +267,100 @@ function hasMeterSignal(d: Omit<DayPoint, "key" | "label">): boolean {
   );
 }
 
+/** kWh for one hour row: prefer change/state/sum; else mean W → kWh. */
+function hourKwh(row: HaStatRow): number {
+  const change = num(row.change);
+  if (change != null) return change;
+  const state = num(row.state);
+  if (state != null) return state;
+  const sum = num(row.sum);
+  if (sum != null) return sum;
+  const mean = num(row.mean);
+  if (mean != null) return mean / 1000; // mean W over 1h ≈ kWh
+  return 0;
+}
+
+function startAsDate(start: string | number | null | undefined): Date | null {
+  if (start == null || start === "") return null;
+  if (typeof start === "number") {
+    if (!Number.isFinite(start)) return null;
+    return new Date(start);
+  }
+  const s = String(start).trim();
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (!Number.isFinite(n)) return null;
+    return new Date(n);
+  }
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t);
+}
+
+/**
+ * Split one calendar day's grid import into cheap-window vs peak kWh using
+ * hourly statistics + Intelligent Go window fractions.
+ * Returns null when there are no hourly rows for that day.
+ */
+export function splitGridImportForDay(
+  hourRows: HaStatRow[] | undefined,
+  dayKey: string,
+): { lowKwh: number; highKwh: number } | null {
+  if (!hourRows?.length) return null;
+  let low = 0;
+  let high = 0;
+  let hits = 0;
+  for (const row of hourRows) {
+    const start = startAsDate(row.start);
+    if (!start) continue;
+    if (localDayKey(start) !== dayKey) continue;
+    const kwh = hourKwh(row);
+    // Import only — export (negative) does not reduce spend.
+    const importKwh = Math.max(0, kwh);
+    if (importKwh === 0 && kwh === 0) {
+      // Still count the hour so an all-zero day is distinguishable from missing.
+      hits += 1;
+      continue;
+    }
+    hits += 1;
+    const cheapFrac = cheapFractionInLocalHour(start);
+    low += importKwh * cheapFrac;
+    high += importKwh * (1 - cheapFrac);
+  }
+  if (hits === 0) return null;
+  return {
+    lowKwh: Number(low.toFixed(4)),
+    highKwh: Number(high.toFixed(4)),
+  };
+}
+
+/** Daily spend from low+high grid import × tariff rates (never a flat average). */
+export function daySpendGbp(
+  gridIn: number,
+  dayKey: string,
+  hourRows: HaStatRow[] | undefined,
+  rates: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh"> = DEFAULT_TARIFF,
+): number {
+  const split = splitGridImportForDay(hourRows, dayKey);
+  if (split) return gridSpendGbp(split.lowKwh, split.highKwh, rates);
+  // Gap: no hourly import series — best available is window-hour weighting.
+  const approx = splitDailyImportByWindow(gridIn);
+  return gridSpendGbp(approx.lowKwh, approx.highKwh, rates);
+}
+
 /** Daily kWh rows from recorder statistics. Empty → []. */
 export function daysFromStatistics(
   stats: HaStatisticsBag,
   map: HaMap,
   count: number,
   now = new Date(),
+  opts: DaysFromStatisticsOpts = {},
 ): DayPoint[] {
   const solarId = map.solarTodayKwh ?? map.solarNowW;
   if (!solarId && !map.gridW && !map.houseW && !map.batteryW && !map.zappiW) return [];
+
+  const rates = opts.rates ?? DEFAULT_TARIFF;
+  const hourRows = map.gridW && opts.hourStats ? opts.hourStats[map.gridW] : undefined;
 
   const out: DayPoint[] = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -275,6 +373,7 @@ export function daysFromStatistics(
       key,
       label: dayLabel(key),
       ...meters,
+      cost: daySpendGbp(meters.gridIn, key, hourRows, rates),
     });
   }
   if (out.every((d) => !hasMeterSignal(d))) return [];
@@ -300,6 +399,8 @@ export function monthsFromStatistics(
       key,
       label: monthLabel(key),
       ...meters,
+      // No hourly series for monthly buckets — window-hour weighting.
+      cost: daySpendGbp(meters.gridIn, key, undefined, DEFAULT_TARIFF),
     });
   }
   if (out.every((d) => !hasMeterSignal(d))) return [];

@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
@@ -35,6 +36,10 @@ const STACK_MQ = "(max-width: 767px)";
 
 const MIN_W = 300;
 const MIN_H = 220;
+const GLASS_OPACITY_KEY = "chimes.overview.glassOpacity";
+const GLASS_OPACITY_MIN = 25;
+const GLASS_OPACITY_MAX = 100;
+const GLASS_OPACITY_DEFAULT = 50;
 let zTop = 20;
 
 const RANGE_OPTS: { id: ChartRange; label: string }[] = [
@@ -43,6 +48,48 @@ const RANGE_OPTS: { id: ChartRange; label: string }[] = [
   { id: "month", label: "Month" },
   { id: "year", label: "Year" },
 ];
+
+/** Teal-deep #1c3940 — glass fill only; content stays fully opaque. */
+function glassFill(pct: number): string {
+  return `rgb(28 57 64 / ${pct / 100})`;
+}
+
+function readGlassOpacity(): number {
+  try {
+    const raw = localStorage.getItem(GLASS_OPACITY_KEY);
+    if (!raw) return GLASS_OPACITY_DEFAULT;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return GLASS_OPACITY_DEFAULT;
+    return Math.min(GLASS_OPACITY_MAX, Math.max(GLASS_OPACITY_MIN, Math.round(n)));
+  } catch {
+    return GLASS_OPACITY_DEFAULT;
+  }
+}
+
+function writeGlassOpacity(pct: number) {
+  try {
+    localStorage.setItem(GLASS_OPACITY_KEY, String(pct));
+  } catch {
+    /* private mode */
+  }
+}
+
+function useGlassOpacity() {
+  const [opacity, setOpacity] = useState(GLASS_OPACITY_DEFAULT);
+
+  useEffect(() => {
+    setOpacity(readGlassOpacity());
+  }, []);
+
+  function setAndPersist(next: number) {
+    const clamped = Math.min(GLASS_OPACITY_MAX, Math.max(GLASS_OPACITY_MIN, Math.round(next)));
+    setOpacity(clamped);
+    writeGlassOpacity(clamped);
+  }
+
+  return [opacity, setAndPersist] as const;
+}
+
 
 function useStackedOverview() {
   const [stacked, setStacked] = useState(() =>
@@ -64,6 +111,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
   const [range, setRange] = useState<ChartRange>("day");
+  const [glassOpacity, setGlassOpacity] = useGlassOpacity();
   const live = useLive();
   const stacked = useStackedOverview();
 
@@ -105,6 +153,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
         : range === "month"
           ? "28 days"
           : "12 months";
+  const tileStyle = { backgroundColor: glassFill(glassOpacity) } satisfies CSSProperties;
 
   return (
     <div
@@ -125,7 +174,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
       />
       <div className="overview-wash pointer-events-none absolute inset-0" />
 
-      <header className="relative z-20 flex shrink-0 items-center justify-between gap-2 px-4 py-4 sm:gap-4 sm:p-6 md:p-10">
+      <header className="relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-3 px-4 py-4 sm:gap-4 sm:p-6 md:p-10">
         <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <img src="/brand/mark.png" alt="" className="size-9 shrink-0 object-contain sm:size-10" />
           <div className="min-w-0">
@@ -136,25 +185,28 @@ export function Overview({ onClose }: { onClose: () => void }) {
           </div>
         </div>
         <OverviewClock compact={stacked} />
-        <button
-          type="button"
-          aria-label="Close overview"
-          onPointerDown={(event) => {
-            if (event.button === 0) onClose();
-          }}
-          onClick={onClose}
-          className="grid size-11 shrink-0 place-items-center rounded-md border border-sidebar-fg/25 bg-teal-deep/40 text-sidebar-fg backdrop-blur-sm"
-        >
-          <Minimize2 className="size-5" strokeWidth={1.7} />
-        </button>
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <GlassOpacitySlider value={glassOpacity} onChange={setGlassOpacity} compact={stacked} />
+          <button
+            type="button"
+            aria-label="Close overview"
+            onPointerDown={(event) => {
+              if (event.button === 0) onClose();
+            }}
+            onClick={onClose}
+            className="grid size-11 shrink-0 place-items-center rounded-md border border-sidebar-fg/25 bg-teal-deep/40 text-sidebar-fg backdrop-blur-sm"
+          >
+            <Minimize2 className="size-5" strokeWidth={1.7} />
+          </button>
+        </div>
       </header>
 
       {stacked ? (
         <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 pb-5">
-          <StackedTile title={graphTitle} badge={graphBadge} tall="chart">
+          <StackedTile title={graphTitle} badge={graphBadge} tall="chart" style={tileStyle}>
             <OverviewGraph range={range} onRangeChange={setRange} />
           </StackedTile>
-          <StackedTile title="Energy flow" badge={flowBadge} tall="flow">
+          <StackedTile title="Energy flow" badge={flowBadge} tall="flow" style={tileStyle}>
             <FitFlow />
           </StackedTile>
         </div>
@@ -166,6 +218,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
             badge={graphBadge}
             handleOnly
             fallback={defaultGraph}
+            style={tileStyle}
           >
             <OverviewGraph range={range} onRangeChange={setRange} />
           </GlassTile>
@@ -175,6 +228,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
             title="Energy flow"
             badge={flowBadge}
             fallback={defaultFlow}
+            style={tileStyle}
           >
             <FitFlow />
           </GlassTile>
@@ -184,21 +238,62 @@ export function Overview({ onClose }: { onClose: () => void }) {
   );
 }
 
+function GlassOpacitySlider({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: number;
+  onChange: (next: number) => void;
+  compact?: boolean;
+}) {
+  return (
+    <label
+      className={cn(
+        "flex items-center gap-2 rounded-md border border-sidebar-fg/20 bg-teal-deep/40 px-2.5 py-1.5 backdrop-blur-sm",
+        compact ? "max-w-[11rem]" : "max-w-[14rem]",
+      )}
+    >
+      <span className="shrink-0 text-[0.65rem] uppercase tracking-widest text-sidebar-fg/70">
+        Glass
+      </span>
+      <input
+        type="range"
+        min={GLASS_OPACITY_MIN}
+        max={GLASS_OPACITY_MAX}
+        step={1}
+        value={value}
+        aria-label="Info box glass opacity"
+        aria-valuemin={GLASS_OPACITY_MIN}
+        aria-valuemax={GLASS_OPACITY_MAX}
+        aria-valuenow={value}
+        aria-valuetext={`${value} percent`}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="overview-glass-slider h-1.5 w-full min-w-0 cursor-pointer appearance-none rounded-full bg-sidebar-fg/25 accent-sand"
+      />
+      <span className="w-8 shrink-0 text-right text-xs tabular-nums text-sidebar-fg/85">{value}%</span>
+    </label>
+  );
+}
+
 function StackedTile({
   title,
   badge,
   children,
   tall,
+  style,
 }: {
   title: string;
   badge: string;
   children: ReactNode;
   tall: "chart" | "flow";
+  style: CSSProperties;
 }) {
   return (
     <div
+      style={style}
       className={cn(
-        "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 bg-teal-deep/50 shadow-card backdrop-blur-xl",
+        "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card backdrop-blur-xl",
         tall === "chart" ? "h-[min(42dvh,20rem)] min-h-[14rem]" : "h-[min(52dvh,24rem)] min-h-[17.5rem]",
       )}
     >
@@ -220,6 +315,7 @@ function GlassTile({
   children,
   fallback,
   handleOnly = false,
+  style,
 }: {
   storageKey: string;
   title: string;
@@ -227,6 +323,7 @@ function GlassTile({
   children: ReactNode;
   fallback: () => Box;
   handleOnly?: boolean;
+  style: CSSProperties;
 }) {
   const tile = useRef<HTMLDivElement>(null);
   const mode = useRef<"drag" | "resize" | null>(null);
@@ -315,9 +412,9 @@ function GlassTile({
   return (
     <div
       ref={tile}
-      style={{ left: box.x, top: box.y, width: box.w, height: box.h, zIndex: z }}
+      style={{ ...style, left: box.x, top: box.y, width: box.w, height: box.h, zIndex: z }}
       className={cn(
-        "absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 bg-teal-deep/50 shadow-card backdrop-blur-xl",
+        "absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card backdrop-blur-xl",
         grab ? "cursor-grabbing" : handleOnly ? "" : "cursor-grab",
       )}
       onPointerDown={handleOnly ? undefined : (event) => begin(event, "drag")}
@@ -490,11 +587,11 @@ function FitFlow() {
     const el = host.current;
     if (!el) return;
     const fit = () => {
-      const s = Math.min(el.clientWidth / 1000, el.clientHeight / 560);
+      const s = Math.min(el.clientWidth / 1000, el.clientHeight / 580);
       setScale(s);
       setOffset({
         x: (el.clientWidth - 1000 * s) / 2,
-        y: (el.clientHeight - 560 * s) / 2,
+        y: (el.clientHeight - 580 * s) / 2,
       });
     };
     fit();
@@ -509,7 +606,7 @@ function FitFlow() {
         className="origin-top-left"
         style={{
           width: 1000,
-          height: 560,
+          height: 580,
           transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
         }}
       >
