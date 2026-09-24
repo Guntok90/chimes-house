@@ -495,6 +495,51 @@ export function autoMap(states: HaState[]): HaMap {
   return map;
 }
 
+/** Entity ids Overview / live cards care about — plus sun.sun for dusk hint. */
+export function interestFromMap(map: HaMap): Set<string> {
+  const ids = new Set<string>(["sun.sun"]);
+  for (const value of Object.values(map)) {
+    if (typeof value === "string" && value) ids.add(value);
+  }
+  return ids;
+}
+
+export function sameLive(a: HouseLive, b: HouseLive): boolean {
+  return (
+    a.soc === b.soc &&
+    a.batteryW === b.batteryW &&
+    a.inverterW === b.inverterW &&
+    a.solarNowW === b.solarNowW &&
+    a.houseW === b.houseW &&
+    a.gridW === b.gridW &&
+    a.solarTodayKwh === b.solarTodayKwh &&
+    a.inverterStatus === b.inverterStatus &&
+    a.zappiMode === b.zappiMode &&
+    a.zappiPlugged === b.zappiPlugged &&
+    a.zappiW === b.zappiW &&
+    a.intelligent === b.intelligent &&
+    a.offPeak === b.offPeak &&
+    a.gridCharge === b.gridCharge &&
+    a.stevieHome === b.stevieHome &&
+    a.sunAboveHorizon === b.sunAboveHorizon
+  );
+}
+
+export function sameSwitches(
+  a: Record<string, boolean>,
+  b: Record<string, boolean>,
+): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (Boolean(a[key]) !== Boolean(b[key])) return false;
+  }
+  return true;
+}
+
+function statesById(states: HaState[] | Map<string, HaState>): Map<string, HaState> {
+  return states instanceof Map ? states : new Map(states.map((s) => [s.entity_id, s]));
+}
+
 /**
  * Build HouseLive from HA states. Pass EMPTY_LIVE (default) so missing entities
  * become zeros/false — never demo SNAPSHOT leftovers like 16.68 kWh.
@@ -504,11 +549,11 @@ export function autoMap(states: HaState[]): HaMap {
  * never from SNAPSHOT, kWh totals, or myenergi home consumption.
  */
 export function liveFromStates(
-  states: HaState[],
+  states: HaState[] | Map<string, HaState>,
   map: HaMap,
   fallback: HouseLive = EMPTY_LIVE,
 ): HouseLive {
-  const byId = new Map(states.map((s) => [s.entity_id, s]));
+  const byId = statesById(states);
   const take = (key: keyof HouseLive) => {
     const id = map[key];
     return id ? byId.get(id) : undefined;
@@ -612,11 +657,15 @@ export function liveFromStates(
   };
 }
 
-export function switchOn(states: HaState[], map: HaMap): Record<string, boolean> {
+export function switchOn(
+  states: HaState[] | Map<string, HaState>,
+  map: HaMap,
+): Record<string, boolean> {
+  const byId = statesById(states);
   const out: Record<string, boolean> = {};
   for (const sw of SWITCHES) {
     const id = map[sw.id];
-    const s = id ? states.find((x) => x.entity_id === id) : undefined;
+    const s = id ? byId.get(id) : undefined;
     if (s) out[sw.id] = s.state === "on";
   }
   return out;
@@ -624,16 +673,31 @@ export function switchOn(states: HaState[], map: HaMap): Record<string, boolean>
 
 type Msg = { id?: number; type: string; [k: string]: unknown };
 
+/**
+ * Browser WebSocket to Home Assistant.
+ *
+ * State updates are Map-backed (O(1)), coalesced per animation frame, and
+ * optionally filtered by `interest` so unrelated Pi entities do not thrash React.
+ */
 export class HaSocket {
   private ws: WebSocket | null = null;
   private id = 1;
   private pending = new Map<number, { ok: (v: unknown) => void; err: (e: Error) => void }>();
-  private states: HaState[] = [];
-  onStates: ((states: HaState[]) => void) | null = null;
+  private statesByEntity = new Map<string, HaState>();
+  private dirtyIds = new Set<string>();
+  private flushRaf = 0;
+  private bootstrapFlush = false;
+  /**
+   * When set, only flush `onStates` if a dirty entity is in this set.
+   * Cleared on connect; the store fills it after the first autoMap.
+   */
+  interest: Set<string> | null = null;
+  onStates: ((states: Map<string, HaState>) => void) | null = null;
   onStatus: ((s: "connecting" | "live" | "error", err?: string) => void) | null = null;
 
   async connect(url: string, token: string) {
     this.close();
+    this.interest = null;
     this.onStatus?.("connecting");
     const ws = new WebSocket(toWs(url));
     this.ws = ws;
@@ -671,12 +735,7 @@ export class HaSocket {
         if (msg.type === "event") {
           const event = msg.event as { data?: { new_state?: HaState } };
           const next = event.data?.new_state;
-          if (next) {
-            const i = this.states.findIndex((s) => s.entity_id === next.entity_id);
-            if (i >= 0) this.states[i] = next;
-            else this.states.push(next);
-            this.onStates?.([...this.states]);
-          }
+          if (next) this.noteState(next);
         }
       };
       ws.onerror = () => {
@@ -696,10 +755,51 @@ export class HaSocket {
       };
     });
     this.onStatus?.("live");
-    this.states = (await this.send("get_states")) as HaState[];
-    this.onStates?.([...this.states]);
+    const states = (await this.send("get_states")) as HaState[];
+    this.statesByEntity = new Map(states.map((s) => [s.entity_id, s]));
+    // First snapshot must reach the store immediately (no rAF wait).
+    this.bootstrapFlush = true;
+    this.flushStates();
     await this.send("subscribe_events", { event_type: "state_changed" });
-    return this.states;
+    return states;
+  }
+
+  /** Apply one entity state and schedule a coalesced UI flush. */
+  private noteState(next: HaState) {
+    this.statesByEntity.set(next.entity_id, next);
+    this.dirtyIds.add(next.entity_id);
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush() {
+    if (this.flushRaf || this.bootstrapFlush) return;
+    this.flushRaf = window.requestAnimationFrame(() => {
+      this.flushRaf = 0;
+      this.flushStates();
+    });
+  }
+
+  private flushStates() {
+    this.bootstrapFlush = false;
+    if (!this.onStates) {
+      this.dirtyIds.clear();
+      return;
+    }
+    if (this.interest && this.dirtyIds.size > 0) {
+      let relevant = false;
+      for (const id of this.dirtyIds) {
+        if (this.interest.has(id)) {
+          relevant = true;
+          break;
+        }
+      }
+      this.dirtyIds.clear();
+      if (!relevant) return;
+    } else {
+      this.dirtyIds.clear();
+    }
+    // Pass the live Map — store must not mutate it.
+    this.onStates(this.statesByEntity);
   }
 
   async call(entityId: string, turnOn?: boolean) {
@@ -776,6 +876,14 @@ export class HaSocket {
   }
 
   close() {
+    if (this.flushRaf) {
+      window.cancelAnimationFrame(this.flushRaf);
+      this.flushRaf = 0;
+    }
+    this.bootstrapFlush = false;
+    this.dirtyIds.clear();
+    this.interest = null;
+    this.statesByEntity.clear();
     const ws = this.ws;
     this.ws = null;
     this.pending.clear();

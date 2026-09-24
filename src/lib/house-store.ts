@@ -9,22 +9,17 @@ import {
 import {
   DEFAULT_HA_URL,
   HaSocket,
-  autoMap,
   credsForBoot,
-  liveFromStates,
   readCreds,
-  readMap,
-  switchOn,
   writeCreds,
-  writeMap,
   wsFailureMessage,
   type HaBootstrapResponse,
   type HaCreds,
   type HaMap,
-  type HaState,
   type SwitchId,
 } from "./ha";
-import { EMPTY_LIVE, SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
+import { applyLiveStates } from "./live-updates";
+import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
 
 const socket = new HaSocket();
 
@@ -118,11 +113,13 @@ export const useHouse = create<Store>((set, get) => {
         historyStatus: "idle",
       });
       writeCreds(creds);
+      socket.interest = null;
       socket.onStatus = (s, err) => {
         // Stay on "connecting" until the first state payload. A Live badge
         // with the demo snapshot would read as dusk (0 W, 16.68 kWh).
         if (s === "connecting") set({ status: "connecting", error: undefined });
         if (s === "error") {
+          socket.interest = null;
           set({
             status: "error",
             error: wsFailureMessage(err ?? "Disconnected."),
@@ -134,20 +131,8 @@ export const useHouse = create<Store>((set, get) => {
           });
         }
       };
-      socket.onStates = (states: HaState[]) => {
-        const saved = readMap();
-        // autoMap wins over stale localStorage so preferred Pi entities stick.
-        const mapped = { ...saved, ...autoMap(states) };
-        writeMap(mapped);
-        const wasLive = get().status === "live";
-        set({
-          live: liveFromStates(states, mapped, EMPTY_LIVE),
-          switches: switchOn(states, mapped),
-          map: mapped,
-          status: "live",
-          error: undefined,
-        });
-        if (!wasLive) void get().refreshHistory();
+      socket.onStates = (states) => {
+        applyLiveStates(states, get, set, socket);
       };
       try {
         await socket.connect(creds.url, creds.token);
