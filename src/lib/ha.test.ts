@@ -7,7 +7,10 @@ import {
   PREFERRED_SWITCHES,
   autoMap,
   credsForBoot,
+  interestFromMap,
   liveFromStates,
+  sameLive,
+  sameSwitches,
   rateToGbpPerKwh,
   wsFailureMessage,
   type HaState,
@@ -316,6 +319,44 @@ describe("deriveHouseW energy balance", () => {
   it("clamps noise below zero to 0", () => {
     assert.equal(deriveHouseW(0, -100, 50), 0);
     assert.equal(deriveHouseW(100, 0, 0, 200), 0);
+  });
+});
+
+describe("live update helpers", () => {
+  it("tracks mapped entities plus sun.sun for WS interest", () => {
+    const map = autoMap(CHIMES_PI);
+    const interest = interestFromMap(map);
+    assert.equal(interest.has("sun.sun"), true);
+    assert.equal(interest.has("sensor.battery_1_state_of_capacity"), true);
+    assert.equal(interest.has("sensor.batteries_charge_discharge_power"), true);
+    assert.equal(interest.has("switch.smart_switch_4"), true);
+    // Unrelated inventory must not keep the UI busy.
+    assert.equal(interest.has("sensor.power_meter_consumption"), false);
+  });
+
+  it("sameLive detects power/SOC changes and ignores identical snapshots", () => {
+    const map = autoMap(CHIMES_PI);
+    const a = liveFromStates(CHIMES_PI, map, EMPTY_LIVE);
+    assert.equal(sameLive(a, { ...a }), true);
+    assert.equal(sameLive(a, { ...a, soc: a.soc + 1 }), false);
+    assert.equal(sameLive(a, { ...a, batteryW: a.batteryW - 10 }), false);
+  });
+
+  it("liveFromStates accepts a Map (socket path) with the same result", () => {
+    const map = autoMap(CHIMES_PI);
+    const fromArray = liveFromStates(CHIMES_PI, map, EMPTY_LIVE);
+    const fromMap = liveFromStates(
+      new Map(CHIMES_PI.map((s) => [s.entity_id, s])),
+      map,
+      EMPTY_LIVE,
+    );
+    assert.equal(sameLive(fromArray, fromMap), true);
+  });
+
+  it("sameSwitches tolerates missing keys as off", () => {
+    assert.equal(sameSwitches({ lamp: true }, { lamp: true }), true);
+    assert.equal(sameSwitches({ lamp: true }, { lamp: false }), false);
+    assert.equal(sameSwitches({ lamp: false }, {}), true);
   });
 });
 
