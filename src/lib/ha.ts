@@ -1067,30 +1067,43 @@ function isControllableSwitch(s: HaState) {
 }
 
 /**
- * Home switch list filters (dad feedback): drop Dnd twins, enable-* toggles,
- * and vehicle child-lock switches. Match against entity_id + display label.
+ * Home switch list filters (dad follow-up after PR #22): drop junk so Home
+ * shows one real switch tile each. Match case-insensitively against entity_id,
+ * display label, registry name, and friendly_name:
+ * - dnd / do not disturb (twins)
+ * - myenergi / my energy
+ * - child lock (any device)
+ * - enable
  */
-export function hideHomeSwitch(entityId: string, label: string): boolean {
-  const hay = `${entityId} ${label}`.toLowerCase();
-  if (hay.includes("dnd")) return true;
-  if (hay.includes("enable")) return true;
-  const childLock = hay.includes("child_lock") || hay.includes("child lock");
+export function hideHomeSwitch(
+  entityId: string,
+  label: string,
+  extraNames: string[] = [],
+): boolean {
+  const hay = `${entityId} ${label} ${extraNames.join(" ")}`.toLowerCase();
   if (
-    childLock &&
-    (hay.includes("range_rover") ||
-      hay.includes("range rover") ||
-      hay.includes("cupra") ||
-      hay.includes("vehicle"))
+    hay.includes("dnd") ||
+    hay.includes("do not disturb") ||
+    hay.includes("do_not_disturb")
   ) {
     return true;
   }
+  if (
+    hay.includes("myenergi") ||
+    hay.includes("my energy") ||
+    hay.includes("my_energy")
+  ) {
+    return true;
+  }
+  if (hay.includes("child_lock") || hay.includes("child lock")) return true;
+  if (hay.includes("enable")) return true;
   return false;
 }
 
 /**
  * All switch/light entities from live states, grouped by HA area.
  * Unassigned entities land in Spares (shown without a labelled heading).
- * Filters out Dnd twins, enable-* switches, and vehicle child locks.
+ * Filters out Dnd / myenergi / child-lock / enable junk (see hideHomeSwitch).
  */
 export function areaSwitchesFromStates(
   states: HaState[],
@@ -1107,11 +1120,14 @@ export function areaSwitchesFromStates(
     if (reg?.disabled_by || reg?.hidden_by) continue;
     const areaId = reg?.area_id ?? null;
     const area = areaId ? (areaName.get(areaId) ?? SPARES_AREA) : SPARES_AREA;
+    const friendly = String(s.attributes.friendly_name ?? "").trim();
+    const regName = reg?.name ? String(reg.name).trim() : "";
     const label =
-      (reg?.name && String(reg.name).trim()) ||
-      String(s.attributes.friendly_name ?? "").trim() ||
+      regName ||
+      friendly ||
       s.entity_id.replace(/^(switch|light)\./, "").replace(/_/g, " ");
-    if (hideHomeSwitch(s.entity_id, label)) continue;
+    // Include every name source so a cleaned registry alias cannot un-hide junk.
+    if (hideHomeSwitch(s.entity_id, label, [friendly, regName])) continue;
     out.push({
       entityId: s.entity_id,
       label,

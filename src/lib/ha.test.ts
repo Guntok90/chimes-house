@@ -23,6 +23,7 @@ import {
   wsFailureMessage,
   zappiModeOptions,
   DEFAULT_ZAPPI_MODES,
+  type HaEntityReg,
   type HaState,
 } from "./ha.ts";
 import { EMPTY_LIVE, SNAPSHOT, solarStatusHint, usesDemoCharts } from "./house.ts";
@@ -593,9 +594,13 @@ describe("area-grouped switches (Home)", () => {
     assert.ok(front.some((s) => s.label === "Range Rover Hybrid"));
   });
 
-  it("hideHomeSwitch drops Dnd twins, enable-*, and vehicle child locks", () => {
+  it("hideHomeSwitch drops dnd / myenergi / child lock / enable (any device)", () => {
     assert.equal(hideHomeSwitch("switch.lamp_dnd", "Lamp Dnd"), true);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1 DND"), true);
+    assert.equal(
+      hideHomeSwitch("switch.lamp_do_not_disturb", "Lamp Do Not Disturb"),
+      true,
+    );
     assert.equal(hideHomeSwitch("switch.smart_switch_enable", "Enable charging"), true);
     assert.equal(hideHomeSwitch("switch.enable_notifications", "Notifications"), true);
     assert.equal(
@@ -603,20 +608,38 @@ describe("area-grouped switches (Home)", () => {
       true,
     );
     assert.equal(hideHomeSwitch("switch.cupra_child_lock", "Cupra Child Lock"), true);
-    assert.equal(hideHomeSwitch("switch.vehicle_child_lock", "Vehicle child lock"), true);
+    assert.equal(hideHomeSwitch("switch.cabinet_child_lock", "Cabinet child lock"), true);
+    assert.equal(hideHomeSwitch("switch.myenergi_zappi_boost", "Boost"), true);
+    assert.equal(hideHomeSwitch("switch.garage_plug", "My Energy boost"), true);
+    assert.equal(hideHomeSwitch("switch.garage_plug", "Myenergi boost"), true);
     // Real switches stay
     assert.equal(hideHomeSwitch("switch.smart_switch_4", "Lamp"), false);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1"), false);
-    // Child lock alone (non-vehicle) stays — filter needs vehicle cue
-    assert.equal(hideHomeSwitch("switch.cabinet_child_lock", "Cabinet child lock"), false);
+    assert.equal(hideHomeSwitch("switch.batteries_charge_from_grid", "Charge from grid"), false);
+  });
+
+  it("hideHomeSwitch still catches junk when registry alias cleans the label", () => {
+    // Display label looks real; friendly_name / entity still name the twin.
+    assert.equal(
+      hideHomeSwitch("switch.smart_switch_4_dnd", "Lamp", ["Lamp Dnd", "Lamp"]),
+      true,
+    );
+    assert.equal(
+      hideHomeSwitch("switch.random_id", "Boost", ["Myenergi boost", "Boost"]),
+      true,
+    );
   });
 
   it("areaSwitchesFromStates omits filtered twins from the Home list", () => {
     const states: HaState[] = [
       state("switch.smart_switch_4", "on", "Lamp"),
       state("switch.smart_switch_4_dnd", "off", "Lamp Dnd"),
+      state("switch.lamp_do_not_disturb", "off", "Lamp Do Not Disturb"),
       state("switch.batteries_enable_charge", "on", "Enable charge"),
       state("switch.range_rover_child_lock", "off", "Range Rover child lock"),
+      state("switch.cabinet_child_lock", "off", "Cabinet child lock"),
+      state("switch.myenergi_zappi_boost", "off", "Boost"),
+      state("switch.spare_boost", "off", "My Energy boost"),
       state("switch.pergola_switch_1", "off", "Pergola"),
     ];
     const list = areaSwitchesFromStates(states, [], []);
@@ -626,6 +649,23 @@ describe("area-grouped switches (Home)", () => {
     );
     assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
     assert.equal(list.find((s) => s.entityId === "switch.pergola_switch_1")?.on, false);
+  });
+
+  it("areaSwitchesFromStates hides Dnd twin even when registry name is cleaned", () => {
+    const states: HaState[] = [
+      state("switch.smart_switch_4", "on", "Lamp"),
+      state("switch.smart_switch_4_dnd", "off", "Lamp Dnd"),
+    ];
+    const entities: HaEntityReg[] = [
+      { entity_id: "switch.smart_switch_4", area_id: null, name: "Lamp" },
+      // Cleaned alias would previously keep the twin on Home.
+      { entity_id: "switch.smart_switch_4_dnd", area_id: null, name: "Lamp" },
+    ];
+    const list = areaSwitchesFromStates(states, [], entities);
+    assert.deepEqual(
+      list.map((s) => s.entityId),
+      ["switch.smart_switch_4"],
+    );
   });
 });
 
