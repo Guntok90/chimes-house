@@ -471,11 +471,11 @@ function FitFlow() {
     const el = host.current;
     if (!el) return;
     const fit = () => {
-      const s = Math.min(el.clientWidth / 1000, el.clientHeight / 560);
+      const s = Math.min(el.clientWidth / 1000, el.clientHeight / 580);
       setScale(s);
       setOffset({
         x: (el.clientWidth - 1000 * s) / 2,
-        y: (el.clientHeight - 560 * s) / 2,
+        y: (el.clientHeight - 580 * s) / 2,
       });
     };
     fit();
@@ -490,7 +490,7 @@ function FitFlow() {
         className="origin-top-left"
         style={{
           width: 1000,
-          height: 560,
+          height: 580,
           transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`,
         }}
       >

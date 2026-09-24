@@ -102,7 +102,7 @@ export function mountEnergyScene(host: HTMLElement): () => void {
   // Driveway pad is centered at z≈3.15 (5.8×3.4). Match house photo:
   // Range Rover left bay, Zappi/Cupra right bay — keep both on the bricks.
   scene.add(makeCar(new THREE.Vector3(-1.55, 0, 3.25), C.umber, true, "Range Rover"));
-  scene.add(makeCar(new THREE.Vector3(1.85, 0, 3.4), C.teal, false, "Driveway"));
+  scene.add(makeCar(new THREE.Vector3(1.85, 0, 3.4), C.teal, false, "Zappi"));
   scene.add(makeTree(-4.35, 2.55));
   scene.add(makeTree(5.35, -3.15));
   scene.add(makeTree(-3.15, -3.85));

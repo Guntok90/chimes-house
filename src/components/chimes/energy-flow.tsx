@@ -40,7 +40,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
   const roverOn = live.rangeRoverW > 30;
   const roverMapped = Boolean(map.rangeRoverW || map.rangeRoverSoc || map.rangeRoverPlugged);
   const glass = tone === "glass";
-  const idle = glass ? "flow-idle stroke-sidebar-fg/35" : "flow-idle stroke-line";
+  const idle = glass ? "flow-idle stroke-sidebar-fg/45" : "flow-idle stroke-teal-soft/55";
   const badge = battOut ? "On battery" : solarOn && home > 0 ? "Solar" : "Idle";
 
   const roverValue = map.rangeRoverW
@@ -64,13 +64,15 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
     <div
       className={cn(
         "relative",
-        bare ? "h-full w-full" : "overflow-hidden rounded-lg border border-line bg-paper-raised",
+        bare
+          ? "h-full w-full"
+          : "overflow-hidden rounded-lg border border-teal/25 bg-gradient-to-br from-sand/55 via-paper-raised to-teal/[0.1] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.55)]",
       )}
     >
       {bare ? null : (
         <div className="flex items-start justify-between gap-3 px-5 pt-5">
           <div>
-            <div className="text-xs font-medium uppercase tracking-widest text-ink-soft">
+            <div className="text-xs font-medium uppercase tracking-widest text-teal">
               Energy flow
             </div>
             <div className="mt-1 text-sm tabular-nums text-ink">
@@ -78,7 +80,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
               {map.rangeRoverW ? ` · ${live.rangeRoverW} W Rover` : ""}
             </div>
           </div>
-          <div className="rounded-full border border-line bg-white/70 px-2.5 py-1 text-xs font-medium text-ink">
+          <div className="rounded-full border border-teal/25 bg-teal/10 px-2.5 py-1 text-xs font-medium text-teal">
             {badge}
           </div>
         </div>
