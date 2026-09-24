@@ -374,7 +374,10 @@ function HomeView() {
       </section>
 
       {groups.map(({ area, items }) => (
-        <Room key={area} title={area}>
+        <Room
+          key={area}
+          title={area.toLowerCase() === SPARES_AREA.toLowerCase() ? null : area}
+        >
           {items.map((sw) => (
             <Tile
               key={sw.entityId}

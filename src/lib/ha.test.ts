@@ -13,6 +13,7 @@ import {
   credsForBoot,
   demoAreaSwitches,
   groupSwitchesByArea,
+  hideHomeSwitch,
   interestFromMap,
   liveFromStates,
   sameLive,
@@ -558,6 +559,41 @@ describe("area-grouped switches (Home)", () => {
     const demo = demoAreaSwitches({ lamp: true });
     assert.ok(demo.some((s) => s.area === SPARES_AREA));
     assert.equal(demo.find((s) => s.entityId === "demo.lamp")?.on, true);
+  });
+
+  it("hideHomeSwitch drops Dnd twins, enable-*, and vehicle child locks", () => {
+    assert.equal(hideHomeSwitch("switch.lamp_dnd", "Lamp Dnd"), true);
+    assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1 DND"), true);
+    assert.equal(hideHomeSwitch("switch.smart_switch_enable", "Enable charging"), true);
+    assert.equal(hideHomeSwitch("switch.enable_notifications", "Notifications"), true);
+    assert.equal(
+      hideHomeSwitch("switch.range_rover_child_lock", "Range Rover child lock"),
+      true,
+    );
+    assert.equal(hideHomeSwitch("switch.cupra_child_lock", "Cupra Child Lock"), true);
+    assert.equal(hideHomeSwitch("switch.vehicle_child_lock", "Vehicle child lock"), true);
+    // Real switches stay
+    assert.equal(hideHomeSwitch("switch.smart_switch_4", "Lamp"), false);
+    assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1"), false);
+    // Child lock alone (non-vehicle) stays — filter needs vehicle cue
+    assert.equal(hideHomeSwitch("switch.cabinet_child_lock", "Cabinet child lock"), false);
+  });
+
+  it("areaSwitchesFromStates omits filtered twins from the Home list", () => {
+    const states: HaState[] = [
+      state("switch.smart_switch_4", "on", "Lamp"),
+      state("switch.smart_switch_4_dnd", "off", "Lamp Dnd"),
+      state("switch.batteries_enable_charge", "on", "Enable charge"),
+      state("switch.range_rover_child_lock", "off", "Range Rover child lock"),
+      state("switch.pergola_switch_1", "off", "Pergola"),
+    ];
+    const list = areaSwitchesFromStates(states, [], []);
+    assert.deepEqual(
+      list.map((s) => s.entityId).sort(),
+      ["switch.pergola_switch_1", "switch.smart_switch_4"],
+    );
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
+    assert.equal(list.find((s) => s.entityId === "switch.pergola_switch_1")?.on, false);
   });
 });
 
