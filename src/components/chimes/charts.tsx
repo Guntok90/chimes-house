@@ -122,26 +122,36 @@ export function LineArea({
 
 const glassTick = { fill: "rgba(244,239,232,0.62)", fontSize: 11 };
 
-function GlassTip({
-  active,
-  payload,
-  label,
-}: {
+type DayTipProps = {
   active?: boolean;
   payload?: { name: string; value: number; color: string }[];
   label?: string;
-}) {
+  glass?: boolean;
+};
+
+function DayTip({ active, payload, label, glass = false }: DayTipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-md border border-sidebar-fg/20 bg-teal-deep/85 px-3 py-2 text-xs text-sidebar-fg shadow-sm backdrop-blur-md">
+    <div
+      className={
+        glass
+          ? "rounded-md border border-sidebar-fg/20 bg-teal-deep/85 px-3 py-2 text-xs text-sidebar-fg shadow-sm backdrop-blur-md"
+          : "rounded-md border border-line bg-paper-raised px-3 py-2 text-xs shadow-sm"
+      }
+    >
       <div className="mb-1 font-medium">{label}</div>
       {payload.map((p) => (
-        <div key={p.name} className="flex justify-between gap-5 tabular-nums text-sidebar-fg/70">
+        <div
+          key={p.name}
+          className={
+            glass
+              ? "flex justify-between gap-5 tabular-nums text-sidebar-fg/70"
+              : "flex justify-between gap-5 tabular-nums text-ink-soft"
+          }
+        >
           <span>{p.name}</span>
-          <span className="text-sidebar-fg">
-            {p.name === "SOC"
-              ? `${Math.round(p.value)}%`
-              : `${Math.round(p.value)} W`}
+          <span className={glass ? "text-sidebar-fg" : "text-ink"}>
+            {p.name === "SOC" ? `${Math.round(p.value)}%` : `${Math.round(p.value)} W`}
           </span>
         </div>
       ))}
@@ -149,44 +159,70 @@ function GlassTip({
   );
 }
 
-export function DayAllChart({ data }: { data: HourPoint[] }) {
+const DAY_SERIES = {
+  glass: {
+    solar: "#e6d2c0",
+    house: "#ae593c",
+    battery: "#7eb8c0",
+    grid: "#c4a484",
+    soc: "#f4efe8",
+    gridStroke: "rgba(244,239,232,0.12)",
+  },
+  paper: {
+    solar: "var(--color-teal-soft)",
+    house: "var(--color-terra)",
+    battery: "var(--color-teal)",
+    grid: "var(--color-umber)",
+    soc: "var(--color-ink)",
+    gridStroke: "var(--color-line)",
+  },
+} as const;
+
+/** 24h multi-series energy chart — glass (Overview) or paper (Home / History family). */
+export function DayAllChart({
+  data,
+  theme = "glass",
+}: {
+  data: HourPoint[];
+  theme?: "glass" | "paper";
+}) {
+  const colors = DAY_SERIES[theme];
+  const tick = theme === "glass" ? glassTick : axis;
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={data} margin={{ top: 10, right: 28, left: 0, bottom: 0 }}>
-        <CartesianGrid stroke="rgba(244,239,232,0.12)" strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid
+          stroke={colors.gridStroke}
+          strokeDasharray="3 3"
+          vertical={false}
+        />
         <XAxis
           dataKey="hour"
-          tick={glassTick}
+          tick={tick}
           axisLine={false}
           tickLine={false}
           interval={2}
           tickFormatter={(v: string) => v.slice(0, 2)}
         />
-        <YAxis
-          yAxisId="w"
-          tick={glassTick}
-          axisLine={false}
-          tickLine={false}
-          width={40}
-        />
+        <YAxis yAxisId="w" tick={tick} axisLine={false} tickLine={false} width={40} />
         <YAxis
           yAxisId="soc"
           orientation="right"
           domain={[0, 100]}
-          tick={glassTick}
+          tick={tick}
           axisLine={false}
           tickLine={false}
           width={32}
           tickFormatter={(v: number) => `${v}`}
         />
-        <Tooltip content={<GlassTip />} />
+        <Tooltip content={<DayTip glass={theme === "glass"} />} />
         <Area
           yAxisId="w"
           type="monotone"
           dataKey="solarW"
           name="Solar"
-          stroke="#e6d2c0"
-          fill="#e6d2c0"
+          stroke={colors.solar}
+          fill={colors.solar}
           fillOpacity={0.22}
           strokeWidth={1.6}
         />
@@ -195,7 +231,7 @@ export function DayAllChart({ data }: { data: HourPoint[] }) {
           type="monotone"
           dataKey="houseW"
           name="House"
-          stroke="#ae593c"
+          stroke={colors.house}
           dot={false}
           strokeWidth={1.8}
         />
@@ -204,7 +240,7 @@ export function DayAllChart({ data }: { data: HourPoint[] }) {
           type="monotone"
           dataKey="battW"
           name="Battery"
-          stroke="#7eb8c0"
+          stroke={colors.battery}
           dot={false}
           strokeWidth={1.6}
         />
@@ -213,7 +249,7 @@ export function DayAllChart({ data }: { data: HourPoint[] }) {
           type="monotone"
           dataKey="gridW"
           name="Grid"
-          stroke="#c4a484"
+          stroke={colors.grid}
           dot={false}
           strokeWidth={1.4}
         />
@@ -222,7 +258,7 @@ export function DayAllChart({ data }: { data: HourPoint[] }) {
           type="monotone"
           dataKey="soc"
           name="SOC"
-          stroke="#f4efe8"
+          stroke={colors.soc}
           strokeDasharray="4 5"
           dot={false}
           strokeWidth={1.3}
@@ -230,4 +266,23 @@ export function DayAllChart({ data }: { data: HourPoint[] }) {
       </ComposedChart>
     </ResponsiveContainer>
   );
+}
+
+export const DAY_CHART_LEGEND = [
+  { key: "solar", label: "Solar" },
+  { key: "house", label: "House" },
+  { key: "battery", label: "Battery" },
+  { key: "grid", label: "Grid" },
+  { key: "soc", label: "SOC", dashed: true },
+] as const;
+
+export function dayChartLegendColors(theme: "glass" | "paper" = "glass") {
+  const c = DAY_SERIES[theme];
+  return {
+    solar: c.solar,
+    house: c.house,
+    battery: c.battery,
+    grid: c.grid,
+    soc: c.soc,
+  };
 }
