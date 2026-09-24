@@ -201,8 +201,30 @@ export const useHouse = create<Store>((set, get) => {
               end.toISOString(),
               "day",
             )) as HaStatisticsBag;
-            week = daysFromStatistics(stats, map, 7, end);
-            month = daysFromStatistics(stats, map, 28, end);
+
+            // Hourly grid import for cheap/peak spend split (Intelligent Go window).
+            let hourStats: HaStatisticsBag = {};
+            if (map.gridW) {
+              try {
+                hourStats = (await socket.statisticsDuringPeriod(
+                  [map.gridW],
+                  start28.toISOString(),
+                  end.toISOString(),
+                  "hour",
+                )) as HaStatisticsBag;
+              } catch {
+                hourStats = {};
+              }
+            }
+
+            const live = get().live;
+            const rates = {
+              lowGbpPerKwh: live.cheapRateGbp,
+              highGbpPerKwh: live.peakRateGbp,
+            };
+            const opts = { hourStats, rates };
+            week = daysFromStatistics(stats, map, 7, end, opts);
+            month = daysFromStatistics(stats, map, 28, end, opts);
           } catch {
             week = [];
             month = [];

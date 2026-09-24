@@ -8,10 +8,12 @@ import {
   autoMap,
   credsForBoot,
   liveFromStates,
+  rateToGbpPerKwh,
   wsFailureMessage,
   type HaState,
 } from "./ha.ts";
 import { EMPTY_LIVE, SNAPSHOT, solarStatusHint } from "./house.ts";
+import { DEFAULT_TARIFF } from "./octopus.ts";
 
 function state(
   entity_id: string,
@@ -102,12 +104,29 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
     assert.equal(live.sunAboveHorizon, true);
+    // No rate sensors on Pi inventory → fallback Intelligent Go constants.
+    assert.equal(live.cheapRateGbp, DEFAULT_TARIFF.lowGbpPerKwh);
+    assert.equal(live.peakRateGbp, DEFAULT_TARIFF.highGbpPerKwh);
     // houseW = solar + grid − battery − zappi = 1150 + 40 − (−380) − 0 = 1570
     assert.equal(live.houseW, deriveHouseW(1150, 40, -380, 0));
     assert.equal(live.houseW, 1570);
     assert.notEqual(live.solarTodayKwh, SNAPSHOT.solarTodayKwh);
     assert.notEqual(live.houseW, 7);
     assert.notEqual(live.houseW, SNAPSHOT.houseW);
+  });
+
+  it("maps Octopus cheap/peak rate sensors and normalises pence to £/kWh", () => {
+    const withRates: HaState[] = [
+      ...CHIMES_PI,
+      state("sensor.octopus_cheap_rate", "7", "Octopus cheap rate", "p/kWh"),
+      state("sensor.octopus_peak_rate", "0.226", "Octopus peak rate", "GBP/kWh"),
+    ];
+    const map = autoMap(withRates);
+    assert.equal(map.cheapRateGbp, "sensor.octopus_cheap_rate");
+    assert.equal(map.peakRateGbp, "sensor.octopus_peak_rate");
+    const live = liveFromStates(withRates, map, EMPTY_LIVE);
+    assert.equal(live.cheapRateGbp, 0.07);
+    assert.equal(live.peakRateGbp, 0.226);
   });
 
   it("maps preferred switch entity ids (kitchen stays unmapped)", () => {
@@ -284,5 +303,13 @@ describe("browser boot creds", () => {
   it("explains a failed socket as a Tailscale reachability problem", () => {
     assert.match(wsFailureMessage("Could not reach Home Assistant."), /Tailscale/);
     assert.equal(wsFailureMessage("Token refused."), "Token refused.");
+  });
+});
+
+describe("rateToGbpPerKwh", () => {
+  it("treats values > 1 as pence", () => {
+    assert.equal(rateToGbpPerKwh(7), 0.07);
+    assert.equal(rateToGbpPerKwh(22.6), 0.226);
+    assert.equal(rateToGbpPerKwh(0.08), 0.08);
   });
 });

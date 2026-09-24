@@ -113,6 +113,9 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   intelligent: [],
   gridCharge: [],
   stevieHome: ["person.stevie_w"],
+  // Read-only tariff sensors (£/kWh or p/kWh) — never written back to HA.
+  cheapRateGbp: [],
+  peakRateGbp: [],
 };
 
 /**
@@ -232,6 +235,36 @@ export function isPowerUnit(s: HaState) {
   const u = unitOf(s);
   if (!u) return true;
   return u === "w" || u === "kw" || u.includes("watt");
+}
+
+/** True for tariff unit-rate sensors (£/kWh, p/kWh, GBP/kWh, …). */
+export function isRateUnit(s: HaState) {
+  const u = unitOf(s);
+  if (!u) {
+    // Many Octopus rate sensors omit unit; entity/name must still look like a rate.
+    const b = blob(s);
+    return b.includes("rate") || b.includes("price") || b.includes("tariff");
+  }
+  return (
+    u.includes("gbp") ||
+    u.includes("£") ||
+    u.includes("/kwh") ||
+    u.includes("p/kwh") ||
+    u.includes("pence") ||
+    u === "p" ||
+    u.includes("£/kwh")
+  );
+}
+
+/**
+ * Normalise a HA rate state to £/kWh.
+ * Values > 1 are treated as pence/kWh (e.g. 7 or 22.6 → 0.07 / 0.226).
+ */
+export function rateToGbpPerKwh(raw: number | null | undefined): number | null {
+  if (raw == null || !Number.isFinite(raw) || raw < 0) return null;
+  if (raw === 0) return 0;
+  if (raw > 1) return Number((raw / 100).toFixed(5));
+  return Number(raw.toFixed(5));
 }
 
 function find(states: HaState[], test: (s: HaState, b: string) => boolean) {
@@ -463,6 +496,23 @@ export function autoMap(states: HaState[]): HaMap {
     (s, b) => s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")),
   );
 
+  // Cheap / peak £·kWh⁻¹ from Octopus (or similarly named) rate sensors — read only.
+  const cheapRate = find(
+    states,
+    (s, b) =>
+      isRateUnit(s) &&
+      (b.includes("cheap") || b.includes("off_peak") || b.includes("off-peak") || b.includes("offpeak")) &&
+      (b.includes("rate") || b.includes("price") || b.includes("unit")),
+  );
+  const peakRate = find(
+    states,
+    (s, b) =>
+      isRateUnit(s) &&
+      (b.includes("peak") || b.includes("day_rate") || b.includes("standard_rate") || b.includes("day rate")) &&
+      !b.includes("off") &&
+      (b.includes("rate") || b.includes("price") || b.includes("unit")),
+  );
+
   if (soc) map.soc = soc.entity_id;
   if (battW) map.batteryW = battW.entity_id;
   if (solarNow) map.solarNowW = solarNow.entity_id;
@@ -478,6 +528,8 @@ export function autoMap(states: HaState[]): HaMap {
   if (intelligent) map.intelligent = intelligent.entity_id;
   if (gridCharge) map.gridCharge = gridCharge.entity_id;
   if (stevie) map.stevieHome = stevie.entity_id;
+  if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
+  if (peakRate) map.peakRateGbp = peakRate.entity_id;
 
   for (const sw of SWITCHES) {
     const preferred = prefer(states, PREFERRED_SWITCHES[sw.id]);
@@ -575,6 +627,12 @@ export function liveFromStates(
   const zappiW = Math.round(n("zappiW", fallback.zappiW));
   batteryW = Math.round(batteryW);
 
+  const rateGbp = (key: "cheapRateGbp" | "peakRateGbp", current: number) => {
+    const s = take(key);
+    if (!s) return current;
+    return rateToGbpPerKwh(num(s.state)) ?? current;
+  };
+
   const houseState = take("houseW");
   const houseMappedOk =
     Boolean(houseState) &&
@@ -609,6 +667,8 @@ export function liveFromStates(
     gridCharge: flag("gridCharge", fallback.gridCharge),
     stevieHome: flag("stevieHome", fallback.stevieHome),
     sunAboveHorizon,
+    cheapRateGbp: rateGbp("cheapRateGbp", fallback.cheapRateGbp),
+    peakRateGbp: rateGbp("peakRateGbp", fallback.peakRateGbp),
   };
 }
 
