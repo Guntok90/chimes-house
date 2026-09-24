@@ -46,6 +46,11 @@ export type HouseLive = {
    * Caps how high the pack may charge from solar (self-consumption).
    */
   solarChargeCutoffSoc: number | null;
+  /**
+   * Huawei discharging cutoff capacity (%). Null when missing.
+   * Minimum SOC — how empty the pack may go before discharge stops.
+   */
+  minDischargeSoc: number | null;
   stevieHome: boolean;
   /** From `sun.sun` when available; demo evening snapshot is below horizon. */
   sunAboveHorizon: boolean;
@@ -83,6 +88,7 @@ export const EMPTY_LIVE: HouseLive = {
   gridCharge: false,
   gridChargeCutoffSoc: null,
   solarChargeCutoffSoc: null,
+  minDischargeSoc: null,
   stevieHome: false,
   sunAboveHorizon: true,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
@@ -111,6 +117,7 @@ export const SNAPSHOT: HouseLive = {
   gridCharge: false,
   gridChargeCutoffSoc: 90,
   solarChargeCutoffSoc: 100,
+  minDischargeSoc: 5,
   stevieHome: true,
   sunAboveHorizon: false,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,

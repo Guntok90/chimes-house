@@ -43,6 +43,7 @@ export function ChargeSection({
   const map = useHouse((s) => s.map);
   const options = useHouse((s) => s.zappiModeOptions);
   const writeError = useHouse((s) => s.writeError);
+  const writePending = useHouse((s) => s.writePending);
   const applyZappiMode = useHouse((s) => s.applyZappiMode);
 
   const liveMode = status === "live";
@@ -55,10 +56,12 @@ export function ChargeSection({
   const [draftMode, setDraftMode] = useState(live.zappiMode);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
+  const pendingMode = writePending?.key === "zappiMode";
 
   useEffect(() => {
+    if (busy || pendingMode) return;
     if (live.zappiMode && live.zappiMode !== "—") setDraftMode(live.zappiMode);
-  }, [live.zappiMode]);
+  }, [live.zappiMode, busy, pendingMode]);
 
   async function applyMode() {
     setBusy(true);
@@ -70,6 +73,7 @@ export function ChargeSection({
 
   const dirty = draftMode !== live.zappiMode && draftMode !== "—";
   const writable = liveMode && modeMapped;
+  const applying = busy || pendingMode;
 
   return (
     <section className="space-y-4">
@@ -119,14 +123,14 @@ export function ChargeSection({
                   <button
                     key={opt}
                     type="button"
-                    disabled={!writable || busy}
+                    disabled={!writable || applying}
                     onClick={() => setDraftMode(opt)}
                     className={cn(
                       "min-h-9 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
                       draftMode === opt
                         ? "bg-paper-raised text-ink shadow-sm"
                         : "text-ink-soft",
-                      (!writable || busy) && "opacity-60",
+                      (!writable || applying) && "opacity-60",
                     )}
                   >
                     {opt}
@@ -135,13 +139,13 @@ export function ChargeSection({
               </div>
               <button
                 type="button"
-                disabled={!writable || busy || !dirty}
+                disabled={!writable || applying || !dirty}
                 onClick={() => {
                   void applyMode();
                 }}
                 className="rounded-md bg-teal px-3.5 py-2 text-sm text-paper disabled:opacity-50"
               >
-                {busy ? "Sending…" : "Apply mode"}
+                {applying ? "Sending…" : "Apply mode"}
               </button>
             </div>
             {!liveMode ? (
@@ -155,7 +159,11 @@ export function ChargeSection({
                 {map.zappiMode} · select.select_option
               </p>
             ) : null}
-            {note ? <p className="text-sm text-teal">{note}</p> : null}
+            {applying ? (
+              <p className="text-sm text-ink-soft">Waiting for the Pi to confirm…</p>
+            ) : note ? (
+              <p className="text-sm text-teal">{note}</p>
+            ) : null}
             {writeError ? <p className="text-sm text-terra">{writeError}</p> : null}
           </div>
         </Surface>

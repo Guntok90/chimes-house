@@ -17,6 +17,8 @@ import {
   hideHomeSwitch,
   resolveFrontGardenTiles,
   interestFromMap,
+  isHaTimeoutError,
+  haWriteFailureMessage,
   liveFromStates,
   sameLive,
   sameSwitches,
@@ -81,6 +83,7 @@ const CHIMES_PI: HaState[] = [
   state("switch.batteries_charge_from_grid", "on", "Charge from grid"),
   state("number.batteries_grid_charge_cutoff_soc", "85", "Grid charge cutoff SOC", "%"),
   state("number.batteries_charging_cutoff_capacity", "100", "End-of-charge SOC", "%"),
+  state("number.batteries_discharging_cutoff_capacity", "5", "End-of-discharge SOC", "%"),
 ];
 
 describe("ha autoMap preferences", () => {
@@ -105,6 +108,7 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.gridCharge, "switch.batteries_charge_from_grid");
     assert.equal(map.gridChargeCutoffSoc, "number.batteries_grid_charge_cutoff_soc");
     assert.equal(map.solarChargeCutoffSoc, "number.batteries_charging_cutoff_capacity");
+    assert.equal(map.minDischargeSoc, "number.batteries_discharging_cutoff_capacity");
     // No true house-load W → leave unmapped (derive later); never lifetime kWh or myenergi home.
     assert.equal(map.houseW, undefined);
     assert.notEqual(map.houseW, "sensor.power_meter_consumption");
@@ -138,6 +142,7 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.gridCharge, true);
     assert.equal(live.gridChargeCutoffSoc, 85);
     assert.equal(live.solarChargeCutoffSoc, 100);
+    assert.equal(live.minDischargeSoc, 5);
     assert.equal(live.sunAboveHorizon, true);
     // No rate sensors on Pi inventory → fallback Intelligent Go constants.
     assert.equal(live.cheapRateGbp, DEFAULT_TARIFF.lowGbpPerKwh);
@@ -306,23 +311,26 @@ describe("ha autoMap preferences", () => {
       state("switch.batteries_charge_from_grid", "off"),
       state("number.batteries_grid_charge_cutoff_soc", "70", "", "%"),
       state("number.batteries_charging_cutoff_capacity", "95", "", "%"),
-      // Must not steal solar cutoff mapping.
+      // Min SOC / discharge floor — must not steal solar cutoff mapping.
       state("number.batteries_discharging_cutoff_capacity", "5", "", "%"),
     ];
     const map = autoMap(withLimits);
     assert.equal(map.gridCharge, "switch.batteries_charge_from_grid");
     assert.equal(map.gridChargeCutoffSoc, "number.batteries_grid_charge_cutoff_soc");
     assert.equal(map.solarChargeCutoffSoc, "number.batteries_charging_cutoff_capacity");
+    assert.equal(map.minDischargeSoc, "number.batteries_discharging_cutoff_capacity");
     assert.notEqual(map.solarChargeCutoffSoc, "number.batteries_discharging_cutoff_capacity");
 
     const live = liveFromStates(withLimits, map, EMPTY_LIVE);
     assert.equal(live.gridCharge, false);
     assert.equal(live.gridChargeCutoffSoc, 70);
     assert.equal(live.solarChargeCutoffSoc, 95);
+    assert.equal(live.minDischargeSoc, 5);
 
     const bare = liveFromStates([], {}, EMPTY_LIVE);
     assert.equal(bare.gridChargeCutoffSoc, null);
     assert.equal(bare.solarChargeCutoffSoc, null);
+    assert.equal(bare.minDischargeSoc, null);
   });
 
   it("does not map number entities as the charge-from-grid switch", () => {
@@ -351,6 +359,11 @@ describe("ha autoMap preferences", () => {
     });
     assert.deepEqual(chargeLimitMeta([], {}, "solarChargeCutoffSoc"), {
       min: 90,
+      max: 100,
+      step: 1,
+    });
+    assert.deepEqual(chargeLimitMeta([], {}, "minDischargeSoc"), {
+      min: 0,
       max: 100,
       step: 1,
     });
@@ -473,6 +486,8 @@ describe("live update helpers", () => {
     assert.equal(sameLive(a, { ...a }), true);
     assert.equal(sameLive(a, { ...a, soc: a.soc + 1 }), false);
     assert.equal(sameLive(a, { ...a, batteryW: a.batteryW - 10 }), false);
+    assert.equal(sameLive(a, { ...a, gridCharge: !a.gridCharge }), false);
+    assert.equal(sameLive(a, { ...a, minDischargeSoc: (a.minDischargeSoc ?? 5) + 1 }), false);
   });
 
   it("liveFromStates accepts a Map (socket path) with the same result", () => {
@@ -517,7 +532,14 @@ describe("browser boot creds", () => {
 
   it("explains a failed socket as a Tailscale reachability problem", () => {
     assert.match(wsFailureMessage("Could not reach Home Assistant."), /Tailscale/);
+    assert.match(wsFailureMessage("Home Assistant request timed out."), /timed out/i);
     assert.equal(wsFailureMessage("Token refused."), "Token refused.");
+    assert.equal(isHaTimeoutError(new Error("Home Assistant request timed out.")), true);
+    assert.equal(isHaTimeoutError(new Error("Token refused.")), false);
+    assert.match(
+      haWriteFailureMessage(new Error("Home Assistant request timed out."), "charge from grid"),
+      /timed out.*charge from grid/i,
+    );
   });
 });
 
