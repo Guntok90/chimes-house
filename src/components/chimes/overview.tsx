@@ -14,6 +14,7 @@ import {
   SCROLL_DAYS,
   WEEK_HOURS,
   YEAR,
+  usesDemoCharts,
   type DayPoint,
   type HourPoint,
 } from "@/lib/house";
@@ -37,7 +38,7 @@ const STACK_MQ = "(max-width: 767px)";
 const MIN_W = 300;
 const MIN_H = 220;
 const GLASS_OPACITY_KEY = "chimes.overview.glassOpacity";
-const GLASS_OPACITY_MIN = 25;
+const GLASS_OPACITY_MIN = 0;
 const GLASS_OPACITY_MAX = 100;
 const GLASS_OPACITY_DEFAULT = 50;
 let zTop = 20;
@@ -333,9 +334,10 @@ function GlassTile({
   const [z, setZ] = useState(10);
 
   useEffect(() => {
+    // Restore the user's last size/position. Do not discard smaller Energy Flow
+    // boxes — an old w<560 "stale" migration ignored saved sizes on every open.
     const saved = readBox(storageKey);
-    const stale = storageKey === "chimes.overview.flow" && saved && saved.w < 560;
-    setBox(clamp(stale || !saved ? fallback() : saved));
+    setBox(clamp(saved ?? fallback()));
     const onResize = () => setBox((current) => clamp(current));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
@@ -460,7 +462,7 @@ function OverviewGraph({
   const historyDays = useHouse((s) => s.historyDays);
   const historyMonth = useHouse((s) => s.historyMonth);
   const historyYear = useHouse((s) => s.historyYear);
-  const liveMode = status === "live";
+  const liveMode = !usesDemoCharts(status);
 
   const showCars = !liveMode || Boolean(map.zappiW);
 

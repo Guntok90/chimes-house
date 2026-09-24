@@ -119,13 +119,13 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
-| Home     | 24h energy graph, area-grouped switches (incl. Spares), Stevie |
-| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover status; Dispatch read-only) + inverter / Octopus + custom £/kWh rates |
+| Home     | 24h energy graph, area-grouped switches (no Spares heading; Dnd/enable/child-lock filtered), Stevie |
+| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover status; Dispatch read-only) + **Battery** charge limits (grid/solar cutoffs) + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge + Grid & Solar charge cutoffs |
 | Charge   | Zappi Eco+ mode control, Range Rover status, Intelligent (read-only) |
 | History  | 7 / 28 day solar, house, grid, spend                   |
-| Garden   | Front (Willow, Range Rover cams) · Back (Pergola, ponds, Frank) |
+| Garden   | Front (Willow Tree + Range Rover Hybrid switches) · Back (Pergola, ponds, Frank) |
 | House    | Lights, plugs, **Pi connection**, sign out             |
 | Overview | iPad wall — house film, glass tiles (flow + 24h graph) |
 
