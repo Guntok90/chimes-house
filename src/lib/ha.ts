@@ -109,11 +109,35 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_internal_load_ct1",
     "sensor.myenergi_zappi_25435526_ct_internal",
   ],
+  // Range Rover — no preferred ids (do not invent brand integrations). Fuzzy map only.
+  rangeRoverW: [],
+  rangeRoverSoc: [],
+  rangeRoverPlugged: [],
+  // myenergi daily energy used by the Zappi (resets at local midnight).
+  zappiTodayKwh: [
+    "sensor.myenergi_zappi_25435526_energy_used_today",
+    "sensor.myenergi_zappi_25435526_green_energy_today",
+  ],
+  // Optional — many JLR installs lack a daily charged-kWh entity.
+  rangeRoverTodayKwh: [],
   offPeak: [],
   intelligent: [],
   gridCharge: [],
   stevieHome: ["person.stevie_w"],
+  // Read-only tariff sensors (£/kWh or p/kWh) — never written back to HA.
+  cheapRateGbp: [],
+  peakRateGbp: [],
 };
+
+/** True when entity name/id clearly refers to the Range Rover (second vehicle). */
+function isRangeRoverBlob(b: string) {
+  return (
+    b.includes("range_rover") ||
+    b.includes("range rover") ||
+    b.includes("rangerover") ||
+    b.includes("range-rover")
+  );
+}
 
 /**
  * Never treat these as live house watts.
@@ -232,6 +256,36 @@ export function isPowerUnit(s: HaState) {
   const u = unitOf(s);
   if (!u) return true;
   return u === "w" || u === "kw" || u.includes("watt");
+}
+
+/** True for tariff unit-rate sensors (£/kWh, p/kWh, GBP/kWh, …). */
+export function isRateUnit(s: HaState) {
+  const u = unitOf(s);
+  if (!u) {
+    // Many Octopus rate sensors omit unit; entity/name must still look like a rate.
+    const b = blob(s);
+    return b.includes("rate") || b.includes("price") || b.includes("tariff");
+  }
+  return (
+    u.includes("gbp") ||
+    u.includes("£") ||
+    u.includes("/kwh") ||
+    u.includes("p/kwh") ||
+    u.includes("pence") ||
+    u === "p" ||
+    u.includes("£/kwh")
+  );
+}
+
+/**
+ * Normalise a HA rate state to £/kWh.
+ * Values > 1 are treated as pence/kWh (e.g. 7 or 22.6 → 0.07 / 0.226).
+ */
+export function rateToGbpPerKwh(raw: number | null | undefined): number | null {
+  if (raw == null || !Number.isFinite(raw) || raw < 0) return null;
+  if (raw === 0) return 0;
+  if (raw > 1) return Number((raw / 100).toFixed(5));
+  return Number(raw.toFixed(5));
 }
 
 function find(states: HaState[], test: (s: HaState, b: string) => boolean) {
@@ -433,6 +487,96 @@ export function autoMap(states: HaState[]): HaMap {
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
+  // Second vehicle — only when entity names already say Range Rover (never invent brands).
+  const rangeRoverW = resolve(
+    states,
+    "rangeRoverW",
+    (_s, b) =>
+      isRangeRoverBlob(b) &&
+      (b.includes("power") ||
+        b.includes("charge_rate") ||
+        b.includes("charging") ||
+        b.includes("watt")) &&
+      !b.includes("today") &&
+      !b.includes("daily") &&
+      !b.includes("energy") &&
+      !b.includes("zappi"),
+    (s) => !isEnergyUnit(s) && isPowerUnit(s),
+  );
+
+  const rangeRoverSoc = resolve(
+    states,
+    "rangeRoverSoc",
+    (_s, b) =>
+      isRangeRoverBlob(b) &&
+      (b.includes("soc") ||
+        b.includes("state_of_charge") ||
+        b.includes("battery") ||
+        b.includes("charge_level") ||
+        b.includes("fuel")) &&
+      !b.includes("zappi") &&
+      !b.includes("luna") &&
+      !b.includes("house"),
+  );
+
+  const rangeRoverPlug = resolve(
+    states,
+    "rangeRoverPlugged",
+    (s, b) =>
+      isRangeRoverBlob(b) &&
+      !b.includes("power") &&
+      !b.includes("watt") &&
+      !b.includes("soc") &&
+      !b.includes("charge_level") &&
+      !b.includes("battery") &&
+      (b.includes("plug") ||
+        b.includes("plugged") ||
+        b.includes("connected") ||
+        b.includes("cable") ||
+        (b.includes("status") && !b.includes("mode") && !b.includes("charg"))) &&
+      (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
+  );
+
+  const zappiToday = resolve(
+    states,
+    "zappiTodayKwh",
+    (_s, b) =>
+      b.includes("zappi") &&
+      (b.includes("energy_used_today") ||
+        b.includes("green_energy_today") ||
+        b.includes("energy diverted today") ||
+        ((b.includes("energy") || b.includes("charged") || b.includes("charge")) &&
+          (b.includes("today") || b.includes("daily")) &&
+          !b.includes("session"))) &&
+      !b.includes("generation") &&
+      !b.includes("battery") &&
+      !b.includes("grid_import") &&
+      !b.includes("grid_export") &&
+      !b.includes("home_consumption"),
+    isEnergyUnit,
+  );
+
+  const rangeRoverToday = resolve(
+    states,
+    "rangeRoverTodayKwh",
+    (_s, b) =>
+      (b.includes("range_rover") ||
+        b.includes("range rover") ||
+        b.includes("land_rover") ||
+        b.includes("land rover") ||
+        b.includes("jlr")) &&
+      (b.includes("energy_used_today") ||
+        b.includes("charged_today") ||
+        b.includes("charge_today") ||
+        b.includes("energy_today") ||
+        b.includes("charging_energy") ||
+        ((b.includes("energy") || b.includes("charged") || b.includes("kwh")) &&
+          (b.includes("today") || b.includes("daily")))) &&
+      !b.includes("zappi") &&
+      !b.includes("myenergi"),
+    isEnergyUnit,
+  );
+
   const offPeak = find(
     states,
     (_s, b) =>
@@ -463,6 +607,23 @@ export function autoMap(states: HaState[]): HaMap {
     (s, b) => s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")),
   );
 
+  // Cheap / peak £·kWh⁻¹ from Octopus (or similarly named) rate sensors — read only.
+  const cheapRate = find(
+    states,
+    (s, b) =>
+      isRateUnit(s) &&
+      (b.includes("cheap") || b.includes("off_peak") || b.includes("off-peak") || b.includes("offpeak")) &&
+      (b.includes("rate") || b.includes("price") || b.includes("unit")),
+  );
+  const peakRate = find(
+    states,
+    (s, b) =>
+      isRateUnit(s) &&
+      (b.includes("peak") || b.includes("day_rate") || b.includes("standard_rate") || b.includes("day rate")) &&
+      !b.includes("off") &&
+      (b.includes("rate") || b.includes("price") || b.includes("unit")),
+  );
+
   if (soc) map.soc = soc.entity_id;
   if (battW) map.batteryW = battW.entity_id;
   if (solarNow) map.solarNowW = solarNow.entity_id;
@@ -474,10 +635,17 @@ export function autoMap(states: HaState[]): HaMap {
   if (zappiMode) map.zappiMode = zappiMode.entity_id;
   if (zappiPlug) map.zappiPlugged = zappiPlug.entity_id;
   if (zappiW) map.zappiW = zappiW.entity_id;
+  if (rangeRoverW) map.rangeRoverW = rangeRoverW.entity_id;
+  if (rangeRoverSoc) map.rangeRoverSoc = rangeRoverSoc.entity_id;
+  if (rangeRoverPlug) map.rangeRoverPlugged = rangeRoverPlug.entity_id;
+  if (zappiToday) map.zappiTodayKwh = zappiToday.entity_id;
+  if (rangeRoverToday) map.rangeRoverTodayKwh = rangeRoverToday.entity_id;
   if (offPeak) map.offPeak = offPeak.entity_id;
   if (intelligent) map.intelligent = intelligent.entity_id;
   if (gridCharge) map.gridCharge = gridCharge.entity_id;
   if (stevie) map.stevieHome = stevie.entity_id;
+  if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
+  if (peakRate) map.peakRateGbp = peakRate.entity_id;
 
   for (const sw of SWITCHES) {
     const preferred = prefer(states, PREFERRED_SWITCHES[sw.id]);
@@ -495,6 +663,51 @@ export function autoMap(states: HaState[]): HaMap {
   return map;
 }
 
+/** Entity ids Overview / live cards care about — plus sun.sun for dusk hint. */
+export function interestFromMap(map: HaMap): Set<string> {
+  const ids = new Set<string>(["sun.sun"]);
+  for (const value of Object.values(map)) {
+    if (typeof value === "string" && value) ids.add(value);
+  }
+  return ids;
+}
+
+export function sameLive(a: HouseLive, b: HouseLive): boolean {
+  return (
+    a.soc === b.soc &&
+    a.batteryW === b.batteryW &&
+    a.inverterW === b.inverterW &&
+    a.solarNowW === b.solarNowW &&
+    a.houseW === b.houseW &&
+    a.gridW === b.gridW &&
+    a.solarTodayKwh === b.solarTodayKwh &&
+    a.inverterStatus === b.inverterStatus &&
+    a.zappiMode === b.zappiMode &&
+    a.zappiPlugged === b.zappiPlugged &&
+    a.zappiW === b.zappiW &&
+    a.intelligent === b.intelligent &&
+    a.offPeak === b.offPeak &&
+    a.gridCharge === b.gridCharge &&
+    a.stevieHome === b.stevieHome &&
+    a.sunAboveHorizon === b.sunAboveHorizon
+  );
+}
+
+export function sameSwitches(
+  a: Record<string, boolean>,
+  b: Record<string, boolean>,
+): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (Boolean(a[key]) !== Boolean(b[key])) return false;
+  }
+  return true;
+}
+
+function statesById(states: HaState[] | Map<string, HaState>): Map<string, HaState> {
+  return states instanceof Map ? states : new Map(states.map((s) => [s.entity_id, s]));
+}
+
 /**
  * Build HouseLive from HA states. Pass EMPTY_LIVE (default) so missing entities
  * become zeros/false — never demo SNAPSHOT leftovers like 16.68 kWh.
@@ -504,11 +717,11 @@ export function autoMap(states: HaState[]): HaMap {
  * never from SNAPSHOT, kWh totals, or myenergi home consumption.
  */
 export function liveFromStates(
-  states: HaState[],
+  states: HaState[] | Map<string, HaState>,
   map: HaMap,
   fallback: HouseLive = EMPTY_LIVE,
 ): HouseLive {
-  const byId = new Map(states.map((s) => [s.entity_id, s]));
+  const byId = statesById(states);
   const take = (key: keyof HouseLive) => {
     const id = map[key];
     return id ? byId.get(id) : undefined;
@@ -570,10 +783,34 @@ export function liveFromStates(
       : flag("zappiPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
   }
 
+  const rangeRoverPlugState = take("rangeRoverPlugged");
+  let rangeRoverPlugged = fallback.rangeRoverPlugged;
+  if (rangeRoverPlugState) {
+    const v = rangeRoverPlugState.state.toLowerCase();
+    const negative =
+      v.includes("not connected") ||
+      v.includes("not_connected") ||
+      v.includes("unplugged") ||
+      v.includes("disconnected") ||
+      v === "off" ||
+      v === "false";
+    rangeRoverPlugged = negative
+      ? false
+      : flag("rangeRoverPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
+  }
+
   const solarNowW = Math.round(n("solarNowW", fallback.solarNowW));
   const gridW = Math.round(n("gridW", fallback.gridW));
   const zappiW = Math.round(n("zappiW", fallback.zappiW));
+  const rangeRoverW = Math.round(n("rangeRoverW", fallback.rangeRoverW));
+  const rangeRoverSoc = Math.round(n("rangeRoverSoc", fallback.rangeRoverSoc));
   batteryW = Math.round(batteryW);
+
+  const rateGbp = (key: "cheapRateGbp" | "peakRateGbp", current: number) => {
+    const s = take(key);
+    if (!s) return current;
+    return rateToGbpPerKwh(num(s.state)) ?? current;
+  };
 
   const houseState = take("houseW");
   const houseMappedOk =
@@ -592,6 +829,17 @@ export function liveFromStates(
     houseW = Math.round(fallback.houseW);
   }
 
+  /** Optional daily kWh — null when entity missing (never invent 0 as “no data”). */
+  const todayKwh = (key: "zappiTodayKwh" | "rangeRoverTodayKwh"): number | null => {
+    const s = take(key);
+    if (!s || !available(s)) return null;
+    const raw = num(s.state);
+    if (raw == null) return null;
+    const u = unitOf(s);
+    const kwh = u === "wh" || u.includes("watt-hour") ? raw / 1000 : raw;
+    return Number(kwh.toFixed(2));
+  };
+
   return {
     soc: Math.round(n("soc", fallback.soc)),
     batteryW,
@@ -604,19 +852,30 @@ export function liveFromStates(
     zappiMode: zappiModeState ?? fallback.zappiMode,
     zappiPlugged,
     zappiW,
+    rangeRoverW,
+    rangeRoverSoc,
+    rangeRoverPlugged,
+    zappiTodayKwh: todayKwh("zappiTodayKwh"),
+    rangeRoverTodayKwh: todayKwh("rangeRoverTodayKwh"),
     intelligent: flag("intelligent", fallback.intelligent),
     offPeak: flag("offPeak", fallback.offPeak),
     gridCharge: flag("gridCharge", fallback.gridCharge),
     stevieHome: flag("stevieHome", fallback.stevieHome),
     sunAboveHorizon,
+    cheapRateGbp: rateGbp("cheapRateGbp", fallback.cheapRateGbp),
+    peakRateGbp: rateGbp("peakRateGbp", fallback.peakRateGbp),
   };
 }
 
-export function switchOn(states: HaState[], map: HaMap): Record<string, boolean> {
+export function switchOn(
+  states: HaState[] | Map<string, HaState>,
+  map: HaMap,
+): Record<string, boolean> {
+  const byId = statesById(states);
   const out: Record<string, boolean> = {};
   for (const sw of SWITCHES) {
     const id = map[sw.id];
-    const s = id ? states.find((x) => x.entity_id === id) : undefined;
+    const s = id ? byId.get(id) : undefined;
     if (s) out[sw.id] = s.state === "on";
   }
   return out;
@@ -753,16 +1012,31 @@ export function groupSwitchesByArea(switches: AreaSwitch[]): { area: string; ite
 
 type Msg = { id?: number; type: string; [k: string]: unknown };
 
+/**
+ * Browser WebSocket to Home Assistant.
+ *
+ * State updates are Map-backed (O(1)), coalesced per animation frame, and
+ * optionally filtered by `interest` so unrelated Pi entities do not thrash React.
+ */
 export class HaSocket {
   private ws: WebSocket | null = null;
   private id = 1;
   private pending = new Map<number, { ok: (v: unknown) => void; err: (e: Error) => void }>();
-  private states: HaState[] = [];
-  onStates: ((states: HaState[]) => void) | null = null;
+  private statesByEntity = new Map<string, HaState>();
+  private dirtyIds = new Set<string>();
+  private flushRaf = 0;
+  private bootstrapFlush = false;
+  /**
+   * When set, only flush `onStates` if a dirty entity is in this set.
+   * Cleared on connect; the store fills it after the first autoMap.
+   */
+  interest: Set<string> | null = null;
+  onStates: ((states: Map<string, HaState>) => void) | null = null;
   onStatus: ((s: "connecting" | "live" | "error", err?: string) => void) | null = null;
 
   async connect(url: string, token: string) {
     this.close();
+    this.interest = null;
     this.onStatus?.("connecting");
     const ws = new WebSocket(toWs(url));
     this.ws = ws;
@@ -800,12 +1074,7 @@ export class HaSocket {
         if (msg.type === "event") {
           const event = msg.event as { data?: { new_state?: HaState } };
           const next = event.data?.new_state;
-          if (next) {
-            const i = this.states.findIndex((s) => s.entity_id === next.entity_id);
-            if (i >= 0) this.states[i] = next;
-            else this.states.push(next);
-            this.onStates?.([...this.states]);
-          }
+          if (next) this.noteState(next);
         }
       };
       ws.onerror = () => {
@@ -825,10 +1094,51 @@ export class HaSocket {
       };
     });
     this.onStatus?.("live");
-    this.states = (await this.send("get_states")) as HaState[];
-    this.onStates?.([...this.states]);
+    const states = (await this.send("get_states")) as HaState[];
+    this.statesByEntity = new Map(states.map((s) => [s.entity_id, s]));
+    // First snapshot must reach the store immediately (no rAF wait).
+    this.bootstrapFlush = true;
+    this.flushStates();
     await this.send("subscribe_events", { event_type: "state_changed" });
-    return this.states;
+    return states;
+  }
+
+  /** Apply one entity state and schedule a coalesced UI flush. */
+  private noteState(next: HaState) {
+    this.statesByEntity.set(next.entity_id, next);
+    this.dirtyIds.add(next.entity_id);
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush() {
+    if (this.flushRaf || this.bootstrapFlush) return;
+    this.flushRaf = window.requestAnimationFrame(() => {
+      this.flushRaf = 0;
+      this.flushStates();
+    });
+  }
+
+  private flushStates() {
+    this.bootstrapFlush = false;
+    if (!this.onStates) {
+      this.dirtyIds.clear();
+      return;
+    }
+    if (this.interest && this.dirtyIds.size > 0) {
+      let relevant = false;
+      for (const id of this.dirtyIds) {
+        if (this.interest.has(id)) {
+          relevant = true;
+          break;
+        }
+      }
+      this.dirtyIds.clear();
+      if (!relevant) return;
+    } else {
+      this.dirtyIds.clear();
+    }
+    // Pass the live Map — store must not mutate it.
+    this.onStates(this.statesByEntity);
   }
 
   async call(entityId: string, turnOn?: boolean) {
@@ -867,7 +1177,7 @@ export class HaSocket {
     statisticIds: string[],
     start: string,
     end: string,
-    period: "hour" | "day" = "day",
+    period: "hour" | "day" | "month" = "day",
   ) {
     if (!statisticIds.length || !this.ws) return {};
     try {
@@ -939,6 +1249,14 @@ export class HaSocket {
   }
 
   close() {
+    if (this.flushRaf) {
+      window.cancelAnimationFrame(this.flushRaf);
+      this.flushRaf = 0;
+    }
+    this.bootstrapFlush = false;
+    this.dirtyIds.clear();
+    this.interest = null;
+    this.statesByEntity.clear();
     const ws = this.ws;
     this.ws = null;
     this.pending.clear();

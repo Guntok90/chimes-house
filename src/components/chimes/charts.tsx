@@ -11,7 +11,8 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { HourPoint } from "@/lib/house";
+import { useEffect, useRef, type ReactNode } from "react";
+import type { DayPoint, HourPoint } from "@/lib/house";
 
 const axis = { fill: "var(--color-ink-soft)", fontSize: 11 };
 const grid = { stroke: "var(--color-line)", strokeDasharray: "3 3" };
@@ -122,14 +123,24 @@ export function LineArea({
 
 const glassTick = { fill: "rgba(244,239,232,0.62)", fontSize: 11 };
 
+export const METER_COLORS = {
+  solar: "#e6d2c0",
+  house: "#ae593c",
+  battery: "#7eb8c0",
+  grid: "#c4a484",
+  cars: "#d4a017",
+  soc: "#f4efe8",
+} as const;
+
 type DayTipProps = {
   active?: boolean;
   payload?: { name: string; value: number; color: string }[];
   label?: string;
   glass?: boolean;
+  unit?: "W" | "kWh";
 };
 
-function DayTip({ active, payload, label, glass = false }: DayTipProps) {
+function DayTip({ active, payload, label, glass = true, unit = "W" }: DayTipProps) {
   if (!active || !payload?.length) return null;
   return (
     <div
@@ -151,7 +162,11 @@ function DayTip({ active, payload, label, glass = false }: DayTipProps) {
         >
           <span>{p.name}</span>
           <span className={glass ? "text-sidebar-fg" : "text-ink"}>
-            {p.name === "SOC" ? `${Math.round(p.value)}%` : `${Math.round(p.value)} W`}
+            {p.name === "SOC"
+              ? `${Math.round(p.value)}%`
+              : unit === "kWh"
+                ? `${typeof p.value === "number" ? p.value.toFixed(p.value >= 10 ? 1 : 2) : p.value} kWh`
+                : `${Math.round(p.value)} W`}
           </span>
         </div>
       ))}
@@ -161,11 +176,12 @@ function DayTip({ active, payload, label, glass = false }: DayTipProps) {
 
 const DAY_SERIES = {
   glass: {
-    solar: "#e6d2c0",
-    house: "#ae593c",
-    battery: "#7eb8c0",
-    grid: "#c4a484",
-    soc: "#f4efe8",
+    solar: METER_COLORS.solar,
+    house: METER_COLORS.house,
+    battery: METER_COLORS.battery,
+    grid: METER_COLORS.grid,
+    cars: METER_COLORS.cars,
+    soc: METER_COLORS.soc,
     gridStroke: "rgba(244,239,232,0.12)",
   },
   paper: {
@@ -173,36 +189,66 @@ const DAY_SERIES = {
     house: "var(--color-terra)",
     battery: "var(--color-teal)",
     grid: "var(--color-umber)",
-    soc: "var(--color-ink)",
+    cars: "var(--color-sand)",
+    soc: "var(--color-ink-soft)",
     gridStroke: "var(--color-line)",
   },
 } as const;
 
-/** 24h multi-series energy chart — glass (Overview) or paper (Home / History family). */
+/** Horizontally scrollable chart host — scrolls to the newest point on mount/data change. */
+export function ChartScroll({
+  children,
+  widthPx,
+  className,
+}: {
+  children: ReactNode;
+  widthPx: number;
+  className?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollLeft = el.scrollWidth;
+  }, [widthPx]);
+  return (
+    <div
+      ref={ref}
+      className={className ?? "h-full w-full overflow-x-auto overflow-y-hidden overscroll-x-contain"}
+      style={{ WebkitOverflowScrolling: "touch" }}
+    >
+      <div className="h-full min-w-full" style={{ width: Math.max(widthPx, 1) }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** 24h multi-series energy chart — glass (Overview) or paper (Home). */
 export function DayAllChart({
   data,
+  showCars = true,
   theme = "glass",
 }: {
   data: HourPoint[];
+  showCars?: boolean;
   theme?: "glass" | "paper";
 }) {
   const colors = DAY_SERIES[theme];
   const tick = theme === "glass" ? glassTick : axis;
+  const multiDay = data.length > 24;
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={data} margin={{ top: 10, right: 28, left: 0, bottom: 0 }}>
-        <CartesianGrid
-          stroke={colors.gridStroke}
-          strokeDasharray="3 3"
-          vertical={false}
-        />
+        <CartesianGrid stroke={colors.gridStroke} strokeDasharray="3 3" vertical={false} />
         <XAxis
           dataKey="hour"
           tick={tick}
           axisLine={false}
           tickLine={false}
-          interval={2}
-          tickFormatter={(v: string) => v.slice(0, 2)}
+          interval={multiDay ? 11 : 2}
+          minTickGap={multiDay ? 28 : 8}
+          tickFormatter={(v: string) => (multiDay ? v : v.slice(0, 2))}
         />
         <YAxis yAxisId="w" tick={tick} axisLine={false} tickLine={false} width={40} />
         <YAxis
@@ -215,7 +261,7 @@ export function DayAllChart({
           width={32}
           tickFormatter={(v: number) => `${v}`}
         />
-        <Tooltip content={<DayTip glass={theme === "glass"} />} />
+        <Tooltip content={<DayTip glass={theme === "glass"} unit="W" />} />
         <Area
           yAxisId="w"
           type="monotone"
@@ -253,6 +299,17 @@ export function DayAllChart({
           dot={false}
           strokeWidth={1.4}
         />
+        {showCars ? (
+          <Line
+            yAxisId="w"
+            type="monotone"
+            dataKey="carW"
+            name="Cars"
+            stroke={colors.cars}
+            dot={false}
+            strokeWidth={1.5}
+          />
+        ) : null}
         <Line
           yAxisId="soc"
           type="monotone"
@@ -268,14 +325,6 @@ export function DayAllChart({
   );
 }
 
-export const DAY_CHART_LEGEND = [
-  { key: "solar", label: "Solar" },
-  { key: "house", label: "House" },
-  { key: "battery", label: "Battery" },
-  { key: "grid", label: "Grid" },
-  { key: "soc", label: "SOC", dashed: true },
-] as const;
-
 export function dayChartLegendColors(theme: "glass" | "paper" = "glass") {
   const c = DAY_SERIES[theme];
   return {
@@ -283,6 +332,98 @@ export function dayChartLegendColors(theme: "glass" | "paper" = "glass") {
     house: c.house,
     battery: c.battery,
     grid: c.grid,
+    cars: c.cars,
     soc: c.soc,
   };
+}
+
+type EnergyRow = {
+  label: string;
+  solar: number;
+  house: number;
+  grid: number;
+  battery: number;
+  cars: number;
+};
+
+function toEnergyRows(data: DayPoint[]): EnergyRow[] {
+  return data.map((d) => ({
+    label: d.label,
+    solar: d.solar,
+    house: d.house,
+    grid: d.gridIn - d.gridOut,
+    battery: d.battCharge - d.battDischarge,
+    cars: d.cars,
+  }));
+}
+
+/** Daily/monthly kWh meters for Overview week / month / year tabs. */
+export function EnergyMetersChart({
+  data,
+  showCars = true,
+}: {
+  data: DayPoint[];
+  showCars?: boolean;
+}) {
+  const rows = toEnergyRows(data);
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={rows} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke="rgba(244,239,232,0.12)" strokeDasharray="3 3" vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={glassTick}
+          axisLine={false}
+          tickLine={false}
+          interval="preserveStartEnd"
+          minTickGap={20}
+        />
+        <YAxis tick={glassTick} axisLine={false} tickLine={false} width={40} />
+        <Tooltip content={<DayTip unit="kWh" />} />
+        <Area
+          type="monotone"
+          dataKey="solar"
+          name="Solar"
+          stroke={METER_COLORS.solar}
+          fill={METER_COLORS.solar}
+          fillOpacity={0.22}
+          strokeWidth={1.6}
+        />
+        <Line
+          type="monotone"
+          dataKey="house"
+          name="House"
+          stroke={METER_COLORS.house}
+          dot={false}
+          strokeWidth={1.8}
+        />
+        <Line
+          type="monotone"
+          dataKey="battery"
+          name="Battery"
+          stroke={METER_COLORS.battery}
+          dot={false}
+          strokeWidth={1.6}
+        />
+        <Line
+          type="monotone"
+          dataKey="grid"
+          name="Grid"
+          stroke={METER_COLORS.grid}
+          dot={false}
+          strokeWidth={1.4}
+        />
+        {showCars ? (
+          <Line
+            type="monotone"
+            dataKey="cars"
+            name="Cars"
+            stroke={METER_COLORS.cars}
+            dot={false}
+            strokeWidth={1.5}
+          />
+        ) : null}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
 }

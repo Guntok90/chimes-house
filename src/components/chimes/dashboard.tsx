@@ -13,8 +13,8 @@ import {
   Plug,
   Sun,
   Tv,
-  Waves,
   Maximize2,
+  Waves,
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -26,6 +26,7 @@ import { BatteryView } from "./battery-view";
 import { ChargeView } from "./charge-view";
 import { DayAllChart, dayChartLegendColors } from "./charts";
 import { EnergyView } from "./energy-view";
+import { GardenView } from "./garden-view";
 import { HistoryView } from "./history-view";
 import { NoHistoryYet } from "./no-history";
 import { Overview } from "./overview";
@@ -437,43 +438,6 @@ function iconForSwitch(sw: AreaSwitch): LucideIcon {
   if (sw.area === SPARES_AREA || blob.includes("spare") || blob.includes("plug")) return Plug;
   if (sw.entityId.startsWith("light.")) return Lightbulb;
   return Plug;
-}
-
-function GardenView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
-  const status = useHouse((s) => s.status);
-  const map = useHouse((s) => s.map);
-  const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
-  return (
-    <div className="space-y-8">
-      <PageTitle>Garden</PageTitle>
-      <Room title="Back garden">
-        <Tile
-          id="pergola"
-          label="Pergola"
-          state={on.pergola}
-          onToggle={toggle}
-          icon={Sun}
-          available={mapped("pergola")}
-        />
-        <Tile
-          id="pond-1"
-          label="Pond 1"
-          state={on["pond-1"]}
-          onToggle={toggle}
-          icon={Waves}
-          available={mapped("pond-1")}
-        />
-        <Tile
-          id="pond-2"
-          label="Pond 2"
-          state={on["pond-2"]}
-          onToggle={toggle}
-          icon={Waves}
-          available={mapped("pond-2")}
-        />
-      </Room>
-    </div>
-  );
 }
 
 function HouseView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
