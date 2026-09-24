@@ -123,11 +123,22 @@ export const LIVE = SNAPSHOT;
 export type ConnectionStatus = "demo" | "connecting" | "live" | "error";
 
 /**
+ * Charts / meters should only swap to canned demo series in true demo mode.
+ * While connecting or after a transient WS drop, keep the live data path
+ * (empty → “no history yet”, never a silent demo-curve flash).
+ */
+export function usesDemoCharts(status: ConnectionStatus): boolean {
+  return status === "demo";
+}
+
+/**
  * Solar caption. “after dusk” only while a live socket says sun.sun is below
  * the horizon — never for a failed connect or the demo snapshot.
  */
 export function solarStatusHint(status: ConnectionStatus, live: HouseLive): string {
-  if (status !== "live") return status === "error" ? "not connected" : "demo";
+  if (status === "error") return "not connected";
+  if (status === "connecting") return "connecting";
+  if (status === "demo") return "demo";
   if (live.solarNowW > 30) return "producing";
   if (live.sunAboveHorizon === false) return "after dusk";
   return "idle";

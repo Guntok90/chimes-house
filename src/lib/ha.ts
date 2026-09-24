@@ -1164,6 +1164,11 @@ export class HaSocket {
   onStates: ((states: Map<string, HaState>) => void) | null = null;
   onStatus: ((s: "connecting" | "live" | "error", err?: string) => void) | null = null;
 
+  /** True while the HA WebSocket is open (post-handshake traffic OK). */
+  get connected() {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
   async connect(url: string, token: string) {
     this.close();
     this.interest = null;

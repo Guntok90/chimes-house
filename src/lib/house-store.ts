@@ -116,7 +116,7 @@ type Store = {
   writeError?: string;
   /** Custom £/kWh rates for History/Energy spend maths (not Octopus Dispatch). */
   tariffs: TariffState;
-  connect: (creds: HaCreds) => Promise<void>;
+  connect: (creds: HaCreds, opts?: { preserveData?: boolean }) => Promise<void>;
   disconnect: () => void;
   boot: () => void;
   toggle: (id: string) => void;
@@ -133,6 +133,18 @@ type Store = {
 
 let bootInFlight: Promise<void> | null = null;
 let historyInFlight: Promise<void> | null = null;
+/** Once we have been live this SPA session, keep last readings across drops. */
+let hadLiveSession = false;
+let reconnectTimer: number | null = null;
+let reconnectAttempt = 0;
+/** Suppress reconnect when the user explicitly chose demo / we are tearing down. */
+let reconnectAllowed = true;
+
+function clearReconnectTimer() {
+  if (reconnectTimer == null) return;
+  window.clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
 
 function emptyHistory() {
   return {
@@ -142,6 +154,23 @@ function emptyHistory() {
     historyMonth: [] as DayPoint[],
     historyYear: [] as DayPoint[],
   };
+}
+
+function scheduleReconnect(get: () => Store) {
+  if (!reconnectAllowed) return;
+  if (reconnectTimer != null) return;
+  const creds = readCreds();
+  if (!creds) return;
+  const delay = Math.min(1000 * 2 ** reconnectAttempt, 30_000);
+  reconnectAttempt += 1;
+  reconnectTimer = window.setTimeout(() => {
+    reconnectTimer = null;
+    if (!reconnectAllowed) return;
+    const { status } = get();
+    if (status === "live" && socket.connected) return;
+    if (status === "connecting") return;
+    void get().connect(creds, { preserveData: true });
+  }, delay);
 }
 
 export const useHouse = create<Store>((set, get) => {
@@ -159,7 +188,13 @@ export const useHouse = create<Store>((set, get) => {
 
     boot() {
       if (bootInFlight) return;
+      // Soft remount / Strict Mode / Overview↔Home must not tear down Live.
+      if (get().status === "live" && socket.connected) return;
+      if (get().status === "connecting") return;
+
       bootInFlight = (async () => {
+        reconnectAllowed = true;
+        const preserve = hadLiveSession;
         set({ status: "connecting", error: undefined });
         let bootstrap: HaBootstrapResponse | null = null;
         let bootstrapFailed = false;
@@ -169,12 +204,16 @@ export const useHouse = create<Store>((set, get) => {
             cache: "no-store",
           });
           if (res.status === 401) {
+            hadLiveSession = false;
+            clearReconnectTimer();
+            reconnectAllowed = false;
             set({
               status: "demo",
               live: { ...SNAPSHOT },
               areaSwitches: demoAreaSwitches({}),
               tariffs: resolveTariffs(null, readLocalTariffs()),
               error: undefined,
+              ...emptyHistory(),
               historyStatus: "idle",
             });
             return;
@@ -190,29 +229,38 @@ export const useHouse = create<Store>((set, get) => {
 
         const creds = credsForBoot(bootstrap, readCreds());
         if (!creds) {
+          hadLiveSession = false;
           set({
             status: bootstrapFailed ? "error" : "demo",
             live: { ...SNAPSHOT },
             error: bootstrapFailed
               ? "Could not read Pi setup. Connect from House, on Tailscale."
               : undefined,
+            ...emptyHistory(),
             historyStatus: "idle",
           });
           return;
         }
-        await get().connect(creds);
+        await get().connect(creds, { preserveData: preserve });
       })().finally(() => {
         bootInFlight = null;
       });
     },
 
-    async connect(creds) {
+    async connect(creds, opts) {
+      const preserveData = Boolean(opts?.preserveData) || hadLiveSession;
+      reconnectAllowed = true;
+      clearReconnectTimer();
       set({
         status: "connecting",
         error: undefined,
         url: creds.url,
-        ...emptyHistory(),
-        historyStatus: "idle",
+        ...(preserveData
+          ? {}
+          : {
+              ...emptyHistory(),
+              historyStatus: "idle" as const,
+            }),
       });
       writeCreds(creds);
       socket.interest = null;
@@ -222,6 +270,15 @@ export const useHouse = create<Store>((set, get) => {
         if (s === "connecting") set({ status: "connecting", error: undefined });
         if (s === "error") {
           socket.interest = null;
+          if (hadLiveSession) {
+            // Keep last live readings — do not silently drop to demo curves.
+            set({
+              status: "error",
+              error: wsFailureMessage(err ?? "Disconnected."),
+            });
+            scheduleReconnect(get);
+            return;
+          }
           set({
             status: "error",
             error: wsFailureMessage(err ?? "Disconnected."),
@@ -236,6 +293,11 @@ export const useHouse = create<Store>((set, get) => {
         lastStates = list;
         const wasLive = get().status === "live";
         applyLiveStates(states, get, set, socket);
+        if (get().status === "live") {
+          hadLiveSession = true;
+          reconnectAttempt = 0;
+          clearReconnectTimer();
+        }
         const mapped = get().map;
         const haRates = tariffsFromStates(list, mapped);
         const tariffs = resolveTariffs(haRates, readLocalTariffs());
@@ -253,9 +315,17 @@ export const useHouse = create<Store>((set, get) => {
         await socket.connect(creds.url, creds.token);
       } catch (err) {
         socket.close();
+        const message = wsFailureMessage(
+          err instanceof Error ? err.message : "Could not connect.",
+        );
+        if (hadLiveSession) {
+          set({ status: "error", error: message });
+          scheduleReconnect(get);
+          return;
+        }
         set({
           status: "error",
-          error: wsFailureMessage(err instanceof Error ? err.message : "Could not connect."),
+          error: message,
           live: { ...SNAPSHOT },
           historyStatus: "idle",
         });
@@ -365,6 +435,10 @@ export const useHouse = create<Store>((set, get) => {
     },
 
     disconnect() {
+      reconnectAllowed = false;
+      clearReconnectTimer();
+      hadLiveSession = false;
+      reconnectAttempt = 0;
       socket.onStatus = null;
       socket.onStates = null;
       socket.interest = null;

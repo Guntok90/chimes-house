@@ -1,4 +1,4 @@
-import { WEEK, solarStatusHint } from "@/lib/house";
+import { WEEK, solarStatusHint, usesDemoCharts } from "@/lib/house";
 import { useHouse, useLive, useTariffs } from "@/lib/house-store";
 import { estimateImportCost } from "@/lib/tariffs";
 import { CostBars, PowerArea } from "./charts";
@@ -14,7 +14,7 @@ export function EnergyView() {
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyWeek = useHouse((s) => s.historyWeek);
   const tariffs = useTariffs();
-  const liveMode = status === "live";
+  const liveMode = !usesDemoCharts(status);
   const week = liveMode
     ? historyWeek
     : WEEK.map((d) => ({ ...d, cost: estimateImportCost(d.gridIn, tariffs) }));
@@ -25,15 +25,17 @@ export function EnergyView() {
   const gridHint = LIVE.gridW > 30 ? "Importing" : LIVE.gridW < -30 ? "Exporting" : "Balanced";
   const battHint = LIVE.batteryW < -30 ? "Discharging" : LIVE.batteryW > 30 ? "Charging" : "Idle";
   const blurb =
-    status === "error"
-      ? "Not connected to the Pi. Showing the demo snapshot — the tablet needs Tailscale or the house Wi-Fi."
-      : status !== "live"
-        ? "Demo snapshot. Tablets on Tailscale go live after the family password."
-        : LIVE.solarNowW > 30
-          ? `Solar is producing ${LIVE.solarNowW} W. House load ${LIVE.houseW} W.`
-          : LIVE.batteryW < -30
-            ? `Battery is covering the house (${Math.abs(LIVE.batteryW)} W out). Solar is ${solarHint.toLowerCase()}.`
-            : `Solar is ${solarHint.toLowerCase()}. House load ${LIVE.houseW} W.`;
+    status === "connecting"
+      ? "Connecting to the Pi…"
+      : status === "error"
+        ? "Connection to the Pi dropped — keeping the last readings and retrying. Check Tailscale or house Wi-Fi if this sticks."
+        : status === "demo"
+          ? "Demo snapshot. Tablets on Tailscale go live after the family password."
+          : LIVE.solarNowW > 30
+            ? `Solar is producing ${LIVE.solarNowW} W. House load ${LIVE.houseW} W.`
+            : LIVE.batteryW < -30
+              ? `Battery is covering the house (${Math.abs(LIVE.batteryW)} W out). Solar is ${solarHint.toLowerCase()}.`
+              : `Solar is ${solarHint.toLowerCase()}. House load ${LIVE.houseW} W.`;
 
   return (
     <div className="space-y-8">

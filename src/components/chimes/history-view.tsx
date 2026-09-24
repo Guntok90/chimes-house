@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { MONTH, WEEK, type DayPoint } from "@/lib/house";
+import { MONTH, WEEK, usesDemoCharts, type DayPoint } from "@/lib/house";
 import { useHouse, useTariffs } from "@/lib/house-store";
 import { estimateImportCost } from "@/lib/tariffs";
 import { CostBars, PowerArea } from "./charts";
@@ -16,7 +16,7 @@ export function HistoryView() {
   const historyMonth = useHouse((s) => s.historyMonth);
   const tariffs = useTariffs();
 
-  const liveMode = status === "live";
+  const liveMode = !usesDemoCharts(status);
   const rows: DayPoint[] = liveMode
     ? range === "week"
       ? historyWeek

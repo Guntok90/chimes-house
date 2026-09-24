@@ -21,7 +21,7 @@ import {
   wsFailureMessage,
   type HaState,
 } from "./ha.ts";
-import { EMPTY_LIVE, SNAPSHOT, solarStatusHint } from "./house.ts";
+import { EMPTY_LIVE, SNAPSHOT, solarStatusHint, usesDemoCharts } from "./house.ts";
 import { DEFAULT_TARIFF } from "./octopus.ts";
 
 function state(
@@ -276,7 +276,12 @@ describe("ha autoMap preferences", () => {
     assert.equal(solarStatusHint("live", night), "after dusk");
     assert.equal(solarStatusHint("live", { ...day, solarNowW: 1239 }), "producing");
     assert.equal(solarStatusHint("error", night), "not connected");
+    assert.equal(solarStatusHint("connecting", night), "connecting");
     assert.equal(solarStatusHint("demo", SNAPSHOT), "demo");
+    assert.equal(usesDemoCharts("demo"), true);
+    assert.equal(usesDemoCharts("live"), false);
+    assert.equal(usesDemoCharts("connecting"), false);
+    assert.equal(usesDemoCharts("error"), false);
   });
 
   it("keeps Huawei signed battery power (negative = discharging)", () => {

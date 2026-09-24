@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { HOURS, WEEK } from "@/lib/house";
+import { HOURS, WEEK, usesDemoCharts } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import type { ChargeLimitKey } from "@/lib/ha";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,7 @@ export function BatteryView() {
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyHours = useHouse((s) => s.historyHours);
   const historyWeek = useHouse((s) => s.historyWeek);
-  const liveMode = status === "live";
+  const liveMode = !usesDemoCharts(status);
   const week = liveMode ? historyWeek : WEEK;
   const hoursSrc = liveMode ? historyHours : HOURS;
   const chartsReady = !liveMode || (historyStatus === "ready" && hoursSrc.length > 0);
