@@ -1,6 +1,7 @@
 import { WEEK, solarStatusHint } from "@/lib/house";
 import { useHouse, useLive, useTariffs } from "@/lib/house-store";
 import { estimateImportCost } from "@/lib/tariffs";
+import { ChargeLimitsSection } from "./charge-limits";
 import { CostBars, PowerArea } from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
@@ -51,6 +52,8 @@ export function EnergyView() {
       </div>
 
       <VehiclesSection />
+
+      <ChargeLimitsSection title="Battery" tone="sand" />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section>
