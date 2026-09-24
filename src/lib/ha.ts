@@ -1275,14 +1275,40 @@ export class HaSocket {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** Reject every in-flight command so probe/reconnect fail fast on close. */
+  private rejectPending(message: string) {
+    if (this.pending.size === 0) return;
+    const err = new Error(message);
+    for (const [, p] of this.pending) p.err(err);
+    this.pending.clear();
+  }
+
   /**
    * HA `ping`/`pong` health check. Safari iPad often leaves readyState OPEN after
    * backgrounding while the TCP session is already dead — probe before trusting it.
    */
-  async probe(timeoutMs = 2500): Promise<boolean> {
+  async probe(timeoutMs = 1200): Promise<boolean> {
     if (!this.connected) return false;
     try {
       await this.send("ping", {}, timeoutMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Pull a fresh get_states snapshot after a successful ping.
+   * Ping alone can succeed on a half-alive socket that no longer delivers events.
+   */
+  async refreshStates(timeoutMs = 4000): Promise<boolean> {
+    if (!this.connected) return false;
+    try {
+      const states = (await this.send("get_states", {}, timeoutMs)) as HaState[];
+      if (!Array.isArray(states)) return false;
+      this.statesByEntity = new Map(states.map((s) => [s.entity_id, s]));
+      this.bootstrapFlush = true;
+      this.flushStates();
       return true;
     } catch {
       return false;
@@ -1322,6 +1348,7 @@ export class HaSocket {
           const p = this.pending.get(msg.id);
           if (p) {
             this.pending.delete(msg.id);
+            // HA `pong` has no `success` field — treat anything but explicit failure as ok.
             if (msg.success === false) p.err(new Error("Home Assistant request failed."));
             else p.ok(msg.result);
           }
@@ -1340,6 +1367,7 @@ export class HaSocket {
       ws.onclose = () => {
         if (this.ws !== ws) return;
         this.ws = null;
+        this.rejectPending("Disconnected.");
         if (handshake) {
           window.clearTimeout(timer);
           reject(new Error("Could not reach Home Assistant."));
@@ -1527,7 +1555,19 @@ export class HaSocket {
           err(e);
         },
       });
-      this.ws?.send(JSON.stringify({ id, type, ...extra }));
+      try {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          this.pending.delete(id);
+          window.clearTimeout(timer);
+          err(new Error("Home Assistant socket is not open."));
+          return;
+        }
+        this.ws.send(JSON.stringify({ id, type, ...extra }));
+      } catch (e) {
+        this.pending.delete(id);
+        window.clearTimeout(timer);
+        err(e instanceof Error ? e : new Error("Home Assistant send failed."));
+      }
     });
   }
 
@@ -1542,12 +1582,16 @@ export class HaSocket {
     this.statesByEntity.clear();
     const ws = this.ws;
     this.ws = null;
-    this.pending.clear();
+    this.rejectPending("Disconnected.");
     if (!ws) return;
     ws.onmessage = null;
     ws.onerror = null;
     ws.onclose = null;
-    ws.close();
+    try {
+      ws.close();
+    } catch {
+      // Ignore — already closing/closed after iOS suspend.
+    }
   }
 }
 
