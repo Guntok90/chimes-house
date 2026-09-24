@@ -1,3 +1,9 @@
+import {
+  DEFAULT_TARIFF,
+  gridSpendGbp,
+  splitDailyImportByWindow,
+} from "./octopus.ts";
+
 export type HouseLive = {
   soc: number;
   batteryW: number;
@@ -24,6 +30,12 @@ export type HouseLive = {
   stevieHome: boolean;
   /** From `sun.sun` when available; demo evening snapshot is below horizon. */
   sunAboveHorizon: boolean;
+  /**
+   * Octopus Intelligent Go unit rates (£/kWh) when HA exposes them.
+   * Fallback matches prior app constants (7p / 22.6p) — see `octopus.ts`.
+   */
+  cheapRateGbp: number;
+  peakRateGbp: number;
 };
 
 /**
@@ -49,6 +61,8 @@ export const EMPTY_LIVE: HouseLive = {
   gridCharge: false,
   stevieHome: false,
   sunAboveHorizon: true,
+  cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
+  peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
 };
 
 export const SNAPSHOT: HouseLive = {
@@ -70,6 +84,8 @@ export const SNAPSHOT: HouseLive = {
   gridCharge: false,
   stevieHome: true,
   sunAboveHorizon: false,
+  cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
+  peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
 };
 
 /** Demo snapshot. Live values come from `useLive()`. */
@@ -130,7 +146,12 @@ export function lastDays(count: number): DayPoint[] {
     const short = Math.max(0, house - solar - battDischarge + battCharge * 0.15);
     const gridOut = clamp(surplus * 0.55, 0, 6.2);
     const gridIn = clamp(short * 0.7, 0.2, 8.4);
-    const cost = Number((gridIn * (SNAPSHOT.offPeak && i === 0 ? 0.07 : 0.226)).toFixed(2));
+    // Demo has no hourly import series — split by Intelligent Go window hours.
+    const { lowKwh, highKwh } = splitDailyImportByWindow(gridIn);
+    const cost = gridSpendGbp(lowKwh, highKwh, {
+      lowGbpPerKwh: SNAPSHOT.cheapRateGbp,
+      highGbpPerKwh: SNAPSHOT.peakRateGbp,
+    });
     out.push({
       key: d.toISOString().slice(0, 10),
       label: d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }),
