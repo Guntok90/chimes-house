@@ -99,8 +99,10 @@ export function mountEnergyScene(host: HTMLElement): () => void {
   scene.add(makeSolar());
   scene.add(makeBattery());
   scene.add(makeGrid());
-  scene.add(makeCar(new THREE.Vector3(-1.85, 0, 3.35), C.umber, true, "Range Rover"));
-  scene.add(makeCar(new THREE.Vector3(1.85, 0, 3.4), C.teal, false, "Driveway"));
+  // Driveway pad is centered at z≈3.15 (5.8×3.4). Match house photo:
+  // Range Rover left bay, Zappi/Cupra right bay — keep both on the bricks.
+  scene.add(makeCar(new THREE.Vector3(-1.55, 0, 3.25), C.umber, true, "Range Rover"));
+  scene.add(makeCar(new THREE.Vector3(1.85, 0, 3.4), C.teal, false, "Zappi"));
   scene.add(makeTree(-4.35, 2.55));
   scene.add(makeTree(5.35, -3.15));
   scene.add(makeTree(-3.15, -3.85));
@@ -429,7 +431,7 @@ function buildFlows(scene: THREE.Scene): Flow[] {
   const solar = new THREE.Vector3(0.1, 1.55, -4.1);
   const battery = new THREE.Vector3(3.85, 0.95, 0.15);
   const grid = new THREE.Vector3(-4.55, 3.7, -0.7);
-  const rover = new THREE.Vector3(-1.85, 0.5, 2.9);
+  const rover = new THREE.Vector3(-1.55, 0.5, 2.85);
   const drive = new THREE.Vector3(1.85, 0.48, 2.95);
 
   const solarOn = LIVE.solarNowW > 30;
