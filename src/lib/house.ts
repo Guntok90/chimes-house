@@ -11,6 +11,13 @@ export type HouseLive = {
   zappiPlugged: boolean;
   /** Zappi charge power (W) when a myenergi power entity is present. */
   zappiW: number;
+  /**
+   * Second vehicle (Range Rover) — only populated when HA exposes matching
+   * power / SOC / plug entities (discovered by name; no invented brand ids).
+   */
+  rangeRoverW: number;
+  rangeRoverSoc: number;
+  rangeRoverPlugged: boolean;
   intelligent: boolean;
   offPeak: boolean;
   gridCharge: boolean;
@@ -35,6 +42,9 @@ export const EMPTY_LIVE: HouseLive = {
   zappiMode: "—",
   zappiPlugged: false,
   zappiW: 0,
+  rangeRoverW: 0,
+  rangeRoverSoc: 0,
+  rangeRoverPlugged: false,
   intelligent: false,
   offPeak: false,
   gridCharge: false,
@@ -54,6 +64,9 @@ export const SNAPSHOT: HouseLive = {
   zappiMode: "Eco+",
   zappiPlugged: false,
   zappiW: 0,
+  rangeRoverW: 0,
+  rangeRoverSoc: 0,
+  rangeRoverPlugged: false,
   intelligent: true,
   offPeak: true,
   gridCharge: false,

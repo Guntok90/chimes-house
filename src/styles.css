@@ -73,24 +73,45 @@
 
 .flow-line {
   fill: none;
-  stroke-width: 2.4;
+  stroke-width: 2.5;
   stroke-linecap: round;
 }
 
 .flow-idle {
-  stroke-dasharray: 5 11;
-  opacity: 0.85;
+  stroke-dasharray: 4 14;
+  opacity: 0.42;
 }
 
 .flow-active {
-  stroke-dasharray: 8 12;
-  stroke-width: 2.8;
-  animation: flow-dash 1.7s linear infinite;
+  stroke-dasharray: 16 9;
+  stroke-width: 4;
+  opacity: 0.95;
+  filter: drop-shadow(0 0 5px rgb(244 239 232 / 0.35));
+  animation: flow-dash 0.85s linear infinite;
+}
+
+.flow-active-rev {
+  animation-name: flow-dash-rev;
+}
+
+.flow-particle {
+  opacity: 0.95;
+  filter: drop-shadow(0 0 4px rgb(244 239 232 / 0.55));
+}
+
+.flow-particle-soft {
+  opacity: 0.55;
 }
 
 @keyframes flow-dash {
   to {
-    stroke-dashoffset: -40;
+    stroke-dashoffset: -50;
+  }
+}
+
+@keyframes flow-dash-rev {
+  to {
+    stroke-dashoffset: 50;
   }
 }
 

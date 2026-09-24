@@ -46,6 +46,7 @@ Mapped when present (preferred ids first):
 | Zappi mode      | `select.myenergi_zappi_25435526_charge_mode`                                     |
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
+| Range Rover     | Fuzzy only when entity id/name already contains `range_rover` / `range rover` (W, SOC, plug). No invented brand ids — Energy Flow shows a labeled node with `—` until mapped. |
 | Stevie          | `person.stevie_w`                                                                |
 | Switches        | Lamp/Telly/blankets/Fish/Pergola/Ponds → `switch.smart_switch_*` / garden ids    |
 
@@ -91,7 +92,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
 | Home     | Solar today, battery, house load, lights, Stevie       |
-| Energy   | Live 5-node flow + inverter / Octopus                  |
+| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + inverter / Octopus |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge                               |
 | Charge   | Zappi Eco+, Intelligent                                |

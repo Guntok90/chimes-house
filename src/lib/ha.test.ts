@@ -98,6 +98,11 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.zappiMode, "Eco+");
     assert.equal(live.zappiPlugged, false);
     assert.equal(live.zappiW, 0);
+    assert.equal(live.rangeRoverW, 0);
+    assert.equal(live.rangeRoverSoc, 0);
+    assert.equal(live.rangeRoverPlugged, false);
+    assert.equal(map.rangeRoverW, undefined);
+    assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(live.stevieHome, true);
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
@@ -284,5 +289,35 @@ describe("browser boot creds", () => {
   it("explains a failed socket as a Tailscale reachability problem", () => {
     assert.match(wsFailureMessage("Could not reach Home Assistant."), /Tailscale/);
     assert.equal(wsFailureMessage("Token refused."), "Token refused.");
+  });
+});
+
+describe("Range Rover entity discovery", () => {
+  it("maps Range Rover power/SOC/plug only when entity names already say so", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      state("sensor.range_rover_battery", "64", "Range Rover battery", "%"),
+      state("sensor.range_rover_charging_power", "0", "Range Rover charging power", "W"),
+      state("binary_sensor.range_rover_plug_status", "off", "Range Rover plug"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverSoc, "sensor.range_rover_battery");
+    assert.equal(map.rangeRoverW, "sensor.range_rover_charging_power");
+    assert.equal(map.rangeRoverPlugged, "binary_sensor.range_rover_plug_status");
+    // Zappi driveway path stays on myenergi — never remapped to the Rover.
+    assert.equal(map.zappiW, "sensor.myenergi_chimes_power_charging");
+
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverSoc, 64);
+    assert.equal(live.rangeRoverW, 0);
+    assert.equal(live.rangeRoverPlugged, false);
+  });
+
+  it("does not invent brand entities when none are present", () => {
+    const map = autoMap(CHIMES_PI);
+    assert.equal(map.rangeRoverW, undefined);
+    assert.equal(map.rangeRoverSoc, undefined);
+    assert.equal(map.rangeRoverPlugged, undefined);
+    assert.equal(PREFERRED.rangeRoverW?.length, 0);
   });
 });
