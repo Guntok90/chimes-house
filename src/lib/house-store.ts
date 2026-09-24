@@ -177,35 +177,43 @@ export const useHouse = create<Store>((set, get) => {
           const end = new Date();
           const start24 = new Date(end.getTime() - 24 * 60 * 60 * 1000);
           const start28 = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1000);
-          const raw = await socket.historyDuringPeriod(
-            ids,
-            start24.toISOString(),
-            end.toISOString(),
-          );
-          const bag = normalizeHistoryResult(raw);
-          const hours = hoursFromHistory(bag, map, end);
+          let hours: HourPoint[] = [];
+          let week: DayPoint[] = [];
+          let month: DayPoint[] = [];
 
-          const stats = (await socket.statisticsDuringPeriod(
-            ids,
-            start28.toISOString(),
-            end.toISOString(),
-            "day",
-          )) as HaStatisticsBag;
-          const week = daysFromStatistics(stats, map, 7, end);
-          const month = daysFromStatistics(stats, map, 28, end);
+          // Hourly and daily paths are independent — a stats parse throw must
+          // not wipe an otherwise-valid 24h series (and never invent demo data).
+          try {
+            const raw = await socket.historyDuringPeriod(
+              ids,
+              start24.toISOString(),
+              end.toISOString(),
+            );
+            hours = hoursFromHistory(normalizeHistoryResult(raw), map, end);
+          } catch {
+            hours = [];
+          }
+
+          try {
+            const stats = (await socket.statisticsDuringPeriod(
+              ids,
+              start28.toISOString(),
+              end.toISOString(),
+              "day",
+            )) as HaStatisticsBag;
+            week = daysFromStatistics(stats, map, 7, end);
+            month = daysFromStatistics(stats, map, 28, end);
+          } catch {
+            week = [];
+            month = [];
+          }
+
           const empty = hours.length === 0 && week.length === 0;
           set({
             historyHours: hours,
             historyWeek: week,
             historyMonth: month,
             historyStatus: empty ? "empty" : "ready",
-          });
-        } catch {
-          set({
-            historyHours: [],
-            historyWeek: [],
-            historyMonth: [],
-            historyStatus: "empty",
           });
         } finally {
           historyInFlight = null;
