@@ -8,9 +8,9 @@ const P = {
   solar: { x: 500, y: 100 },
   grid: { x: 140, y: 258 },
   battery: { x: 355, y: 392 },
-  home: { x: 780, y: 190 },
-  zappi: { x: 680, y: 430 },
-  rangeRover: { x: 900, y: 430 },
+  home: { x: 780, y: 180 },
+  zappi: { x: 680, y: 400 },
+  rangeRover: { x: 900, y: 400 },
 } as const;
 
 type Tone = "paper" | "glass";
@@ -144,7 +144,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             markerStart={gridOut ? "url(#flow-arrow-teal)" : undefined}
           />
           <FlowPath
-            d={q(P.home, P.zappi, 720, 300)}
+            d={q(P.home, P.zappi, 720, 280)}
             active={zappiOn}
             idle={idle}
             stroke="stroke-umber"
@@ -152,7 +152,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             marker="url(#flow-arrow-umber)"
           />
           <FlowPath
-            d={q(P.home, P.rangeRover, 900, 280)}
+            d={q(P.home, P.rangeRover, 900, 260)}
             active={roverOn}
             idle={idle}
             stroke="stroke-umber"
@@ -220,7 +220,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[78%] top-[34%]"
+          at="left-[78%] top-[32%]"
           icon={Home}
           ring="border-teal"
           fill
@@ -231,7 +231,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[68%] top-[77%]"
+          at="left-[68%] top-[71%]"
           icon={PlugZap}
           ring="border-umber"
           value={`${live.zappiW} W`}
@@ -243,7 +243,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[90%] top-[77%]"
+          at="left-[90%] top-[71%]"
           icon={Car}
           ring="border-umber"
           value={roverValue}
@@ -290,9 +290,9 @@ function FlowPath({
       />
       {active ? (
         <>
-          <circle r="4" className={cn("flow-particle", fill)}>
+          <circle r="5" className={cn("flow-particle", fill)}>
             <animateMotion
-              dur="1.05s"
+              dur="0.9s"
               repeatCount="indefinite"
               path={d}
               keyPoints={reverse ? "1;0" : "0;1"}
@@ -300,10 +300,10 @@ function FlowPath({
               calcMode="linear"
             />
           </circle>
-          <circle r="2.6" className={cn("flow-particle flow-particle-soft", fill)}>
+          <circle r="3.2" className={cn("flow-particle flow-particle-soft", fill)}>
             <animateMotion
-              dur="1.05s"
-              begin="0.38s"
+              dur="0.9s"
+              begin="0.3s"
               repeatCount="indefinite"
               path={d}
               keyPoints={reverse ? "1;0" : "0;1"}

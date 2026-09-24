@@ -83,11 +83,11 @@
 }
 
 .flow-active {
-  stroke-dasharray: 16 9;
-  stroke-width: 4;
-  opacity: 0.95;
-  filter: drop-shadow(0 0 5px rgb(244 239 232 / 0.35));
-  animation: flow-dash 0.85s linear infinite;
+  stroke-dasharray: 18 8;
+  stroke-width: 4.4;
+  opacity: 1;
+  filter: drop-shadow(0 0 6px rgb(244 239 232 / 0.45));
+  animation: flow-dash 0.7s linear infinite;
 }
 
 .flow-active-rev {
@@ -95,23 +95,23 @@
 }
 
 .flow-particle {
-  opacity: 0.95;
-  filter: drop-shadow(0 0 4px rgb(244 239 232 / 0.55));
+  opacity: 1;
+  filter: drop-shadow(0 0 5px rgb(244 239 232 / 0.7));
 }
 
 .flow-particle-soft {
-  opacity: 0.55;
+  opacity: 0.65;
 }
 
 @keyframes flow-dash {
   to {
-    stroke-dashoffset: -50;
+    stroke-dashoffset: -52;
   }
 }
 
 @keyframes flow-dash-rev {
   to {
-    stroke-dashoffset: 50;
+    stroke-dashoffset: 52;
   }
 }
 
