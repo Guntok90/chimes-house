@@ -1,7 +1,7 @@
 import { PlugZap, Zap } from "lucide-react";
 import { WEEK } from "@/lib/house";
 import { useHouse, useLive, useTariffs } from "@/lib/house-store";
-import { estimateImportCost } from "@/lib/tariffs";
+import { estimateImportCostParts } from "@/lib/tariffs";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
 import { VehiclesSection } from "./vehicles";
 
@@ -17,7 +17,7 @@ export function ChargeView() {
   const week =
     status === "live"
       ? historyWeek
-      : WEEK.map((d) => ({ ...d, cost: estimateImportCost(d.gridIn, tariffs) }));
+      : WEEK.map((d) => ({ ...d, ...estimateImportCostParts(d.gridIn, tariffs) }));
   const today = week[week.length - 1];
   return (
     <div className="space-y-8">

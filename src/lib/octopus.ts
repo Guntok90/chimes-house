@@ -47,15 +47,40 @@ export function cheapFractionInLocalHour(hourStart: Date): number {
   return 0;
 }
 
+/** Off-peak / peak / total £ from grid import split across low / high rates. */
+export type SpendPartsGbp = {
+  /** Off-peak (cheap window) £. */
+  offPeak: number;
+  /** Peak / high £. */
+  peak: number;
+  /** Always offPeak + peak (Dad-facing total). */
+  total: number;
+};
+
+/** Spend parts £ from grid import split across low / high rates. */
+export function gridSpendPartsGbp(
+  gridImportLowKwh: number,
+  gridImportHighKwh: number,
+  rates: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh"> = DEFAULT_TARIFF,
+): SpendPartsGbp {
+  const low = Math.max(0, gridImportLowKwh);
+  const high = Math.max(0, gridImportHighKwh);
+  const offPeak = Number((low * rates.lowGbpPerKwh).toFixed(2));
+  const peak = Number((high * rates.highGbpPerKwh).toFixed(2));
+  return {
+    offPeak,
+    peak,
+    total: Number((offPeak + peak).toFixed(2)),
+  };
+}
+
 /** Spend £ from grid import split across low / high rates. */
 export function gridSpendGbp(
   gridImportLowKwh: number,
   gridImportHighKwh: number,
   rates: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh"> = DEFAULT_TARIFF,
 ): number {
-  const low = Math.max(0, gridImportLowKwh);
-  const high = Math.max(0, gridImportHighKwh);
-  return Number((low * rates.lowGbpPerKwh + high * rates.highGbpPerKwh).toFixed(2));
+  return gridSpendPartsGbp(gridImportLowKwh, gridImportHighKwh, rates).total;
 }
 
 /**

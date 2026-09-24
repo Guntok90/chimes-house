@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { MONTH, WEEK, type DayPoint } from "@/lib/house";
 import { useHouse, useTariffs } from "@/lib/house-store";
-import { estimateImportCost } from "@/lib/tariffs";
+import { estimateImportCostParts } from "@/lib/tariffs";
 import { CostBars, PowerArea } from "./charts";
 import { NoHistoryYet } from "./no-history";
 import { PageTitle, SectionLabel, Segmented, Surface } from "./ui";
@@ -23,7 +23,7 @@ export function HistoryView() {
       : historyMonth
     : (range === "week" ? WEEK : MONTH).map((d) => ({
         ...d,
-        cost: estimateImportCost(d.gridIn, tariffs),
+        ...estimateImportCostParts(d.gridIn, tariffs),
       }));
 
   const showEmpty = liveMode && (historyStatus === "empty" || historyStatus === "loading" || rows.length === 0);
@@ -54,11 +54,13 @@ export function HistoryView() {
         <NoHistoryYet label={historyStatus === "loading" ? "history (loading)" : "history"} />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
             <Stat label="Solar" value={`${totals.solar.toFixed(1)} kWh`} />
             <Stat label="House" value={`${totals.house.toFixed(1)} kWh`} />
             <Stat label="Imported" value={`${totals.gridIn.toFixed(1)} kWh`} />
-            <Stat label="Cost" value={`£${totals.cost.toFixed(2)}`} />
+            <Stat label="Off-peak" value={`£${totals.costOffPeak.toFixed(2)}`} />
+            <Stat label="Peak" value={`£${totals.costPeak.toFixed(2)}`} />
+            <Stat label="Total" value={`£${totals.cost.toFixed(2)}`} />
           </div>
 
           <section>
@@ -93,6 +95,8 @@ export function HistoryView() {
               <CostBars
                 data={rows.map((d) => ({
                   label: range === "week" ? d.label.split(" ")[0] : d.label.split(" ")[1] ?? d.label,
+                  costOffPeak: d.costOffPeak,
+                  costPeak: d.costPeak,
                   cost: d.cost,
                 }))}
               />
@@ -112,7 +116,9 @@ export function HistoryView() {
                     <th className="px-3 py-3 font-medium">Out</th>
                     <th className="px-3 py-3 font-medium">Batt +</th>
                     <th className="px-3 py-3 font-medium">Batt −</th>
-                    <th className="px-4 py-3 font-medium">£</th>
+                    <th className="px-3 py-3 font-medium">Off-peak</th>
+                    <th className="px-3 py-3 font-medium">Peak</th>
+                    <th className="px-4 py-3 font-medium">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -125,7 +131,9 @@ export function HistoryView() {
                       <Num n={d.gridOut} />
                       <Num n={d.battCharge} />
                       <Num n={d.battDischarge} />
-                      <td className="px-4 py-2.5 tabular-nums">£{d.cost.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 tabular-nums text-ink-soft">£{d.costOffPeak.toFixed(2)}</td>
+                      <td className="px-3 py-2.5 tabular-nums text-ink-soft">£{d.costPeak.toFixed(2)}</td>
+                      <td className="px-4 py-2.5 tabular-nums font-medium">£{d.cost.toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -157,8 +165,10 @@ function sum(rows: DayPoint[]) {
       solar: acc.solar + d.solar,
       house: acc.house + d.house,
       gridIn: acc.gridIn + d.gridIn,
+      costOffPeak: acc.costOffPeak + d.costOffPeak,
+      costPeak: acc.costPeak + d.costPeak,
       cost: acc.cost + d.cost,
     }),
-    { solar: 0, house: 0, gridIn: 0, cost: 0 },
+    { solar: 0, house: 0, gridIn: 0, costOffPeak: 0, costPeak: 0, cost: 0 },
   );
 }

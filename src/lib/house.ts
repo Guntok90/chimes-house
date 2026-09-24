@@ -1,6 +1,6 @@
 import {
   DEFAULT_TARIFF,
-  gridSpendGbp,
+  gridSpendPartsGbp,
   splitDailyImportByWindow,
 } from "./octopus.ts";
 import { DEFAULT_TARIFFS } from "./tariffs.ts";
@@ -144,6 +144,11 @@ export type DayPoint = {
   battDischarge: number;
   /** EV / Zappi charge energy (kWh) when a charge-power entity is mapped. */
   cars: number;
+  /** Off-peak (cheap window) grid import £. */
+  costOffPeak: number;
+  /** Peak / high grid import £. */
+  costPeak: number;
+  /** Total spend £ (= costOffPeak + costPeak). */
   cost: number;
 };
 
@@ -183,7 +188,7 @@ export function lastDays(count: number): DayPoint[] {
     // Demo has no hourly import series — split by Intelligent Go window hours,
     // priced with custom tariff defaults (same as editable Energy rates).
     const { lowKwh, highKwh } = splitDailyImportByWindow(gridIn);
-    const cost = gridSpendGbp(lowKwh, highKwh, {
+    const spend = gridSpendPartsGbp(lowKwh, highKwh, {
       lowGbpPerKwh: DEFAULT_TARIFFS.cheap,
       highGbpPerKwh: DEFAULT_TARIFFS.peak,
     });
@@ -197,7 +202,9 @@ export function lastDays(count: number): DayPoint[] {
       battCharge: Number(battCharge.toFixed(2)),
       battDischarge: Number(battDischarge.toFixed(2)),
       cars: Number(cars.toFixed(2)),
-      cost,
+      costOffPeak: spend.offPeak,
+      costPeak: spend.peak,
+      cost: spend.total,
     });
   }
   return out;

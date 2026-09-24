@@ -34,6 +34,7 @@ import { applyLiveStates } from "./live-updates";
 import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
 import {
   clampRate,
+  estimateImportCostParts,
   readLocalTariffs,
   resolveTariffs,
   writeLocalTariffs,
@@ -56,16 +57,17 @@ function bootTariffs(): TariffState {
 }
 
 function remapDayCosts(days: DayPoint[], rates: TariffRates): DayPoint[] {
-  return days.map((d) => ({
-    ...d,
-    cost: Number(
-      (
-        // Prefer TOU window weighting when we lack per-day hourly rows here;
-        // refreshHistory recomputes with hourStats when live.
-        (d.gridIn * (rates.cheap * 0.25 + rates.peak * 0.75))
-      ).toFixed(2),
-    ),
-  }));
+  return days.map((d) => {
+    // Prefer TOU window weighting when we lack per-day hourly rows here;
+    // refreshHistory recomputes with hourStats when live.
+    const spend = estimateImportCostParts(d.gridIn, rates);
+    return {
+      ...d,
+      costOffPeak: spend.costOffPeak,
+      costPeak: spend.costPeak,
+      cost: spend.cost,
+    };
+  });
 }
 
 function ratesForHistory(tariffs: TariffRates): {

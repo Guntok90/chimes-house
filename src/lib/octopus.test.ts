@@ -4,6 +4,7 @@ import {
   DEFAULT_TARIFF,
   cheapFractionInLocalHour,
   gridSpendGbp,
+  gridSpendPartsGbp,
   isIntelligentGoCheapLocal,
   splitDailyImportByWindow,
 } from "./octopus.ts";
@@ -31,6 +32,14 @@ describe("octopus Intelligent Go helpers", () => {
     assert.equal(gridSpendGbp(10, 10, DEFAULT_TARIFF), 2.96);
     // Flat average of 20 kWh @ 22.6p would be 4.52 — must differ.
     assert.notEqual(gridSpendGbp(10, 10, DEFAULT_TARIFF), Number((20 * 0.226).toFixed(2)));
+  });
+
+  it("gridSpendPartsGbp breaks out off-peak, peak, and total", () => {
+    const parts = gridSpendPartsGbp(10, 10, DEFAULT_TARIFF);
+    assert.equal(parts.offPeak, 0.7);
+    assert.equal(parts.peak, 2.26);
+    assert.equal(parts.total, 2.96);
+    assert.equal(parts.total, Number((parts.offPeak + parts.peak).toFixed(2)));
   });
 
   it("splitDailyImportByWindow uses 6/24 cheap hours", () => {
