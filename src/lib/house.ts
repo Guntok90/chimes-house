@@ -1,4 +1,9 @@
-import { DEFAULT_TARIFFS, estimateImportCost } from "./tariffs.ts";
+import {
+  DEFAULT_TARIFF,
+  gridSpendGbp,
+  splitDailyImportByWindow,
+} from "./octopus.ts";
+import { DEFAULT_TARIFFS } from "./tariffs.ts";
 
 export type HouseLive = {
   soc: number;
@@ -13,12 +18,43 @@ export type HouseLive = {
   zappiPlugged: boolean;
   /** Zappi charge power (W) when a myenergi power entity is present. */
   zappiW: number;
+  /**
+   * Second vehicle (Range Rover) — only populated when HA exposes matching
+   * power / SOC / plug entities (discovered by name; no invented brand ids).
+   */
+  rangeRoverW: number;
+  rangeRoverSoc: number;
+  rangeRoverPlugged: boolean;
+  /** Energy charged via Zappi today (kWh). `null` when no today sensor is mapped. */
+  zappiTodayKwh: number | null;
+  /**
+   * Energy charged into the Range Rover today (kWh).
+   * `null` when no daily kWh entity is present — UI shows "—".
+   */
+  rangeRoverTodayKwh: number | null;
   intelligent: boolean;
   offPeak: boolean;
+  /** Huawei `switch.*_charge_from_grid` — allow charging the pack from the grid. */
   gridCharge: boolean;
+  /**
+   * Huawei Grid charge cutoff SOC (%). Null when the number entity is not on this Pi.
+   * Caps how high the pack may charge from the grid (TOU / AC charge).
+   */
+  gridChargeCutoffSoc: number | null;
+  /**
+   * Huawei End-of-charge SOC / charging cutoff capacity (%). Null when missing.
+   * Caps how high the pack may charge from solar (self-consumption).
+   */
+  solarChargeCutoffSoc: number | null;
   stevieHome: boolean;
   /** From `sun.sun` when available; demo evening snapshot is below horizon. */
   sunAboveHorizon: boolean;
+  /**
+   * Octopus Intelligent Go unit rates (£/kWh) when HA exposes them.
+   * Fallback matches prior app constants (7p / 22.6p) — see `octopus.ts`.
+   */
+  cheapRateGbp: number;
+  peakRateGbp: number;
 };
 
 /**
@@ -37,11 +73,20 @@ export const EMPTY_LIVE: HouseLive = {
   zappiMode: "—",
   zappiPlugged: false,
   zappiW: 0,
+  rangeRoverW: 0,
+  rangeRoverSoc: 0,
+  rangeRoverPlugged: false,
+  zappiTodayKwh: null,
+  rangeRoverTodayKwh: null,
   intelligent: false,
   offPeak: false,
   gridCharge: false,
+  gridChargeCutoffSoc: null,
+  solarChargeCutoffSoc: null,
   stevieHome: false,
   sunAboveHorizon: true,
+  cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
+  peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
 };
 
 export const SNAPSHOT: HouseLive = {
@@ -56,11 +101,20 @@ export const SNAPSHOT: HouseLive = {
   zappiMode: "Eco+",
   zappiPlugged: false,
   zappiW: 0,
+  rangeRoverW: 0,
+  rangeRoverSoc: 0,
+  rangeRoverPlugged: false,
+  zappiTodayKwh: 8.4,
+  rangeRoverTodayKwh: 12.1,
   intelligent: true,
   offPeak: true,
   gridCharge: false,
+  gridChargeCutoffSoc: 90,
+  solarChargeCutoffSoc: 100,
   stevieHome: true,
   sunAboveHorizon: false,
+  cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
+  peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
 };
 
 /** Demo snapshot. Live values come from `useLive()`. */
@@ -88,6 +142,8 @@ export type DayPoint = {
   gridOut: number;
   battCharge: number;
   battDischarge: number;
+  /** EV / Zappi charge energy (kWh) when a charge-power entity is mapped. */
+  cars: number;
   cost: number;
 };
 
@@ -98,6 +154,8 @@ export type HourPoint = {
   solarW: number;
   houseW: number;
   gridW: number;
+  /** Zappi / driveway charge power (W) when mapped — second car only if entity exists. */
+  carW: number;
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -121,7 +179,14 @@ export function lastDays(count: number): DayPoint[] {
     const short = Math.max(0, house - solar - battDischarge + battCharge * 0.15);
     const gridOut = clamp(surplus * 0.55, 0, 6.2);
     const gridIn = clamp(short * 0.7, 0.2, 8.4);
-    const cost = estimateImportCost(gridIn, DEFAULT_TARIFFS);
+    const cars = clamp((seed % 7) * 0.35, 0, 4.2);
+    // Demo has no hourly import series — split by Intelligent Go window hours,
+    // priced with custom tariff defaults (same as editable Energy rates).
+    const { lowKwh, highKwh } = splitDailyImportByWindow(gridIn);
+    const cost = gridSpendGbp(lowKwh, highKwh, {
+      lowGbpPerKwh: DEFAULT_TARIFFS.cheap,
+      highGbpPerKwh: DEFAULT_TARIFFS.peak,
+    });
     out.push({
       key: d.toISOString().slice(0, 10),
       label: d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }),
@@ -131,6 +196,7 @@ export function lastDays(count: number): DayPoint[] {
       gridOut: Number(gridOut.toFixed(2)),
       battCharge: Number(battCharge.toFixed(2)),
       battDischarge: Number(battDischarge.toFixed(2)),
+      cars: Number(cars.toFixed(2)),
       cost,
     });
   }
@@ -159,6 +225,7 @@ export function lastHours(): HourPoint[] {
       soc = clamp(soc + (battW / 10000) * 100, 12, 98);
     }
     const gridW = houseW - solarW - (battW < 0 ? -battW : 0) + (battW > 0 ? battW : 0);
+    const carW = h >= 1 && h <= 5 ? 3200 : 0;
     out.push({
       hour: `${String(h).padStart(2, "0")}:00`,
       soc: Math.round(soc),
@@ -166,6 +233,7 @@ export function lastHours(): HourPoint[] {
       solarW,
       houseW,
       gridW: Math.round(gridW * 0.15),
+      carW,
     });
   }
   out[21] = {
@@ -175,10 +243,54 @@ export function lastHours(): HourPoint[] {
     solarW: SNAPSHOT.solarNowW,
     houseW: SNAPSHOT.houseW,
     gridW: SNAPSHOT.gridW,
+    carW: SNAPSHOT.zappiW,
   };
+  return out;
+}
+
+/** Demo multi-day hourly series for Overview day scroll (past week). */
+export function lastWeekHours(): HourPoint[] {
+  const out: HourPoint[] = [];
+  for (let i = 7 * 24 - 1; i >= 0; i--) {
+    const t = new Date(NOW);
+    t.setHours(NOW.getHours() - i, 0, 0, 0);
+    const h = t.getHours();
+    const seed = t.getDate() * 24 + h;
+    let solarW = 0;
+    if (h >= 7 && h <= 18) {
+      const peak = 1 - Math.abs(h - 13) / 7;
+      solarW = Math.round(peak * (3800 + (seed % 9) * 40));
+    }
+    const houseW = h < 6 ? 220 : h < 9 ? 640 : h < 17 ? 410 : h < 22 ? 520 : 280;
+    let battW = 0;
+    if (solarW > houseW + 200) battW = Math.min(2200, solarW - houseW);
+    else if (solarW < houseW - 80) battW = -(houseW - solarW);
+    const carW = h >= 1 && h <= 5 ? 2800 + (seed % 5) * 80 : 0;
+    const label = `${t.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" })} ${String(h).padStart(2, "0")}:00`;
+    out.push({
+      hour: label,
+      soc: clamp(50 + (seed % 40), 12, 98),
+      battW: Math.round(battW),
+      solarW,
+      houseW,
+      gridW: Math.round((houseW - solarW) * 0.12),
+      carW,
+    });
+  }
   return out;
 }
 
 export const WEEK = lastDays(7);
 export const MONTH = lastDays(28);
+export const YEAR = lastDays(12).map((d, i) => {
+  const t = new Date(NOW);
+  t.setMonth(NOW.getMonth() - (11 - i), 1);
+  return {
+    ...d,
+    key: `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}`,
+    label: t.toLocaleDateString("en-GB", { month: "short" }),
+  };
+});
 export const HOURS = lastHours();
+export const WEEK_HOURS = lastWeekHours();
+export const SCROLL_DAYS = lastDays(56);

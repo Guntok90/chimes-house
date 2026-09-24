@@ -6,6 +6,7 @@ import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
 import { TariffEditor } from "./tariff-editor";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
+import { VehiclesSection } from "./vehicles";
 
 export function EnergyView() {
   const LIVE = useLive();
@@ -38,21 +39,23 @@ export function EnergyView() {
     <div className="space-y-8">
       <PageTitle>Energy</PageTitle>
       <section>
-        <SectionLabel>Live flow</SectionLabel>
+        <SectionLabel tone="teal">Live flow</SectionLabel>
         <EnergyFlow />
         <p className="mt-3 max-w-2xl text-sm leading-relaxed text-ink-soft">{blurb}</p>
       </section>
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <Metric accent label="Solar now" value={`${LIVE.solarNowW} W`} hint={solarHint} />
-        <Metric label="House" value={`${LIVE.houseW} W`} hint="Live load" />
-        <Metric label="Battery" value={`${Math.abs(LIVE.batteryW)} W`} hint={battHint} />
-        <Metric label="Grid" value={`${LIVE.gridW} W`} hint={gridHint} />
+        <Metric tone="terra" label="House" value={`${LIVE.houseW} W`} hint="Live load" />
+        <Metric tone="sand" label="Battery" value={`${Math.abs(LIVE.batteryW)} W`} hint={battHint} />
+        <Metric tone="teal" label="Grid" value={`${LIVE.gridW} W`} hint={gridHint} />
       </div>
+
+      <VehiclesSection />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section>
-          <SectionLabel>Today</SectionLabel>
-          <Surface className="px-5">
+          <SectionLabel tone="sand">Today</SectionLabel>
+          <Surface tone="sand" className="px-5">
             <Row label="Solar yield" value={`${LIVE.solarTodayKwh} kWh`} />
             <Row
               label="House used"
@@ -71,8 +74,8 @@ export function EnergyView() {
           </Surface>
         </section>
         <section>
-          <SectionLabel>Inverter</SectionLabel>
-          <Surface className="px-5">
+          <SectionLabel tone="teal">Inverter</SectionLabel>
+          <Surface tone="teal" className="px-5">
             <Row label="Status" value={LIVE.inverterStatus} />
             <Row label="Active power" value={`${LIVE.inverterW} W`} />
             <Row label="Input" value={`${LIVE.solarNowW} W`} />
@@ -84,9 +87,9 @@ export function EnergyView() {
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section>
-          <SectionLabel>Seven days · kWh</SectionLabel>
+          <SectionLabel tone="terra">Seven days · kWh</SectionLabel>
           {chartsReady ? (
-            <Surface className="h-64 p-3">
+            <Surface tone="terra" className="h-64 p-3">
               <PowerArea
                 data={week.map((d) => ({
                   label: d.label.replace(/^\w+ /, ""),
@@ -104,8 +107,8 @@ export function EnergyView() {
           )}
         </section>
         <section>
-          <SectionLabel>Octopus</SectionLabel>
-          <Surface className="mb-3 px-5">
+          <SectionLabel tone="umber">Octopus</SectionLabel>
+          <Surface tone="umber" className="mb-3 px-5">
             <Row label="Tariff" value="Intelligent" />
             <Row label="Window" value={LIVE.offPeak ? "Off-peak now" : "Peak"} />
             <Row label="Cheap rate" value={`£${tariffs.cheap.toFixed(3)}/kWh`} />
@@ -116,7 +119,7 @@ export function EnergyView() {
             />
           </Surface>
           {chartsReady ? (
-            <Surface className="h-48 p-3">
+            <Surface tone="teal" className="h-48 p-3">
               <CostBars data={week.map((d) => ({ label: d.label.split(" ")[0], cost: d.cost }))} />
             </Surface>
           ) : (
