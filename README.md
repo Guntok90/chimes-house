@@ -54,6 +54,14 @@ Mapped when present (preferred ids first):
 | Range Rover kWh | Daily energy / Hybrid “today’s consumption” when present; otherwise “—” on Charge  |
 | Cupra / VAG     | Driveway Cupra stays on the **Zappi** path (`zappiPlugged` / `zappiW` / today). Do not remap VAG `*_plug_connected` onto Range Rover. |
 | Stevie          | `person.stevie_w`                                                                |
+
+If Range Rover Plug/Today still show “—” live, add (or rename) HA entities so the id/friendly name includes `range_rover` / `land_rover` / `jlr`, for example:
+
+- Plug: `binary_sensor.*_charging_cable_connected` / `*_plug_connected` / `*_plugged_in`, or leave the Front garden **Range Rover Hybrid** switch named with both tokens
+- Today kWh: `sensor.*_energy_charged_today` / Hybrid `*_today_s_consumption` (kWh), same naming rule
+- Optional: a utility meter that resets at midnight feeding today’s kWh
+
+Cupra portal / VAG Connect SOC work is out of scope here — keep those entities on the Zappi side.
 | Switches        | Lamp/Telly/blankets/Fish/Pergola/Ponds → `switch.smart_switch_*` / garden ids    |
 
 Live values use neutral zeros for unmapped fields — they never mix demo numbers (e.g. 16.68 kWh) with partial live data. History / Overview charts use HA recorder history over the same WebSocket when available; otherwise they show **No history yet** (never fake WEEK/HOURS curves while Live). “After dusk” only when a live `sun.sun` is `below_horizon`. If bootstrap is unconfigured, or the WebSocket cannot reach the Pi, the app stays on the demo snapshot and shows a connect error.
