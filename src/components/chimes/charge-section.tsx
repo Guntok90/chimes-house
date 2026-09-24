@@ -3,7 +3,6 @@ import { Car, PlugZap, Zap } from "lucide-react";
 import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 import { Row, SectionLabel, Surface } from "./ui";
-import { VehicleCard } from "./vehicles";
 
 function formatTodayKwh(v: number | null): string {
   return v == null ? "—" : `${v} kWh`;
@@ -174,41 +173,6 @@ export function ChargeSection({
             Rover.
           </p>
         </Surface>
-      </div>
-
-      <div className="grid gap-2.5 md:grid-cols-2">
-        <VehicleCard
-          icon={Zap}
-          name="Zappi Charger"
-          place="Driveway"
-          status={live.zappiPlugged ? "Plugged in" : "Unplugged"}
-          detail={
-            live.zappiW > 30
-              ? `${live.zappiW} W`
-              : live.zappiMode === "—"
-                ? undefined
-                : live.zappiMode
-          }
-          todayKwh={live.zappiTodayKwh}
-          live={live.zappiW > 30 || live.zappiPlugged}
-          tone="terra"
-        />
-        <VehicleCard
-          icon={Car}
-          name="Range Rover"
-          place="Driveway"
-          status={rangeRoverStatus(live)}
-          detail={
-            live.rangeRoverW > 30
-              ? `${live.rangeRoverW} W`
-              : live.rangeRoverSoc > 0
-                ? `${live.rangeRoverSoc}%`
-                : undefined
-          }
-          todayKwh={live.rangeRoverTodayKwh}
-          live={live.rangeRoverW > 30 || live.rangeRoverPlugged}
-          tone="teal"
-        />
       </div>
 
       <Surface className="px-5" tone="umber">
