@@ -122,12 +122,32 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   rangeRoverTodayKwh: [],
   offPeak: [],
   intelligent: [],
-  gridCharge: [],
+  // Huawei Solar (wlcrs) — ESS device is usually named "Batteries" on Chimes-Pi.
+  gridCharge: ["switch.batteries_charge_from_grid", "switch.inverter_charge_from_grid"],
+  gridChargeCutoffSoc: [
+    "number.batteries_grid_charge_cutoff_soc",
+    "number.inverter_grid_charge_cutoff_soc",
+  ],
+  // End-of-charge SOC = solar / self-consumption charge cutoff (not grid).
+  solarChargeCutoffSoc: [
+    "number.batteries_charging_cutoff_capacity",
+    "number.inverter_charging_cutoff_capacity",
+  ],
   stevieHome: ["person.stevie_w"],
   // Read-only tariff sensors (£/kWh or p/kWh) — never written back to HA.
   cheapRateGbp: [],
   peakRateGbp: [],
 };
+
+/** Defaults when HA number entities omit min/max/step attributes. */
+export const CHARGE_LIMIT_DEFAULTS = {
+  gridChargeCutoffSoc: { min: 20, max: 100, step: 1 },
+  solarChargeCutoffSoc: { min: 90, max: 100, step: 1 },
+} as const;
+
+export type ChargeLimitKey = keyof typeof CHARGE_LIMIT_DEFAULTS;
+
+export type NumberControlMeta = { min: number; max: number; step: number };
 
 /** True when entity name/id clearly refers to the Range Rover (second vehicle). */
 function isRangeRoverBlob(b: string) {
@@ -593,12 +613,36 @@ export function autoMap(states: HaState[]): HaMap {
       (b.includes("octopus") && (b.includes("ready") || b.includes("dispatch"))),
   );
 
-  const gridCharge = find(
+  // Charge-from-grid allow — switch only (never number / forcible services).
+  const gridCharge = resolve(
     states,
-    (_s, b) =>
-      (b.includes("grid") && b.includes("charge")) ||
-      b.includes("charge_from_grid") ||
-      b.includes("forcible_charge"),
+    "gridCharge",
+    (s, b) =>
+      s.entity_id.startsWith("switch.") &&
+      (b.includes("charge_from_grid") ||
+        (b.includes("grid") && b.includes("charge") && !b.includes("cutoff") && !b.includes("power"))),
+  );
+
+  const gridChargeCutoffSoc = resolve(
+    states,
+    "gridChargeCutoffSoc",
+    (s, b) =>
+      s.entity_id.startsWith("number.") &&
+      (b.includes("grid_charge_cutoff") ||
+        (b.includes("grid") && b.includes("cutoff") && (b.includes("soc") || b.includes("state_of_charge")))),
+  );
+
+  // Solar / self-consumption end-of-charge — not grid cutoff, not discharge cutoff.
+  const solarChargeCutoffSoc = resolve(
+    states,
+    "solarChargeCutoffSoc",
+    (s, b) =>
+      s.entity_id.startsWith("number.") &&
+      !b.includes("grid") &&
+      !b.includes("discharg") &&
+      (b.includes("charging_cutoff_capacity") ||
+        b.includes("charging_cutoff") ||
+        (b.includes("end_of_charge") && (b.includes("soc") || b.includes("capacity")))),
   );
 
   const stevie = resolve(
@@ -643,6 +687,8 @@ export function autoMap(states: HaState[]): HaMap {
   if (offPeak) map.offPeak = offPeak.entity_id;
   if (intelligent) map.intelligent = intelligent.entity_id;
   if (gridCharge) map.gridCharge = gridCharge.entity_id;
+  if (gridChargeCutoffSoc) map.gridChargeCutoffSoc = gridChargeCutoffSoc.entity_id;
+  if (solarChargeCutoffSoc) map.solarChargeCutoffSoc = solarChargeCutoffSoc.entity_id;
   if (stevie) map.stevieHome = stevie.entity_id;
   if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
   if (peakRate) map.peakRateGbp = peakRate.entity_id;
@@ -730,6 +776,12 @@ export function liveFromStates(
     const s = take(key);
     if (!s) return current;
     return num(s.state) ?? current;
+  };
+  const optionalPct = (key: keyof HouseLive): number | null => {
+    const s = take(key);
+    if (!s) return null;
+    const v = num(s.state);
+    return v === null ? null : Math.round(v);
   };
   const flag = (key: keyof HouseLive, current: boolean) => {
     const s = take(key);
@@ -860,10 +912,38 @@ export function liveFromStates(
     intelligent: flag("intelligent", fallback.intelligent),
     offPeak: flag("offPeak", fallback.offPeak),
     gridCharge: flag("gridCharge", fallback.gridCharge),
+    gridChargeCutoffSoc: optionalPct("gridChargeCutoffSoc"),
+    solarChargeCutoffSoc: optionalPct("solarChargeCutoffSoc"),
     stevieHome: flag("stevieHome", fallback.stevieHome),
     sunAboveHorizon,
     cheapRateGbp: rateGbp("cheapRateGbp", fallback.cheapRateGbp),
     peakRateGbp: rateGbp("peakRateGbp", fallback.peakRateGbp),
+  };
+}
+
+/** Read min/max/step from a mapped HA number entity, else Huawei defaults. */
+export function chargeLimitMeta(
+  states: HaState[],
+  map: HaMap,
+  key: ChargeLimitKey,
+): NumberControlMeta {
+  const defaults = CHARGE_LIMIT_DEFAULTS[key];
+  const id = map[key];
+  const s = id ? states.find((x) => x.entity_id === id) : undefined;
+  if (!s) return { ...defaults };
+  const min = num(String(s.attributes.min ?? "")) ?? defaults.min;
+  const max = num(String(s.attributes.max ?? "")) ?? defaults.max;
+  const step = num(String(s.attributes.step ?? "")) ?? defaults.step;
+  return { min, max, step: step > 0 ? step : defaults.step };
+}
+
+export function chargeLimitMetaMap(
+  states: HaState[],
+  map: HaMap,
+): Record<ChargeLimitKey, NumberControlMeta> {
+  return {
+    gridChargeCutoffSoc: chargeLimitMeta(states, map, "gridChargeCutoffSoc"),
+    solarChargeCutoffSoc: chargeLimitMeta(states, map, "solarChargeCutoffSoc"),
   };
 }
 
@@ -1147,6 +1227,16 @@ export class HaSocket {
     await this.send("call_service", {
       domain,
       service,
+      target: { entity_id: entityId },
+    });
+  }
+
+  /** Set a `number.*` entity via `number.set_value` (Huawei charge cutoffs). */
+  async setNumber(entityId: string, value: number) {
+    await this.send("call_service", {
+      domain: "number",
+      service: "set_value",
+      service_data: { value },
       target: { entity_id: entityId },
     });
   }

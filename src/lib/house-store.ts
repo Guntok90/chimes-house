@@ -8,21 +8,25 @@ import {
   type HaStatisticsBag,
 } from "./ha-history";
 import {
+  CHARGE_LIMIT_DEFAULTS,
   DEFAULT_HA_URL,
   HaSocket,
   areaSwitchesFromStates,
+  chargeLimitMetaMap,
   credsForBoot,
   demoAreaSwitches,
   readCreds,
   writeCreds,
   wsFailureMessage,
   type AreaSwitch,
+  type ChargeLimitKey,
   type HaArea,
   type HaBootstrapResponse,
   type HaCreds,
   type HaEntityReg,
   type HaMap,
   type HaState,
+  type NumberControlMeta,
   type SwitchId,
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
@@ -48,6 +52,11 @@ export const HISTORY_YEAR_COUNT = 12;
 type Status = "demo" | "connecting" | "live" | "error";
 type HistoryStatus = "idle" | "loading" | "ready" | "empty";
 
+const DEMO_CHARGE_META: Record<ChargeLimitKey, NumberControlMeta> = {
+  gridChargeCutoffSoc: { ...CHARGE_LIMIT_DEFAULTS.gridChargeCutoffSoc },
+  solarChargeCutoffSoc: { ...CHARGE_LIMIT_DEFAULTS.solarChargeCutoffSoc },
+};
+
 type Store = {
   live: HouseLive;
   switches: Record<string, boolean>;
@@ -68,10 +77,18 @@ type Store = {
   /** Last 12 months from period:month statistics. */
   historyYear: DayPoint[];
   historyStatus: HistoryStatus;
+  /** Min/max/step for mapped Huawei charge-limit number entities. */
+  chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
+  /** Last write error from Battery charge-limit Apply (cleared on success). */
+  writeError?: string;
   connect: (creds: HaCreds) => Promise<void>;
   disconnect: () => void;
   boot: () => void;
   toggle: (id: string) => void;
+  /** Explicit Apply: set grid / solar charge cutoff SOC via number.set_value. */
+  applyChargeLimit: (key: ChargeLimitKey, value: number) => Promise<boolean>;
+  /** Explicit Apply: turn charge-from-grid switch on/off. */
+  applyGridCharge: (allow: boolean) => Promise<boolean>;
   /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
   toggleEntity: (entityId: string) => void;
   refreshHistory: () => Promise<void>;
@@ -100,6 +117,7 @@ export const useHouse = create<Store>((set, get) => {
     url: DEFAULT_HA_URL,
     ...emptyHistory(),
     historyStatus: "idle",
+    chargeLimitMeta: DEMO_CHARGE_META,
 
     boot() {
       if (bootInFlight) return;
@@ -179,7 +197,10 @@ export const useHouse = create<Store>((set, get) => {
         lastStates = list;
         const wasLive = get().status === "live";
         applyLiveStates(states, get, set, socket);
-        set({ areaSwitches: rebuildAreaSwitches(list) });
+        set({
+          areaSwitches: rebuildAreaSwitches(list),
+          chargeLimitMeta: chargeLimitMetaMap(list, get().map),
+        });
         if (!wasLive && get().status === "live") {
           void refreshRegistries();
         }
@@ -313,6 +334,8 @@ export const useHouse = create<Store>((set, get) => {
         live: { ...SNAPSHOT },
         areaSwitches: demoAreaSwitches({}),
         error: undefined,
+        writeError: undefined,
+        chargeLimitMeta: DEMO_CHARGE_META,
         ...emptyHistory(),
         historyStatus: "idle",
       });
@@ -325,6 +348,51 @@ export const useHouse = create<Store>((set, get) => {
       set({ switches: { ...switches, [id]: !switches[id] } });
       if (status === "live" && readCreds()) {
         void socket.call(entity);
+      }
+    },
+
+    async applyChargeLimit(key, value) {
+      const { map, status, live, chargeLimitMeta } = get();
+      const entity = map[key];
+      if (!entity || status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — charge limits stay read-only." });
+        return false;
+      }
+      const meta = chargeLimitMeta[key];
+      const clamped = Math.min(meta.max, Math.max(meta.min, Math.round(value)));
+      set({
+        live: { ...live, [key]: clamped },
+        writeError: undefined,
+      });
+      try {
+        await socket.setNumber(entity, clamped);
+        return true;
+      } catch (err) {
+        set({
+          writeError:
+            err instanceof Error ? err.message : "Could not set the charge limit on the Pi.",
+        });
+        return false;
+      }
+    },
+
+    async applyGridCharge(allow) {
+      const { map, status, live } = get();
+      const entity = map.gridCharge;
+      if (!entity || status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — charge limits stay read-only." });
+        return false;
+      }
+      set({ live: { ...live, gridCharge: allow }, writeError: undefined });
+      try {
+        await socket.call(entity, allow);
+        return true;
+      } catch (err) {
+        set({
+          writeError:
+            err instanceof Error ? err.message : "Could not set charge from grid on the Pi.",
+        });
+        return false;
       }
     },
 

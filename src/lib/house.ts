@@ -33,7 +33,18 @@ export type HouseLive = {
   rangeRoverTodayKwh: number | null;
   intelligent: boolean;
   offPeak: boolean;
+  /** Huawei `switch.*_charge_from_grid` — allow charging the pack from the grid. */
   gridCharge: boolean;
+  /**
+   * Huawei Grid charge cutoff SOC (%). Null when the number entity is not on this Pi.
+   * Caps how high the pack may charge from the grid (TOU / AC charge).
+   */
+  gridChargeCutoffSoc: number | null;
+  /**
+   * Huawei End-of-charge SOC / charging cutoff capacity (%). Null when missing.
+   * Caps how high the pack may charge from solar (self-consumption).
+   */
+  solarChargeCutoffSoc: number | null;
   stevieHome: boolean;
   /** From `sun.sun` when available; demo evening snapshot is below horizon. */
   sunAboveHorizon: boolean;
@@ -69,6 +80,8 @@ export const EMPTY_LIVE: HouseLive = {
   intelligent: false,
   offPeak: false,
   gridCharge: false,
+  gridChargeCutoffSoc: null,
+  solarChargeCutoffSoc: null,
   stevieHome: false,
   sunAboveHorizon: true,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
@@ -95,6 +108,8 @@ export const SNAPSHOT: HouseLive = {
   intelligent: true,
   offPeak: true,
   gridCharge: false,
+  gridChargeCutoffSoc: 90,
+  solarChargeCutoffSoc: 100,
   stevieHome: true,
   sunAboveHorizon: false,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
