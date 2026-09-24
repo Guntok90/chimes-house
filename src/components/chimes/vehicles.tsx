@@ -8,6 +8,15 @@ function formatTodayKwh(v: number | null): string {
   return v == null ? "—" : `${v} kWh`;
 }
 
+function rangeRoverStatus(live: {
+  rangeRoverPlugged: boolean;
+  rangeRoverW: number;
+}): string {
+  if (live.rangeRoverW > 30) return "Charging";
+  if (live.rangeRoverPlugged) return "Plugged in";
+  return "Plug off";
+}
+
 /** Both driveway chargers — same labels as Site / Overview / Charge. */
 export function VehiclesSection({ className }: { className?: string }) {
   const live = useLive();
@@ -35,8 +44,16 @@ export function VehiclesSection({ className }: { className?: string }) {
           icon={Car}
           name="Range Rover"
           place="Driveway"
-          status="Plug off"
+          status={rangeRoverStatus(live)}
+          detail={
+            live.rangeRoverW > 30
+              ? `${live.rangeRoverW} W`
+              : live.rangeRoverSoc > 0
+                ? `${live.rangeRoverSoc}%`
+                : undefined
+          }
           todayKwh={live.rangeRoverTodayKwh}
+          live={live.rangeRoverW > 30 || live.rangeRoverPlugged}
           tone="teal"
         />
       </div>

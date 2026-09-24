@@ -46,7 +46,7 @@ Mapped when present (preferred ids first):
 | Solar cutoff SOC| `number.batteries_charging_cutoff_capacity` — End-of-charge (`number.set_value`) |
 | Grid W          | `sensor.power_meter_active_power` (also `sensor.myenergi_chimes_power_grid`)     |
 | House W         | Real load W if present; else **derived** `solar + grid − battery` (never kWh)    |
-| Zappi mode      | `select.myenergi_zappi_25435526_charge_mode`                                     |
+| Zappi mode      | `select.myenergi_zappi_25435526_charge_mode` (`select.select_option` Apply)     |
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
 | Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
@@ -120,10 +120,10 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
 | Home     | 24h energy graph, area-grouped switches (incl. Spares), Stevie |
-| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + inverter / Octopus + custom £/kWh rates |
+| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover status; Dispatch read-only) + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge + Grid & Solar charge cutoffs |
-| Charge   | Zappi Eco+, Intelligent                                |
+| Charge   | Zappi Eco+ mode control, Range Rover status, Intelligent (read-only) |
 | History  | 7 / 28 day solar, house, grid, spend                   |
 | Garden   | Front (Willow, Range Rover cams) · Back (Pergola, ponds, Frank) |
 | House    | Lights, plugs, **Pi connection**, sign out             |
