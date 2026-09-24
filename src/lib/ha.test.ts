@@ -20,6 +20,7 @@ import {
   sameLive,
   sameSwitches,
   rateToGbpPerKwh,
+  parsePlugConnected,
   wsFailureMessage,
   zappiModeOptions,
   DEFAULT_ZAPPI_MODES,
@@ -393,6 +394,21 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.rangeRoverTodayKwh, 9.5);
   });
 
+  it("maps Hybrid socket today's consumption as Range Rover daily kWh", () => {
+    const states = [
+      state(
+        "sensor.range_rover_hybrid_today_s_consumption",
+        "4.2",
+        "Range Rover Hybrid Today's consumption",
+        "kWh",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_hybrid_today_s_consumption");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverTodayKwh, 4.2);
+  });
+
   it("converts Wh Zappi today sensors to kWh", () => {
     const states = [
       state("sensor.myenergi_zappi_25435526_energy_used_today", "2500", "", "Wh"),
@@ -749,12 +765,79 @@ describe("Range Rover entity discovery", () => {
     assert.equal(live.rangeRoverPlugged, false);
   });
 
+  it("maps charging_cable_connected and WIRED plug states", () => {
+    const states: HaState[] = [
+      state(
+        "binary_sensor.land_rover_charging_cable_connected",
+        "on",
+        "Land Rover charging cable connected",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, "binary_sensor.land_rover_charging_cable_connected");
+    assert.equal(liveFromStates(states, map, EMPTY_LIVE).rangeRoverPlugged, true);
+
+    const wired: HaState[] = [
+      state("sensor.jlr_plug_status", "WIRED", "JLR plug status"),
+    ];
+    const wiredMap = autoMap(wired);
+    assert.equal(wiredMap.rangeRoverPlugged, "sensor.jlr_plug_status");
+    assert.equal(liveFromStates(wired, wiredMap, EMPTY_LIVE).rangeRoverPlugged, true);
+  });
+
+  it("falls back to Range Rover Hybrid switch for plug when no cable sensor exists", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
+      state(
+        "sensor.range_rover_hybrid_current_consumption",
+        "2200",
+        "Range Rover Hybrid Current consumption",
+        "W",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, "switch.range_rover_hybrid");
+    assert.equal(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverPlugged, true);
+    assert.equal(live.rangeRoverW, 2200);
+  });
+
+  it("does not map Cupra / VAG Connect entities onto Range Rover", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      state("binary_sensor.cupra_born_plug_connected", "on", "Cupra plug connected"),
+      state("sensor.cupra_born_battery", "80", "Cupra battery", "%"),
+      state("sensor.cupra_born_charging_power", "7000", "Cupra charging power", "W"),
+      state("sensor.cupra_energy_charged_today", "11", "Cupra charged today", "kWh"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, undefined);
+    assert.equal(map.rangeRoverSoc, undefined);
+    assert.equal(map.rangeRoverW, undefined);
+    assert.equal(map.rangeRoverTodayKwh, undefined);
+  });
+
   it("does not invent brand entities when none are present", () => {
     const map = autoMap(CHIMES_PI);
     assert.equal(map.rangeRoverW, undefined);
     assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(map.rangeRoverPlugged, undefined);
     assert.equal(PREFERRED.rangeRoverW?.length, 0);
+  });
+});
+
+describe("parsePlugConnected", () => {
+  it("treats common connected / disconnected strings", () => {
+    assert.equal(parsePlugConnected("on"), true);
+    assert.equal(parsePlugConnected("WIRED"), true);
+    assert.equal(parsePlugConnected("Cable Connected"), true);
+    assert.equal(parsePlugConnected("charging"), true);
+    assert.equal(parsePlugConnected("Not Connected"), false);
+    assert.equal(parsePlugConnected("off"), false);
+    assert.equal(parsePlugConnected("unplugged"), false);
+    assert.equal(parsePlugConnected("unknown"), null);
   });
 });
 

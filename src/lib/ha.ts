@@ -169,8 +169,81 @@ function isRangeRoverBlob(b: string) {
     b.includes("range_rover") ||
     b.includes("range rover") ||
     b.includes("rangerover") ||
-    b.includes("range-rover")
+    b.includes("range-rover") ||
+    b.includes("land_rover") ||
+    b.includes("land rover") ||
+    b.includes("landrover") ||
+    b.includes("jlr")
   );
+}
+
+/**
+ * Front-garden Range Rover Hybrid outdoor socket (already on Garden Front).
+ * Used as plug/power/today fallback when no dedicated vehicle charge sensor exists.
+ */
+function isRangeRoverHybridBlob(b: string) {
+  return isRangeRoverBlob(b) && b.includes("hybrid");
+}
+
+/** Dedicated plug / cable / connector wording (not generic charging_power). */
+function isPlugCableBlob(b: string) {
+  return (
+    b.includes("plug") ||
+    b.includes("plugged") ||
+    b.includes("cable") ||
+    b.includes("connector") ||
+    b.includes("external_power") ||
+    b.includes("external power") ||
+    b.includes("car_connected") ||
+    b.includes("charging_cable") ||
+    b.includes("charge_cable") ||
+    b.includes("cable_connected") ||
+    b.includes("plug_connected") ||
+    b.includes("plugged_in") ||
+    b.includes("ev_plugged")
+  );
+}
+
+/**
+ * Parse charger/vehicle plug text into boolean.
+ * Returns null when the state is unknown / unavailable (caller keeps fallback).
+ */
+export function parsePlugConnected(raw: string | undefined | null): boolean | null {
+  if (raw == null) return null;
+  const v = raw.toLowerCase().trim().replace(/[_-]+/g, " ");
+  if (!v || v === "unknown" || v === "unavailable" || v === "none" || v === "n/a") return null;
+
+  const negative =
+    v.includes("not connected") ||
+    v.includes("unplugged") ||
+    v.includes("disconnected") ||
+    v === "off" ||
+    v === "false" ||
+    v === "0" ||
+    v === "no" ||
+    v === "idle" ||
+    v === "a" || // EVCC status A = disconnected
+    v.includes("notconnected");
+  if (negative) return false;
+
+  const positive =
+    v === "on" ||
+    v === "true" ||
+    v === "yes" ||
+    v === "1" ||
+    v === "wired" ||
+    v === "b" || // EVCC B = connected
+    v === "c" || // EVCC C = charging (implies plugged)
+    v.includes("plugged") ||
+    v.includes("connected") ||
+    v.includes("charging") ||
+    v.includes("ready for charging") ||
+    v.includes("readyforcharging") ||
+    v.includes("cable locked") ||
+    v.includes("external power");
+  if (positive) return true;
+
+  return null;
 }
 
 /**
@@ -521,7 +594,8 @@ export function autoMap(states: HaState[]): HaMap {
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
-  // Second vehicle — only when entity names already say Range Rover (never invent brands).
+  // Second vehicle — only when entity names already say Range Rover / Land Rover / JLR
+  // (never invent Cupra/VAG brand ids — those belong on the Zappi / Cupra driveway path).
   const rangeRoverW = resolve(
     states,
     "rangeRoverW",
@@ -530,11 +604,16 @@ export function autoMap(states: HaState[]): HaMap {
       (b.includes("power") ||
         b.includes("charge_rate") ||
         b.includes("charging") ||
-        b.includes("watt")) &&
+        b.includes("watt") ||
+        b.includes("current_consumption") ||
+        b.includes("current consumption")) &&
       !b.includes("today") &&
       !b.includes("daily") &&
       !b.includes("energy") &&
-      !b.includes("zappi"),
+      !b.includes("consumption today") &&
+      !b.includes("zappi") &&
+      !b.includes("cupra") &&
+      !b.includes("vag"),
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
@@ -550,26 +629,43 @@ export function autoMap(states: HaState[]): HaMap {
         b.includes("fuel")) &&
       !b.includes("zappi") &&
       !b.includes("luna") &&
-      !b.includes("house"),
+      !b.includes("house") &&
+      !b.includes("cupra") &&
+      !b.includes("vag"),
   );
 
-  const rangeRoverPlug = resolve(
-    states,
-    "rangeRoverPlugged",
-    (s, b) =>
-      isRangeRoverBlob(b) &&
-      !b.includes("power") &&
-      !b.includes("watt") &&
-      !b.includes("soc") &&
-      !b.includes("charge_level") &&
-      !b.includes("battery") &&
-      (b.includes("plug") ||
-        b.includes("plugged") ||
-        b.includes("connected") ||
-        b.includes("cable") ||
-        (b.includes("status") && !b.includes("mode") && !b.includes("charg"))) &&
-      (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
-  );
+  // Prefer a dedicated plug/cable sensor; fall back to the Hybrid outdoor socket switch.
+  const rangeRoverPlug =
+    resolve(
+      states,
+      "rangeRoverPlugged",
+      (s, b) =>
+        isRangeRoverBlob(b) &&
+        !b.includes("power") &&
+        !b.includes("watt") &&
+        !b.includes("current_consumption") &&
+        !b.includes("soc") &&
+        !b.includes("charge_level") &&
+        !b.includes("battery") &&
+        !b.includes("cupra") &&
+        !b.includes("vag") &&
+        !b.includes("zappi") &&
+        (isPlugCableBlob(b) ||
+          (b.includes("status") &&
+            !b.includes("mode") &&
+            !b.includes("device") &&
+            (b.includes("charg") || b.includes("ev") || b.includes("plug")))) &&
+        (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
+    ) ??
+    find(
+      states,
+      (s, b) =>
+        s.entity_id.startsWith("switch.") &&
+        isRangeRoverHybridBlob(b) &&
+        !b.includes("child_lock") &&
+        !b.includes("child lock") &&
+        !b.includes("enable"),
+    );
 
   const zappiToday = resolve(
     states,
@@ -594,20 +690,24 @@ export function autoMap(states: HaState[]): HaMap {
     states,
     "rangeRoverTodayKwh",
     (_s, b) =>
-      (b.includes("range_rover") ||
-        b.includes("range rover") ||
-        b.includes("land_rover") ||
-        b.includes("land rover") ||
-        b.includes("jlr")) &&
+      isRangeRoverBlob(b) &&
       (b.includes("energy_used_today") ||
         b.includes("charged_today") ||
         b.includes("charge_today") ||
         b.includes("energy_today") ||
         b.includes("charging_energy") ||
-        ((b.includes("energy") || b.includes("charged") || b.includes("kwh")) &&
+        b.includes("today_s_consumption") ||
+        b.includes("todays_consumption") ||
+        b.includes("today's consumption") ||
+        ((b.includes("energy") ||
+          b.includes("charged") ||
+          b.includes("kwh") ||
+          b.includes("consumption")) &&
           (b.includes("today") || b.includes("daily")))) &&
       !b.includes("zappi") &&
-      !b.includes("myenergi"),
+      !b.includes("myenergi") &&
+      !b.includes("cupra") &&
+      !b.includes("vag"),
     isEnergyUnit,
   );
 
@@ -860,33 +960,15 @@ export function liveFromStates(
   const zappiPlugState = take("zappiPlugged");
   let zappiPlugged = fallback.zappiPlugged;
   if (zappiPlugState) {
-    const v = zappiPlugState.state.toLowerCase();
-    const negative =
-      v.includes("not connected") ||
-      v.includes("not_connected") ||
-      v.includes("unplugged") ||
-      v.includes("disconnected") ||
-      v === "off" ||
-      v === "false";
-    zappiPlugged = negative
-      ? false
-      : flag("zappiPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
+    const parsed = parsePlugConnected(zappiPlugState.state);
+    if (parsed != null) zappiPlugged = parsed;
   }
 
   const rangeRoverPlugState = take("rangeRoverPlugged");
   let rangeRoverPlugged = fallback.rangeRoverPlugged;
   if (rangeRoverPlugState) {
-    const v = rangeRoverPlugState.state.toLowerCase();
-    const negative =
-      v.includes("not connected") ||
-      v.includes("not_connected") ||
-      v.includes("unplugged") ||
-      v.includes("disconnected") ||
-      v === "off" ||
-      v === "false";
-    rangeRoverPlugged = negative
-      ? false
-      : flag("rangeRoverPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
+    const parsed = parsePlugConnected(rangeRoverPlugState.state);
+    if (parsed != null) rangeRoverPlugged = parsed;
   }
 
   const solarNowW = Math.round(n("solarNowW", fallback.solarNowW));
