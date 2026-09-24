@@ -682,6 +682,8 @@ const SWITCH_IDS = new Set<string>([
   "fish",
   "stevie-blanket",
   "baby-blanket",
+  "willow-tree",
+  "range-rover-hybrid",
 ]);
 
 async function refreshRegistries() {
