@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   dayKeyFromStart,
   daySpendGbp,
+  daySpendPartsGbp,
   daysFromStatistics,
   hoursFromHistory,
   localDayKey,
@@ -202,6 +203,12 @@ describe("ha history helpers", () => {
     // 6×0.07 + 18×0.226 = 0.42 + 4.068 = 4.49
     assert.equal(daySpendGbp(24, key, rows, DEFAULT_TARIFF), 4.49);
     assert.notEqual(daySpendGbp(24, key, rows, DEFAULT_TARIFF), Number((24 * 0.226).toFixed(2)));
+
+    const parts = daySpendPartsGbp(24, key, rows, DEFAULT_TARIFF);
+    assert.equal(parts.offPeak, 0.42);
+    assert.equal(parts.peak, 4.07);
+    assert.equal(parts.total, 4.49);
+    assert.equal(parts.total, Number((parts.offPeak + parts.peak).toFixed(2)));
   });
 
   it("daysFromStatistics prefers hourly grid split for cost", () => {
@@ -230,6 +237,9 @@ describe("ha history helpers", () => {
     const today = week.find((d) => d.key === key)!;
     assert.equal(today.gridIn, 24);
     assert.equal(today.cost, 4.49); // not 24 * 0.226 = 5.42
+    assert.equal(today.costOffPeak, 0.42);
+    assert.equal(today.costPeak, 4.07);
+    assert.equal(today.cost, Number((today.costOffPeak + today.costPeak).toFixed(2)));
   });
 
   it("applies custom tariff rates to daily cost", () => {
@@ -247,5 +257,7 @@ describe("ha history helpers", () => {
     const today = week[week.length - 1];
     // 12 kWh × (0.1×0.25 + 0.3×0.75) = 12 × 0.25 = 3.00
     assert.equal(today.cost, 3);
+    assert.equal(today.costOffPeak, 0.3); // 3 kWh × 0.1
+    assert.equal(today.costPeak, 2.7); // 9 kWh × 0.3
   });
 });

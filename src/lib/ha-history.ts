@@ -4,7 +4,7 @@ import type { DayPoint, HourPoint } from "./house.ts";
 import {
   DEFAULT_TARIFF,
   cheapFractionInLocalHour,
-  gridSpendGbp,
+  gridSpendPartsGbp,
   splitDailyImportByWindow,
   type TariffRates,
 } from "./octopus.ts";
@@ -232,7 +232,7 @@ function metersForPeriod(
   map: HaMap,
   key: string,
   valueFn: (rows: HaStatRow[] | undefined, key: string) => number,
-): Omit<DayPoint, "key" | "label" | "cost"> {
+): Omit<DayPoint, "key" | "label" | "cost" | "costOffPeak" | "costPeak"> {
   const solarId = map.solarTodayKwh ?? map.solarNowW;
   const solar = valueFn(solarId ? stats[solarId] : undefined, key);
   const house = valueFn(map.houseW ? stats[map.houseW] : undefined, key);
@@ -334,6 +334,20 @@ export function splitGridImportForDay(
   };
 }
 
+/** Daily spend parts from low+high grid import × tariff rates (never a flat average). */
+export function daySpendPartsGbp(
+  gridIn: number,
+  dayKey: string,
+  hourRows: HaStatRow[] | undefined,
+  rates: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh"> = DEFAULT_TARIFF,
+) {
+  const split = splitGridImportForDay(hourRows, dayKey);
+  if (split) return gridSpendPartsGbp(split.lowKwh, split.highKwh, rates);
+  // Gap: no hourly import series — best available is window-hour weighting.
+  const approx = splitDailyImportByWindow(gridIn);
+  return gridSpendPartsGbp(approx.lowKwh, approx.highKwh, rates);
+}
+
 /** Daily spend from low+high grid import × tariff rates (never a flat average). */
 export function daySpendGbp(
   gridIn: number,
@@ -341,11 +355,7 @@ export function daySpendGbp(
   hourRows: HaStatRow[] | undefined,
   rates: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh"> = DEFAULT_TARIFF,
 ): number {
-  const split = splitGridImportForDay(hourRows, dayKey);
-  if (split) return gridSpendGbp(split.lowKwh, split.highKwh, rates);
-  // Gap: no hourly import series — best available is window-hour weighting.
-  const approx = splitDailyImportByWindow(gridIn);
-  return gridSpendGbp(approx.lowKwh, approx.highKwh, rates);
+  return daySpendPartsGbp(gridIn, dayKey, hourRows, rates).total;
 }
 
 /** Daily kWh rows from recorder statistics. Empty → []. */
@@ -369,11 +379,14 @@ export function daysFromStatistics(
     d.setDate(d.getDate() - i);
     const key = localDayKey(d);
     const meters = metersForPeriod(stats, map, key, dayValue);
+    const spend = daySpendPartsGbp(meters.gridIn, key, hourRows, rates);
     out.push({
       key,
       label: dayLabel(key),
       ...meters,
-      cost: daySpendGbp(meters.gridIn, key, hourRows, rates),
+      costOffPeak: spend.offPeak,
+      costPeak: spend.peak,
+      cost: spend.total,
     });
   }
   if (out.every((d) => !hasMeterSignal(d))) return [];
@@ -395,12 +408,15 @@ export function monthsFromStatistics(
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1, 12, 0, 0, 0);
     const key = localMonthKey(d);
     const meters = metersForPeriod(stats, map, key, monthValue);
+    const spend = daySpendPartsGbp(meters.gridIn, key, undefined, DEFAULT_TARIFF);
     out.push({
       key,
       label: monthLabel(key),
       ...meters,
       // No hourly series for monthly buckets — window-hour weighting.
-      cost: daySpendGbp(meters.gridIn, key, undefined, DEFAULT_TARIFF),
+      costOffPeak: spend.offPeak,
+      costPeak: spend.peak,
+      cost: spend.total,
     });
   }
   if (out.every((d) => !hasMeterSignal(d))) return [];

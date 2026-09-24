@@ -1,6 +1,6 @@
 import { WEEK, solarStatusHint } from "@/lib/house";
 import { useHouse, useLive, useTariffs } from "@/lib/house-store";
-import { estimateImportCost } from "@/lib/tariffs";
+import { estimateImportCostParts } from "@/lib/tariffs";
 import { CostBars, PowerArea } from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
@@ -17,7 +17,7 @@ export function EnergyView() {
   const liveMode = status === "live";
   const week = liveMode
     ? historyWeek
-    : WEEK.map((d) => ({ ...d, cost: estimateImportCost(d.gridIn, tariffs) }));
+    : WEEK.map((d) => ({ ...d, ...estimateImportCostParts(d.gridIn, tariffs) }));
   const today = week[week.length - 1];
   const chartsReady = !liveMode || (historyStatus === "ready" && week.length > 0);
   const solarHintRaw = solarStatusHint(status, LIVE);
