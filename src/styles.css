@@ -71,6 +71,29 @@
     linear-gradient(180deg, rgb(28 57 64 / 0.42) 0%, rgb(28 57 64 / 0.08) 28%, rgb(28 57 64 / 0.05) 58%, rgb(28 57 64 / 0.72) 100%);
 }
 
+.overview-glass-slider {
+  accent-color: var(--color-sand);
+}
+
+.overview-glass-slider::-webkit-slider-thumb {
+  appearance: none;
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 9999px;
+  background: var(--color-sidebar-fg);
+  border: 1px solid rgb(244 239 232 / 0.35);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+
+.overview-glass-slider::-moz-range-thumb {
+  width: 0.875rem;
+  height: 0.875rem;
+  border-radius: 9999px;
+  background: var(--color-sidebar-fg);
+  border: 1px solid rgb(244 239 232 / 0.35);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+
 .flow-line {
   fill: none;
   stroke-width: 2.4;
