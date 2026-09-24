@@ -27,6 +27,8 @@ describe("tariffs", () => {
   it("estimates import cost with the off-peak blend", () => {
     const rates = { cheap: 0.1, peak: 0.3 };
     const parts = estimateImportCostParts(10, rates);
+    assert.equal(parts.importOffPeakKwh, 2.5);
+    assert.equal(parts.importPeakKwh, 7.5);
     assert.equal(parts.costOffPeak, 0.25); // 2.5 kWh × 0.1
     assert.equal(parts.costPeak, 2.25); // 7.5 kWh × 0.3
     assert.equal(parts.cost, 2.5);
