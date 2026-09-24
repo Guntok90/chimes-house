@@ -16,7 +16,7 @@ const P = {
   battery: { x: 355, y: 392 },
   home: { x: 800, y: 202 },
   /** Left driveway bay — Range Rover (was off / front-garden). */
-  rover: { x: 700, y: 430 },
+  rangeRover: { x: 700, y: 430 },
   /** Right driveway bay — Zappi / Cupra charger side. */
   zappi: { x: 900, y: 430 },
 } as const;
@@ -26,6 +26,7 @@ type Tone = "paper" | "glass";
 export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare?: boolean }) {
   const live = useLive();
   const status = useHouse((s) => s.status);
+  const map = useHouse((s) => s.map);
   const solarHint = solarStatusHint(status, live);
   const solar = live.solarNowW;
   const home = live.houseW;
@@ -36,9 +37,28 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
   const gridIn = live.gridW > 30;
   const gridOut = live.gridW < -30;
   const zappiOn = live.zappiW > 30;
+  const roverOn = live.rangeRoverW > 30;
+  const roverMapped = Boolean(map.rangeRoverW || map.rangeRoverSoc || map.rangeRoverPlugged);
   const glass = tone === "glass";
   const idle = glass ? "flow-idle stroke-sidebar-fg/35" : "flow-idle stroke-line";
   const badge = battOut ? "On battery" : solarOn && home > 0 ? "Solar" : "Idle";
+
+  const roverValue = map.rangeRoverW
+    ? `${live.rangeRoverW} W`
+    : map.rangeRoverSoc
+      ? `${live.rangeRoverSoc}%`
+      : "—";
+  const roverHint = !roverMapped
+    ? status === "live"
+      ? "no sensor"
+      : "driveway"
+    : roverOn
+      ? "charging"
+      : live.rangeRoverPlugged
+        ? "plugged"
+        : map.rangeRoverSoc
+          ? "parked"
+          : "driveway";
 
   return (
     <div
@@ -55,6 +75,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             </div>
             <div className="mt-1 text-sm tabular-nums text-ink">
               {solar} W solar · {home} W home · {live.zappiW} W Zappi
+              {map.rangeRoverW ? ` · ${live.rangeRoverW} W Rover` : ""}
             </div>
           </div>
           <div className="rounded-full border border-line bg-white/70 px-2.5 py-1 text-xs font-medium text-ink">
@@ -65,29 +86,102 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
 
       <div className={cn("relative", bare ? "h-full" : "h-[28rem] md:h-[34rem]")}>
         <svg viewBox="0 0 1000 560" className="absolute inset-0 h-full w-full" aria-hidden>
-          <path
+          <defs>
+            <marker
+              id="flow-arrow-sand"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-sand" />
+            </marker>
+            <marker
+              id="flow-arrow-teal"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-teal-soft" />
+            </marker>
+            <marker
+              id="flow-arrow-terra"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-terra" />
+            </marker>
+            <marker
+              id="flow-arrow-umber"
+              viewBox="0 0 10 10"
+              refX="9"
+              refY="5"
+              markerWidth="5"
+              markerHeight="5"
+              orient="auto-start-reverse"
+            >
+              <path d="M 0 1.2 L 9 5 L 0 8.8 Z" className="fill-umber" />
+            </marker>
+          </defs>
+
+          <FlowPath
             d={q(P.solar, P.home, 700, 60)}
-            className={cn("flow-line", solarOn ? "flow-active stroke-sand" : idle)}
+            active={solarOn}
+            idle={idle}
+            stroke="stroke-sand"
+            fill="fill-sand"
+            marker="url(#flow-arrow-sand)"
           />
-          <path
+          <FlowPath
             d={q(P.grid, P.home, 430, 150)}
-            className={cn("flow-line", gridIn || gridOut ? "flow-active stroke-teal-soft" : idle)}
+            active={gridIn || gridOut}
+            reverse={gridOut}
+            idle={idle}
+            stroke="stroke-teal-soft"
+            fill="fill-teal-soft"
+            marker={gridOut ? undefined : "url(#flow-arrow-teal)"}
+            markerStart={gridOut ? "url(#flow-arrow-teal)" : undefined}
           />
-          <path
-            d={q(P.home, P.rover, 780, 320)}
-            className={cn("flow-line", idle)}
+          <FlowPath
+            d={q(P.home, P.rangeRover, 780, 320)}
+            active={roverOn}
+            idle={idle}
+            stroke="stroke-umber"
+            fill="fill-umber"
+            marker="url(#flow-arrow-umber)"
           />
-          <path
+          <FlowPath
             d={q(P.home, P.zappi, 920, 300)}
-            className={cn("flow-line", zappiOn ? "flow-active stroke-umber" : idle)}
+            active={zappiOn}
+            idle={idle}
+            stroke="stroke-umber"
+            fill="fill-umber"
+            marker="url(#flow-arrow-umber)"
           />
-          <path
+          <FlowPath
             d={q(P.solar, P.battery, 340, 220)}
-            className={cn("flow-line", solarOn && battIn ? "flow-active stroke-sand" : idle)}
+            active={solarOn && battIn}
+            idle={idle}
+            stroke="stroke-sand"
+            fill="fill-sand"
+            marker="url(#flow-arrow-sand)"
           />
-          <path
+          <FlowPath
             d={q(P.battery, P.home, 540, 250)}
-            className={cn("flow-line", battOut ? "flow-active stroke-terra" : idle)}
+            active={battOut}
+            idle={idle}
+            stroke="stroke-terra"
+            fill="fill-terra"
+            marker="url(#flow-arrow-terra)"
           />
         </svg>
 
@@ -134,7 +228,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[80%] top-[36%]"
+          at="left-[78%] top-[32%]"
           icon={Home}
           ring="border-teal"
           fill
@@ -148,10 +242,10 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
           at="left-[70%] top-[77%]"
           icon={Car}
           ring="border-umber"
-          value="—"
+          value={roverValue}
           label="Range Rover"
-          hint="driveway"
-          on={false}
+          hint={roverHint}
+          on={roverOn || live.rangeRoverPlugged}
         />
         <Node
           tone={tone}
@@ -165,6 +259,67 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
       </div>
     </div>
+  );
+}
+
+function FlowPath({
+  d,
+  active,
+  reverse = false,
+  idle,
+  stroke,
+  fill,
+  marker,
+  markerStart,
+}: {
+  d: string;
+  active: boolean;
+  reverse?: boolean;
+  idle: string;
+  stroke: string;
+  fill: string;
+  marker?: string;
+  markerStart?: string;
+}) {
+  return (
+    <g>
+      <path
+        d={d}
+        className={cn(
+          "flow-line",
+          active
+            ? cn("flow-active", reverse && "flow-active-rev", stroke)
+            : idle,
+        )}
+        markerEnd={active && marker ? marker : undefined}
+        markerStart={active && markerStart ? markerStart : undefined}
+      />
+      {active ? (
+        <>
+          <circle r="5" className={cn("flow-particle", fill)}>
+            <animateMotion
+              dur="0.9s"
+              repeatCount="indefinite"
+              path={d}
+              keyPoints={reverse ? "1;0" : "0;1"}
+              keyTimes="0;1"
+              calcMode="linear"
+            />
+          </circle>
+          <circle r="3.2" className={cn("flow-particle flow-particle-soft", fill)}>
+            <animateMotion
+              dur="0.9s"
+              begin="0.3s"
+              repeatCount="indefinite"
+              path={d}
+              keyPoints={reverse ? "1;0" : "0;1"}
+              keyTimes="0;1"
+              calcMode="linear"
+            />
+          </circle>
+        </>
+      ) : null}
+    </g>
   );
 }
 

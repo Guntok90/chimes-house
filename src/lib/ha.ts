@@ -109,6 +109,10 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_internal_load_ct1",
     "sensor.myenergi_zappi_25435526_ct_internal",
   ],
+  // Range Rover — no preferred ids (do not invent brand integrations). Fuzzy map only.
+  rangeRoverW: [],
+  rangeRoverSoc: [],
+  rangeRoverPlugged: [],
   // myenergi daily energy used by the Zappi (resets at local midnight).
   zappiTodayKwh: [
     "sensor.myenergi_zappi_25435526_energy_used_today",
@@ -124,6 +128,16 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   cheapRateGbp: [],
   peakRateGbp: [],
 };
+
+/** True when entity name/id clearly refers to the Range Rover (second vehicle). */
+function isRangeRoverBlob(b: string) {
+  return (
+    b.includes("range_rover") ||
+    b.includes("range rover") ||
+    b.includes("rangerover") ||
+    b.includes("range-rover")
+  );
+}
 
 /**
  * Never treat these as live house watts.
@@ -473,6 +487,56 @@ export function autoMap(states: HaState[]): HaMap {
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
+  // Second vehicle — only when entity names already say Range Rover (never invent brands).
+  const rangeRoverW = resolve(
+    states,
+    "rangeRoverW",
+    (_s, b) =>
+      isRangeRoverBlob(b) &&
+      (b.includes("power") ||
+        b.includes("charge_rate") ||
+        b.includes("charging") ||
+        b.includes("watt")) &&
+      !b.includes("today") &&
+      !b.includes("daily") &&
+      !b.includes("energy") &&
+      !b.includes("zappi"),
+    (s) => !isEnergyUnit(s) && isPowerUnit(s),
+  );
+
+  const rangeRoverSoc = resolve(
+    states,
+    "rangeRoverSoc",
+    (_s, b) =>
+      isRangeRoverBlob(b) &&
+      (b.includes("soc") ||
+        b.includes("state_of_charge") ||
+        b.includes("battery") ||
+        b.includes("charge_level") ||
+        b.includes("fuel")) &&
+      !b.includes("zappi") &&
+      !b.includes("luna") &&
+      !b.includes("house"),
+  );
+
+  const rangeRoverPlug = resolve(
+    states,
+    "rangeRoverPlugged",
+    (s, b) =>
+      isRangeRoverBlob(b) &&
+      !b.includes("power") &&
+      !b.includes("watt") &&
+      !b.includes("soc") &&
+      !b.includes("charge_level") &&
+      !b.includes("battery") &&
+      (b.includes("plug") ||
+        b.includes("plugged") ||
+        b.includes("connected") ||
+        b.includes("cable") ||
+        (b.includes("status") && !b.includes("mode") && !b.includes("charg"))) &&
+      (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
+  );
+
   const zappiToday = resolve(
     states,
     "zappiTodayKwh",
@@ -571,6 +635,9 @@ export function autoMap(states: HaState[]): HaMap {
   if (zappiMode) map.zappiMode = zappiMode.entity_id;
   if (zappiPlug) map.zappiPlugged = zappiPlug.entity_id;
   if (zappiW) map.zappiW = zappiW.entity_id;
+  if (rangeRoverW) map.rangeRoverW = rangeRoverW.entity_id;
+  if (rangeRoverSoc) map.rangeRoverSoc = rangeRoverSoc.entity_id;
+  if (rangeRoverPlug) map.rangeRoverPlugged = rangeRoverPlug.entity_id;
   if (zappiToday) map.zappiTodayKwh = zappiToday.entity_id;
   if (rangeRoverToday) map.rangeRoverTodayKwh = rangeRoverToday.entity_id;
   if (offPeak) map.offPeak = offPeak.entity_id;
@@ -671,9 +738,27 @@ export function liveFromStates(
       : flag("zappiPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
   }
 
+  const rangeRoverPlugState = take("rangeRoverPlugged");
+  let rangeRoverPlugged = fallback.rangeRoverPlugged;
+  if (rangeRoverPlugState) {
+    const v = rangeRoverPlugState.state.toLowerCase();
+    const negative =
+      v.includes("not connected") ||
+      v.includes("not_connected") ||
+      v.includes("unplugged") ||
+      v.includes("disconnected") ||
+      v === "off" ||
+      v === "false";
+    rangeRoverPlugged = negative
+      ? false
+      : flag("rangeRoverPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
+  }
+
   const solarNowW = Math.round(n("solarNowW", fallback.solarNowW));
   const gridW = Math.round(n("gridW", fallback.gridW));
   const zappiW = Math.round(n("zappiW", fallback.zappiW));
+  const rangeRoverW = Math.round(n("rangeRoverW", fallback.rangeRoverW));
+  const rangeRoverSoc = Math.round(n("rangeRoverSoc", fallback.rangeRoverSoc));
   batteryW = Math.round(batteryW);
 
   const rateGbp = (key: "cheapRateGbp" | "peakRateGbp", current: number) => {
@@ -722,6 +807,9 @@ export function liveFromStates(
     zappiMode: zappiModeState ?? fallback.zappiMode,
     zappiPlugged,
     zappiW,
+    rangeRoverW,
+    rangeRoverSoc,
+    rangeRoverPlugged,
     zappiTodayKwh: todayKwh("zappiTodayKwh"),
     rangeRoverTodayKwh: todayKwh("rangeRoverTodayKwh"),
     intelligent: flag("intelligent", fallback.intelligent),
