@@ -4,7 +4,11 @@ import { useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 import { SectionLabel } from "./ui";
 
-/** Both driveway chargers — same labels as Site / Overview. */
+function formatTodayKwh(v: number | null): string {
+  return v == null ? "—" : `${v} kWh`;
+}
+
+/** Both driveway chargers — same labels as Site / Overview / Charge. */
 export function VehiclesSection({ className }: { className?: string }) {
   const live = useLive();
   return (
@@ -13,18 +17,26 @@ export function VehiclesSection({ className }: { className?: string }) {
       <div className="grid gap-2.5 md:grid-cols-2">
         <VehicleCard
           icon={Zap}
-          name="Zappi"
+          name="Zappi Charger"
           place="Driveway"
           status={live.zappiPlugged ? "Plugged in" : "Unplugged"}
-          detail={live.zappiW > 30 ? `${live.zappiW} W` : live.zappiMode === "—" ? undefined : live.zappiMode}
+          detail={
+            live.zappiW > 30
+              ? `${live.zappiW} W`
+              : live.zappiMode === "—"
+                ? undefined
+                : live.zappiMode
+          }
+          todayKwh={live.zappiTodayKwh}
           live={live.zappiW > 30 || live.zappiPlugged}
           tone="terra"
         />
         <VehicleCard
           icon={Car}
           name="Range Rover"
-          place="Front garden"
+          place="Driveway"
           status="Plug off"
+          todayKwh={live.rangeRoverTodayKwh}
           tone="teal"
         />
       </div>
@@ -38,6 +50,7 @@ export function VehicleCard({
   place,
   status,
   detail,
+  todayKwh,
   live = false,
   tone = "teal",
 }: {
@@ -46,6 +59,7 @@ export function VehicleCard({
   place: string;
   status: string;
   detail?: string;
+  todayKwh?: number | null;
   live?: boolean;
   tone?: "teal" | "terra";
 }) {
@@ -69,6 +83,9 @@ export function VehicleCard({
       <div className="min-w-0 flex-1">
         <div className="font-medium">{name}</div>
         <div className="text-sm text-ink-soft">{place}</div>
+        {todayKwh !== undefined ? (
+          <div className="mt-0.5 text-sm text-ink-soft">Today {formatTodayKwh(todayKwh)}</div>
+        ) : null}
       </div>
       <div className="text-right text-sm">
         <div className="font-medium">{status}</div>

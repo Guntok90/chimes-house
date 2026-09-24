@@ -4,6 +4,10 @@ import { useHouse, useLive } from "@/lib/house-store";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
 import { VehiclesSection } from "./vehicles";
 
+function formatTodayKwh(v: number | null): string {
+  return v == null ? "—" : `${v} kWh`;
+}
+
 export function ChargeView() {
   const live = useLive();
   const status = useHouse((s) => s.status);
@@ -17,7 +21,7 @@ export function ChargeView() {
       <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
         <Metric
           accent
-          label="Zappi"
+          label="Zappi Charger"
           value={live.zappiMode === "—" ? "—" : live.zappiMode}
           hint={live.zappiPlugged ? "Plugged in" : "Waiting"}
         />
@@ -43,7 +47,7 @@ export function ChargeView() {
                 <Zap className="size-5" strokeWidth={1.7} />
               </span>
               <div>
-                <div className="font-medium">Driveway charger</div>
+                <div className="font-medium">Zappi Charger</div>
                 <div className="text-sm text-ink-soft">
                   {live.zappiMode === "—" ? "Mode unknown" : live.zappiMode} · surplus then off-peak
                 </div>
@@ -53,6 +57,7 @@ export function ChargeView() {
               <Row label="Mode" value={live.zappiMode} />
               <Row label="Plug" value={live.zappiPlugged ? "Connected" : "Unplugged"} />
               <Row label="Charge" value={live.zappiW > 30 ? `${live.zappiW} W` : "Idle"} />
+              <Row label="Today" value={formatTodayKwh(live.zappiTodayKwh)} />
               <Row label="House CT" value={`${live.houseW} W`} />
               <Row label="Grid CT" value={`${live.gridW} W`} />
               <Row label="Generation" value={`${live.solarNowW + Math.max(0, -live.batteryW)} W`} />
