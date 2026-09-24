@@ -111,6 +111,10 @@ export function BatteryView() {
                 live.solarChargeCutoffSoc === null ? "—" : `${live.solarChargeCutoffSoc}%`
               }
             />
+            <Row
+              label="Minimum SOC"
+              value={live.minDischargeSoc === null ? "—" : `${live.minDischargeSoc}%`}
+            />
           </Surface>
         </section>
         <section>

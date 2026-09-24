@@ -16,6 +16,8 @@ import {
   chargeLimitMetaMap,
   credsForBoot,
   demoAreaSwitches,
+  haWriteFailureMessage,
+  isHaTimeoutError,
   readCreds,
   tariffsFromStates,
   writeCreds,
@@ -96,6 +98,13 @@ type HistoryStatus = "idle" | "loading" | "ready" | "empty";
 const DEMO_CHARGE_META: Record<ChargeLimitKey, NumberControlMeta> = {
   gridChargeCutoffSoc: { ...CHARGE_LIMIT_DEFAULTS.gridChargeCutoffSoc },
   solarChargeCutoffSoc: { ...CHARGE_LIMIT_DEFAULTS.solarChargeCutoffSoc },
+  minDischargeSoc: { ...CHARGE_LIMIT_DEFAULTS.minDischargeSoc },
+};
+
+/** In-flight Battery / Zappi Apply — holds optimistic UI until HA state confirms. */
+export type WritePending = {
+  key: "gridCharge" | "zappiMode" | ChargeLimitKey;
+  expected: boolean | number | string;
 };
 
 type Store = {
@@ -122,15 +131,20 @@ type Store = {
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
   /** Options for mapped Zappi charge-mode select (HA attributes or defaults). */
   zappiModeOptions: string[];
-  /** Last write error from Battery charge-limit Apply (cleared on success). */
+  /** Last write error from Battery / Zappi Apply (cleared on success). */
   writeError?: string;
+  /**
+   * Optimistic write in flight. While set, live updates must not silently
+   * overwrite the pending control with a stale Off / old % from the Pi.
+   */
+  writePending?: WritePending;
   /** Custom £/kWh rates for History/Energy spend maths (not Octopus Dispatch). */
   tariffs: TariffState;
   connect: (creds: HaCreds, opts?: { preserveData?: boolean }) => Promise<void>;
   disconnect: () => void;
   boot: () => void;
   toggle: (id: string) => void;
-  /** Explicit Apply: set grid / solar charge cutoff SOC via number.set_value. */
+  /** Explicit Apply: set grid / solar / min-discharge SOC via number.set_value. */
   applyChargeLimit: (key: ChargeLimitKey, value: number) => Promise<boolean>;
   /** Explicit Apply: turn charge-from-grid switch on/off. */
   applyGridCharge: (allow: boolean) => Promise<boolean>;
@@ -166,6 +180,50 @@ function emptyHistory() {
     historyMonth: [] as DayPoint[],
     historyYear: [] as DayPoint[],
   };
+}
+
+function switchStateMatches(state: string, allow: boolean): boolean {
+  const v = state.toLowerCase();
+  const on =
+    v === "on" || v === "true" || v === "yes" || v === "active" || v === "enabled";
+  return allow ? on : !on;
+}
+
+function numberStateMatches(state: string, expected: number): boolean {
+  const n = Number.parseFloat(state);
+  return Number.isFinite(n) && Math.round(n) === Math.round(expected);
+}
+
+/**
+ * After applyLiveStates, keep optimistic pending values until HA confirms —
+ * otherwise a slow Huawei write + timed-out call looks like Allowed → Off.
+ */
+function holdPendingLive(get: () => Store, set: (partial: Partial<Store>) => void) {
+  const pending = get().writePending;
+  if (!pending) return;
+  const live = get().live;
+  if (pending.key === "gridCharge") {
+    if (live.gridCharge === pending.expected) {
+      set({ writePending: undefined });
+      return;
+    }
+    set({ live: { ...live, gridCharge: pending.expected as boolean } });
+    return;
+  }
+  if (pending.key === "zappiMode") {
+    if (live.zappiMode === pending.expected) {
+      set({ writePending: undefined });
+      return;
+    }
+    set({ live: { ...live, zappiMode: String(pending.expected) } });
+    return;
+  }
+  const key = pending.key;
+  if (live[key] === pending.expected) {
+    set({ writePending: undefined });
+    return;
+  }
+  set({ live: { ...live, [key]: pending.expected as number } });
 }
 
 function scheduleReconnect(get: () => Store) {
@@ -346,6 +404,7 @@ export const useHouse = create<Store>((set, get) => {
         lastStates = list;
         const wasLive = get().status === "live";
         applyLiveStates(states, get, set, socket);
+        holdPendingLive(get, set);
         if (get().status === "live") {
           hadLiveSession = true;
           reconnectAttempt = 0;
@@ -504,6 +563,7 @@ export const useHouse = create<Store>((set, get) => {
         areaSwitches: demoAreaSwitches({}),
         error: undefined,
         writeError: undefined,
+        writePending: undefined,
         chargeLimitMeta: DEMO_CHARGE_META,
         zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
         ...emptyHistory(),
@@ -535,20 +595,55 @@ export const useHouse = create<Store>((set, get) => {
       }
       const meta = chargeLimitMeta[key];
       const clamped = Math.min(meta.max, Math.max(meta.min, Math.round(value)));
+      const previous = live[key];
+      const labels: Record<ChargeLimitKey, string> = {
+        gridChargeCutoffSoc: "grid charge cutoff",
+        solarChargeCutoffSoc: "solar charge cutoff",
+        minDischargeSoc: "minimum SOC",
+      };
       set({
         live: { ...live, [key]: clamped },
         writeError: undefined,
+        writePending: { key, expected: clamped },
       });
+
+      let timedOut = false;
       try {
         await socket.setNumber(entity, clamped);
-        return true;
       } catch (err) {
-        set({
-          writeError:
-            err instanceof Error ? err.message : "Could not set the charge limit on the Pi.",
-        });
-        return false;
+        timedOut = isHaTimeoutError(err);
+        if (!timedOut) {
+          set({
+            live: { ...get().live, [key]: previous },
+            writeError: haWriteFailureMessage(err, labels[key]),
+            writePending: undefined,
+          });
+          return false;
+        }
       }
+
+      const confirmed = await socket.waitForCachedState(
+        entity,
+        (s) => numberStateMatches(s.state, clamped),
+        timedOut ? 45_000 : 12_000,
+      );
+      if (confirmed) {
+        set({
+          live: { ...get().live, [key]: clamped },
+          writeError: undefined,
+          writePending: undefined,
+        });
+        return true;
+      }
+
+      set({
+        live: { ...get().live, [key]: previous },
+        writeError: timedOut
+          ? `Home Assistant timed out and ${labels[key]} did not change on the Pi. Check Tailscale, then Apply again.`
+          : `${labels[key]} did not update on the Pi.`,
+        writePending: undefined,
+      });
+      return false;
     },
 
     async applyGridCharge(allow) {
@@ -558,17 +653,51 @@ export const useHouse = create<Store>((set, get) => {
         set({ writeError: "Not connected to the Pi — charge limits stay read-only." });
         return false;
       }
-      set({ live: { ...live, gridCharge: allow }, writeError: undefined });
+      const previous = live.gridCharge;
+      set({
+        live: { ...live, gridCharge: allow },
+        writeError: undefined,
+        writePending: { key: "gridCharge", expected: allow },
+      });
+
+      let timedOut = false;
       try {
         await socket.call(entity, allow);
-        return true;
       } catch (err) {
-        set({
-          writeError:
-            err instanceof Error ? err.message : "Could not set charge from grid on the Pi.",
-        });
-        return false;
+        timedOut = isHaTimeoutError(err);
+        if (!timedOut) {
+          set({
+            live: { ...get().live, gridCharge: previous },
+            writeError: haWriteFailureMessage(err, "charge from grid"),
+            writePending: undefined,
+          });
+          return false;
+        }
       }
+
+      // Timeout is not failure yet — Huawei Modbus often ACKs after the WS result.
+      const confirmed = await socket.waitForCachedState(
+        entity,
+        (s) => switchStateMatches(s.state, allow),
+        timedOut ? 45_000 : 12_000,
+      );
+      if (confirmed) {
+        set({
+          live: { ...get().live, gridCharge: allow },
+          writeError: undefined,
+          writePending: undefined,
+        });
+        return true;
+      }
+
+      set({
+        live: { ...get().live, gridCharge: previous },
+        writeError: timedOut
+          ? "Home Assistant timed out and charge from grid did not change on the Pi. Check Tailscale, then Apply again."
+          : "Charge from grid did not update on the Pi.",
+        writePending: undefined,
+      });
+      return false;
     },
 
     async applyZappiMode(mode) {
@@ -583,17 +712,50 @@ export const useHouse = create<Store>((set, get) => {
         set({ writeError: "Pick a Zappi mode the charger supports, then Apply." });
         return false;
       }
-      set({ live: { ...live, zappiMode: trimmed }, writeError: undefined });
+      const previous = live.zappiMode;
+      set({
+        live: { ...live, zappiMode: trimmed },
+        writeError: undefined,
+        writePending: { key: "zappiMode", expected: trimmed },
+      });
+
+      let timedOut = false;
       try {
         await socket.setSelect(entity, trimmed);
-        return true;
       } catch (err) {
-        set({
-          writeError:
-            err instanceof Error ? err.message : "Could not set Zappi mode on the Pi.",
-        });
-        return false;
+        timedOut = isHaTimeoutError(err);
+        if (!timedOut) {
+          set({
+            live: { ...get().live, zappiMode: previous },
+            writeError: haWriteFailureMessage(err, "Zappi mode"),
+            writePending: undefined,
+          });
+          return false;
+        }
       }
+
+      const confirmed = await socket.waitForCachedState(
+        entity,
+        (s) => s.state.trim() === trimmed,
+        timedOut ? 45_000 : 12_000,
+      );
+      if (confirmed) {
+        set({
+          live: { ...get().live, zappiMode: trimmed },
+          writeError: undefined,
+          writePending: undefined,
+        });
+        return true;
+      }
+
+      set({
+        live: { ...get().live, zappiMode: previous },
+        writeError: timedOut
+          ? "Home Assistant timed out and Zappi mode did not change on the Pi. Check Tailscale, then Apply again."
+          : "Zappi mode did not update on the Pi.",
+        writePending: undefined,
+      });
+      return false;
     },
 
     async setTariffs(patch) {

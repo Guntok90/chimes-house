@@ -136,6 +136,11 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "number.batteries_charging_cutoff_capacity",
     "number.inverter_charging_cutoff_capacity",
   ],
+  // Discharge floor — minimum SOC (Huawei discharging cutoff capacity).
+  minDischargeSoc: [
+    "number.batteries_discharging_cutoff_capacity",
+    "number.inverter_discharging_cutoff_capacity",
+  ],
   stevieHome: ["person.stevie_w"],
   // Read-only tariff sensors (£/kWh or p/kWh) — never written back to HA.
   cheapRateGbp: [],
@@ -151,7 +156,26 @@ export const PREFERRED_TARIFFS: Record<TariffEntityId, readonly string[]> = {
 export const CHARGE_LIMIT_DEFAULTS = {
   gridChargeCutoffSoc: { min: 20, max: 100, step: 1 },
   solarChargeCutoffSoc: { min: 90, max: 100, step: 1 },
+  /** Huawei LUNA discharge floor — demo / missing attrs default to 5%. */
+  minDischargeSoc: { min: 0, max: 100, step: 1 },
 } as const;
+
+/** Default minimum SOC (%) when the Pi has no value yet (demo + first Apply hint). */
+export const DEFAULT_MIN_DISCHARGE_SOC = 5;
+
+/** True when an HA write failed because the websocket request timed out. */
+export function isHaTimeoutError(err: unknown): boolean {
+  return err instanceof Error && /timed out/i.test(err.message);
+}
+
+/** Dad-facing copy for failed Battery / Zappi writes (timeouts especially). */
+export function haWriteFailureMessage(err: unknown, what: string): string {
+  if (isHaTimeoutError(err)) {
+    return `Home Assistant timed out while setting ${what}. The Pi may still be busy — wait for confirmation, or check Tailscale and Apply again.`;
+  }
+  if (err instanceof Error && err.message.trim()) return err.message;
+  return `Could not set ${what} on the Pi.`;
+}
 
 export type ChargeLimitKey = keyof typeof CHARGE_LIMIT_DEFAULTS;
 
@@ -215,6 +239,9 @@ export function wsFailureMessage(message: string): string {
     message === "Disconnected."
   ) {
     return "Could not reach the Pi. This tablet needs Tailscale or the house Wi-Fi.";
+  }
+  if (/timed out/i.test(message)) {
+    return "Home Assistant timed out. Check Tailscale / house Wi-Fi, wait a moment, then try again.";
   }
   return message;
 }
@@ -659,6 +686,19 @@ export function autoMap(states: HaState[]): HaMap {
         (b.includes("end_of_charge") && (b.includes("soc") || b.includes("capacity")))),
   );
 
+  // Minimum SOC / discharge floor — Huawei discharging cutoff capacity only.
+  const minDischargeSoc = resolve(
+    states,
+    "minDischargeSoc",
+    (s, b) =>
+      s.entity_id.startsWith("number.") &&
+      (b.includes("discharging_cutoff_capacity") ||
+        b.includes("discharging_cutoff") ||
+        (b.includes("discharge") &&
+          b.includes("cutoff") &&
+          (b.includes("soc") || b.includes("capacity") || b.includes("state_of_charge")))),
+  );
+
   const stevie = resolve(
     states,
     "stevieHome",
@@ -703,6 +743,7 @@ export function autoMap(states: HaState[]): HaMap {
   if (gridCharge) map.gridCharge = gridCharge.entity_id;
   if (gridChargeCutoffSoc) map.gridChargeCutoffSoc = gridChargeCutoffSoc.entity_id;
   if (solarChargeCutoffSoc) map.solarChargeCutoffSoc = solarChargeCutoffSoc.entity_id;
+  if (minDischargeSoc) map.minDischargeSoc = minDischargeSoc.entity_id;
   if (stevie) map.stevieHome = stevie.entity_id;
   if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
   if (peakRate) map.peakRateGbp = peakRate.entity_id;
@@ -769,11 +810,21 @@ export function sameLive(a: HouseLive, b: HouseLive): boolean {
     a.zappiMode === b.zappiMode &&
     a.zappiPlugged === b.zappiPlugged &&
     a.zappiW === b.zappiW &&
+    a.rangeRoverW === b.rangeRoverW &&
+    a.rangeRoverSoc === b.rangeRoverSoc &&
+    a.rangeRoverPlugged === b.rangeRoverPlugged &&
+    a.zappiTodayKwh === b.zappiTodayKwh &&
+    a.rangeRoverTodayKwh === b.rangeRoverTodayKwh &&
     a.intelligent === b.intelligent &&
     a.offPeak === b.offPeak &&
     a.gridCharge === b.gridCharge &&
+    a.gridChargeCutoffSoc === b.gridChargeCutoffSoc &&
+    a.solarChargeCutoffSoc === b.solarChargeCutoffSoc &&
+    a.minDischargeSoc === b.minDischargeSoc &&
     a.stevieHome === b.stevieHome &&
-    a.sunAboveHorizon === b.sunAboveHorizon
+    a.sunAboveHorizon === b.sunAboveHorizon &&
+    a.cheapRateGbp === b.cheapRateGbp &&
+    a.peakRateGbp === b.peakRateGbp
   );
 }
 
@@ -952,6 +1003,7 @@ export function liveFromStates(
     gridCharge: flag("gridCharge", fallback.gridCharge),
     gridChargeCutoffSoc: optionalPct("gridChargeCutoffSoc"),
     solarChargeCutoffSoc: optionalPct("solarChargeCutoffSoc"),
+    minDischargeSoc: optionalPct("minDischargeSoc"),
     stevieHome: flag("stevieHome", fallback.stevieHome),
     sunAboveHorizon,
     cheapRateGbp: rateGbp("cheapRateGbp", fallback.cheapRateGbp),
@@ -982,6 +1034,7 @@ export function chargeLimitMetaMap(
   return {
     gridChargeCutoffSoc: chargeLimitMeta(states, map, "gridChargeCutoffSoc"),
     solarChargeCutoffSoc: chargeLimitMeta(states, map, "solarChargeCutoffSoc"),
+    minDischargeSoc: chargeLimitMeta(states, map, "minDischargeSoc"),
   };
 }
 
@@ -1380,41 +1433,99 @@ export class HaSocket {
     this.onStates(this.statesByEntity);
   }
 
-  async call(entityId: string, turnOn?: boolean) {
+  async call(entityId: string, turnOn?: boolean, timeoutMs = 45_000) {
     const [domain] = entityId.split(".");
     const service = turnOn === undefined ? "toggle" : turnOn ? "turn_on" : "turn_off";
-    await this.send("call_service", {
-      domain,
-      service,
-      target: { entity_id: entityId },
-    });
+    await this.send(
+      "call_service",
+      {
+        domain,
+        service,
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
   }
 
   /** Set a `number.*` / `input_number.*` via `*.set_value` (charge cutoffs + tariff helpers). */
-  async setNumber(entityId: string, value: number) {
+  async setNumber(entityId: string, value: number, timeoutMs = 45_000) {
     const [domain] = entityId.split(".");
     if (domain !== "input_number" && domain !== "number") {
       throw new Error("Only input_number / number helpers can be written.");
     }
-    await this.send("call_service", {
-      domain,
-      service: "set_value",
-      service_data: { value },
-      target: { entity_id: entityId },
-    });
+    await this.send(
+      "call_service",
+      {
+        domain,
+        service: "set_value",
+        service_data: { value },
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
   }
 
   /** Set a `select.*` / `input_select.*` via `*.select_option` (Zappi charge mode). */
-  async setSelect(entityId: string, option: string) {
+  async setSelect(entityId: string, option: string, timeoutMs = 45_000) {
     const [domain] = entityId.split(".");
     if (domain !== "select" && domain !== "input_select") {
       throw new Error("Only select / input_select helpers can be written.");
     }
-    await this.send("call_service", {
-      domain,
-      service: "select_option",
-      service_data: { option },
-      target: { entity_id: entityId },
+    await this.send(
+      "call_service",
+      {
+        domain,
+        service: "select_option",
+        service_data: { option },
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
+  }
+
+  /** Latest cached state for an entity (from get_states / state_changed). */
+  cachedState(entityId: string): HaState | undefined {
+    return this.statesByEntity.get(entityId);
+  }
+
+  /**
+   * Wait until cached HA state matches `match`, or `timeoutMs` elapses.
+   * Used after slow Huawei / Zappi writes so a timed-out call_service can still
+   * confirm success from state_changed instead of silently reverting the UI.
+   */
+  waitForCachedState(
+    entityId: string,
+    match: (s: HaState) => boolean,
+    timeoutMs = 30_000,
+  ): Promise<boolean> {
+    const current = this.statesByEntity.get(entityId);
+    if (current && match(current)) return Promise.resolve(true);
+    if (!this.connected) return Promise.resolve(false);
+
+    return new Promise((resolve) => {
+      const started = Date.now();
+      const tick = () => {
+        const s = this.statesByEntity.get(entityId);
+        if (s && match(s)) {
+          cleanup();
+          resolve(true);
+          return;
+        }
+        if (Date.now() - started >= timeoutMs) {
+          cleanup();
+          resolve(false);
+        }
+      };
+      const interval = window.setInterval(tick, 250);
+      const timer = window.setTimeout(() => {
+        cleanup();
+        resolve(false);
+      }, timeoutMs);
+      const cleanup = () => {
+        window.clearInterval(interval);
+        window.clearTimeout(timer);
+      };
+      tick();
     });
   }
 
