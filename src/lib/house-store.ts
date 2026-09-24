@@ -3,6 +3,7 @@ import {
   daysFromStatistics,
   historyEntityIds,
   hoursFromHistory,
+  monthsFromStatistics,
   normalizeHistoryResult,
   type HaStatisticsBag,
 } from "./ha-history";
@@ -28,6 +29,13 @@ import { EMPTY_LIVE, SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } f
 
 const socket = new HaSocket();
 
+/** Hourly points for Overview day tab (past week, scrollable). */
+export const HISTORY_HOUR_COUNT = 7 * 24;
+/** Daily points kept for week scroll + month tab. */
+export const HISTORY_DAY_COUNT = 56;
+/** Monthly points for year tab. */
+export const HISTORY_YEAR_COUNT = 12;
+
 type Status = "demo" | "connecting" | "live" | "error";
 type HistoryStatus = "idle" | "loading" | "ready" | "empty";
 
@@ -39,9 +47,15 @@ type Store = {
   map: HaMap;
   url: string;
   /** Live HA history only — never demo WEEK/HOURS while status === "live". */
+  /** Past-week hourly (≤168). Battery view uses the last 24. */
   historyHours: HourPoint[];
+  /** Longer daily series for Overview week scroll (≤56). */
+  historyDays: DayPoint[];
+  /** Last 7 days — History view + Overview week window. */
   historyWeek: DayPoint[];
   historyMonth: DayPoint[];
+  /** Last 12 months from period:month statistics. */
+  historyYear: DayPoint[];
   historyStatus: HistoryStatus;
   connect: (creds: HaCreds) => Promise<void>;
   disconnect: () => void;
@@ -53,6 +67,16 @@ type Store = {
 let bootInFlight: Promise<void> | null = null;
 let historyInFlight: Promise<void> | null = null;
 
+function emptyHistory() {
+  return {
+    historyHours: [] as HourPoint[],
+    historyDays: [] as DayPoint[],
+    historyWeek: [] as DayPoint[],
+    historyMonth: [] as DayPoint[],
+    historyYear: [] as DayPoint[],
+  };
+}
+
 export const useHouse = create<Store>((set, get) => {
   return {
     live: { ...SNAPSHOT },
@@ -60,9 +84,7 @@ export const useHouse = create<Store>((set, get) => {
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
-    historyHours: [],
-    historyWeek: [],
-    historyMonth: [],
+    ...emptyHistory(),
     historyStatus: "idle",
 
     boot() {
@@ -112,9 +134,7 @@ export const useHouse = create<Store>((set, get) => {
         status: "connecting",
         error: undefined,
         url: creds.url,
-        historyHours: [],
-        historyWeek: [],
-        historyMonth: [],
+        ...emptyHistory(),
         historyStatus: "idle",
       });
       writeCreds(creds);
@@ -127,9 +147,7 @@ export const useHouse = create<Store>((set, get) => {
             status: "error",
             error: wsFailureMessage(err ?? "Disconnected."),
             live: { ...SNAPSHOT },
-            historyHours: [],
-            historyWeek: [],
-            historyMonth: [],
+            ...emptyHistory(),
             historyStatus: "idle",
           });
         }
@@ -168,28 +186,32 @@ export const useHouse = create<Store>((set, get) => {
       const map = get().map;
       const ids = historyEntityIds(map);
       if (!ids.length) {
-        set({ historyStatus: "empty", historyHours: [], historyWeek: [], historyMonth: [] });
+        set({ historyStatus: "empty", ...emptyHistory() });
         return;
       }
       set({ historyStatus: "loading" });
       historyInFlight = (async () => {
         try {
           const end = new Date();
-          const start24 = new Date(end.getTime() - 24 * 60 * 60 * 1000);
-          const start28 = new Date(end.getTime() - 28 * 24 * 60 * 60 * 1000);
+          const startHours = new Date(end.getTime() - HISTORY_HOUR_COUNT * 60 * 60 * 1000);
+          const startDays = new Date(end.getTime() - HISTORY_DAY_COUNT * 24 * 60 * 60 * 1000);
+          const startYear = new Date(end.getFullYear(), end.getMonth() - (HISTORY_YEAR_COUNT - 1), 1);
+
           let hours: HourPoint[] = [];
+          let days: DayPoint[] = [];
           let week: DayPoint[] = [];
           let month: DayPoint[] = [];
+          let year: DayPoint[] = [];
 
           // Hourly and daily paths are independent — a stats parse throw must
-          // not wipe an otherwise-valid 24h series (and never invent demo data).
+          // not wipe an otherwise-valid series (and never invent demo data).
           try {
             const raw = await socket.historyDuringPeriod(
               ids,
-              start24.toISOString(),
+              startHours.toISOString(),
               end.toISOString(),
             );
-            hours = hoursFromHistory(normalizeHistoryResult(raw), map, end);
+            hours = hoursFromHistory(normalizeHistoryResult(raw), map, end, HISTORY_HOUR_COUNT);
           } catch {
             hours = [];
           }
@@ -197,7 +219,7 @@ export const useHouse = create<Store>((set, get) => {
           try {
             const stats = (await socket.statisticsDuringPeriod(
               ids,
-              start28.toISOString(),
+              startDays.toISOString(),
               end.toISOString(),
               "day",
             )) as HaStatisticsBag;
@@ -208,7 +230,7 @@ export const useHouse = create<Store>((set, get) => {
               try {
                 hourStats = (await socket.statisticsDuringPeriod(
                   [map.gridW],
-                  start28.toISOString(),
+                  startDays.toISOString(),
                   end.toISOString(),
                   "hour",
                 )) as HaStatisticsBag;
@@ -223,18 +245,37 @@ export const useHouse = create<Store>((set, get) => {
               highGbpPerKwh: live.peakRateGbp,
             };
             const opts = { hourStats, rates };
-            week = daysFromStatistics(stats, map, 7, end, opts);
-            month = daysFromStatistics(stats, map, 28, end, opts);
+            days = daysFromStatistics(stats, map, HISTORY_DAY_COUNT, end, opts);
+            week = days.length ? days.slice(-7) : daysFromStatistics(stats, map, 7, end, opts);
+            month = days.length
+              ? days.slice(-28)
+              : daysFromStatistics(stats, map, 28, end, opts);
           } catch {
+            days = [];
             week = [];
             month = [];
           }
 
-          const empty = hours.length === 0 && week.length === 0;
+          try {
+            const yearStats = (await socket.statisticsDuringPeriod(
+              ids,
+              startYear.toISOString(),
+              end.toISOString(),
+              "month",
+            )) as HaStatisticsBag;
+            year = monthsFromStatistics(yearStats, map, HISTORY_YEAR_COUNT, end);
+          } catch {
+            year = [];
+          }
+
+          const empty =
+            hours.length === 0 && days.length === 0 && week.length === 0 && year.length === 0;
           set({
             historyHours: hours,
+            historyDays: days,
             historyWeek: week,
             historyMonth: month,
+            historyYear: year,
             historyStatus: empty ? "empty" : "ready",
           });
         } finally {
@@ -253,9 +294,7 @@ export const useHouse = create<Store>((set, get) => {
         status: "demo",
         live: { ...SNAPSHOT },
         error: undefined,
-        historyHours: [],
-        historyWeek: [],
-        historyMonth: [],
+        ...emptyHistory(),
         historyStatus: "idle",
       });
     },

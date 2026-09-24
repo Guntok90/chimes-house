@@ -948,7 +948,7 @@ export class HaSocket {
     statisticIds: string[],
     start: string,
     end: string,
-    period: "hour" | "day" = "day",
+    period: "hour" | "day" | "month" = "day",
   ) {
     if (!statisticIds.length || !this.ws) return {};
     try {
