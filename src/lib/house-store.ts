@@ -34,7 +34,7 @@ import {
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
 import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
-import { decideResume } from "./ha-resume";
+import { decideResume, FORCE_RECONNECT_HIDDEN_MS, STUCK_CONNECTING_MS } from "./ha-resume";
 import {
   clampRate,
   estimateImportCostParts,
@@ -45,7 +45,11 @@ import {
   type TariffState,
 } from "./tariffs";
 
-export { decideResume } from "./ha-resume";
+export {
+  decideResume,
+  FORCE_RECONNECT_HIDDEN_MS,
+  STUCK_CONNECTING_MS,
+} from "./ha-resume";
 export type { ResumeAction } from "./ha-resume";
 
 const socket = new HaSocket();
@@ -53,6 +57,11 @@ const socket = new HaSocket();
 let areasCache: HaArea[] = [];
 let entityRegCache: HaEntityReg[] = [];
 let lastStates: HaState[] = [];
+
+/** When the tab was backgrounded / frozen (iOS Safari suspend). */
+let pageHiddenAt: number | null = null;
+/** When status last entered "connecting" — detect stuck handshakes. */
+let connectingStartedAt: number | null = null;
 
 function rebuildAreaSwitches(states: HaState[]) {
   return areaSwitchesFromStates(states, areasCache, entityRegCache);
@@ -128,7 +137,8 @@ type Store = {
   tariffs: TariffState;
   connect: (creds: HaCreds, opts?: { preserveData?: boolean }) => Promise<void>;
   disconnect: () => void;
-  boot: () => void;
+  /** @param opts.force Re-run boot even if status looks live (zombie after iOS suspend). */
+  boot: (opts?: { force?: boolean }) => void;
   toggle: (id: string) => void;
   /** Explicit Apply: set grid / solar charge cutoff SOC via number.set_value. */
   applyChargeLimit: (key: ChargeLimitKey, value: number) => Promise<boolean>;
@@ -144,6 +154,7 @@ type Store = {
 };
 
 let bootInFlight: Promise<void> | null = null;
+let connectInFlight: Promise<void> | null = null;
 let historyInFlight: Promise<void> | null = null;
 /** Once we have been live this SPA session, keep last readings across drops. */
 let hadLiveSession = false;
@@ -156,6 +167,37 @@ function clearReconnectTimer() {
   if (reconnectTimer == null) return;
   window.clearTimeout(reconnectTimer);
   reconnectTimer = null;
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+function markConnecting() {
+  connectingStartedAt = Date.now();
+}
+
+function clearConnectingClock() {
+  connectingStartedAt = null;
+}
+
+function connectingForMs(status: Status): number {
+  if (status !== "connecting" || connectingStartedAt == null) return 0;
+  return Date.now() - connectingStartedAt;
+}
+
+/** Record that the page left the foreground (app switch / home / freeze). */
+export function notePageHidden() {
+  if (pageHiddenAt == null) pageHiddenAt = Date.now();
+}
+
+function takeHiddenForMs(): number {
+  if (pageHiddenAt == null) return 0;
+  const ms = Date.now() - pageHiddenAt;
+  pageHiddenAt = null;
+  return ms;
 }
 
 function emptyHistory() {
@@ -194,31 +236,83 @@ let resumeInFlight: Promise<void> | null = null;
 export function resumeLiveSession(): Promise<void> {
   if (resumeInFlight) return resumeInFlight;
   resumeInFlight = (async () => {
+    const hiddenForMs = takeHiddenForMs();
+    const state = useHouse.getState();
     const action = decideResume({
       reconnectAllowed,
       hasCreds: Boolean(readCreds()),
       hadLiveSession,
-      status: useHouse.getState().status,
+      status: state.status,
       socketConnected: socket.connected,
       bootInFlight: Boolean(bootInFlight),
+      hiddenForMs,
+      connectingForMs: connectingForMs(state.status),
     });
     if (action === "noop") return;
 
+    if (action === "rebootstrap") {
+      // Same recovery path as a hard refresh — pull token from /api/ha/bootstrap.
+      useHouse.getState().boot({ force: true });
+      return;
+    }
+
     if (action === "probe") {
       const ok = await socket.probe();
-      if (ok) return;
+      if (ok) {
+        // After any background blip, confirm beyond ping (events can die while
+        // pong still answers). Watchdog probes (hiddenForMs === 0) trust ping.
+        if (hiddenForMs > 0) {
+          const fresh = await socket.refreshStates();
+          if (fresh) return;
+          // Ping worked but get_states did not — treat as zombie.
+        } else {
+          return;
+        }
+      }
       // Zombie OPEN socket (common after iPad Safari suspend) — fall through.
     }
 
     if (!reconnectAllowed) return;
     const creds = readCreds();
-    if (!creds) return;
+    if (!creds) {
+      useHouse.getState().boot({ force: true });
+      return;
+    }
+    if (bootInFlight) return;
     const { status } = useHouse.getState();
-    if (status === "connecting" || bootInFlight) return;
+    // Another connect already in progress (and not stuck) — let it finish.
+    if (status === "connecting" && connectingForMs(status) < STUCK_CONNECTING_MS) {
+      return;
+    }
+    if (connectInFlight && connectingForMs("connecting") < STUCK_CONNECTING_MS) {
+      return;
+    }
 
     clearReconnectTimer();
     reconnectAttempt = 0;
-    await useHouse.getState().connect(creds, { preserveData: true });
+
+    // Tailscale / Private Relay often lag visibilitychange by a few hundred ms.
+    // After a real background stretch, settle briefly then retry a couple times
+    // so we do not stick on Error until the user refreshes.
+    const settleMs = hiddenForMs >= FORCE_RECONNECT_HIDDEN_MS ? 250 : 0;
+    const attempts = hiddenForMs >= FORCE_RECONNECT_HIDDEN_MS ? 3 : 1;
+    for (let i = 0; i < attempts; i++) {
+      if (!reconnectAllowed) return;
+      if (i > 0) await sleep(400 * i);
+      else if (settleMs) await sleep(settleMs);
+      if (bootInFlight) return;
+      const now = useHouse.getState();
+      if (now.status === "live" && socket.connected) return;
+      if (
+        (now.status === "connecting" || connectInFlight) &&
+        connectingForMs("connecting") < STUCK_CONNECTING_MS &&
+        i > 0
+      ) {
+        return;
+      }
+      await useHouse.getState().connect(creds, { preserveData: true });
+      if (useHouse.getState().status === "live" && socket.connected) return;
+    }
   })().finally(() => {
     resumeInFlight = null;
   });
@@ -239,15 +333,21 @@ export const useHouse = create<Store>((set, get) => {
     zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
     tariffs: bootTariffs(),
 
-    boot() {
+    boot(opts) {
       if (bootInFlight) return;
+      const force = Boolean(opts?.force);
       // Soft remount / Strict Mode / Overview↔Home must not tear down Live.
-      if (get().status === "live" && socket.connected) return;
-      if (get().status === "connecting") return;
+      if (!force && get().status === "live" && socket.connected) return;
+      if (!force && get().status === "connecting") return;
+      // Force path: drop a zombie OPEN socket so we do not skip reconnect.
+      if (force && socket.connected) {
+        socket.close();
+      }
 
       bootInFlight = (async () => {
         reconnectAllowed = true;
         const preserve = hadLiveSession;
+        markConnecting();
         set({ status: "connecting", error: undefined });
         let bootstrap: HaBootstrapResponse | null = null;
         let bootstrapFailed = false;
@@ -260,6 +360,7 @@ export const useHouse = create<Store>((set, get) => {
             hadLiveSession = false;
             clearReconnectTimer();
             reconnectAllowed = false;
+            clearConnectingClock();
             set({
               status: "demo",
               live: { ...SNAPSHOT },
@@ -283,6 +384,7 @@ export const useHouse = create<Store>((set, get) => {
         const creds = credsForBoot(bootstrap, readCreds());
         if (!creds) {
           hadLiveSession = false;
+          clearConnectingClock();
           set({
             status: bootstrapFailed ? "error" : "demo",
             live: { ...SNAPSHOT },
@@ -301,9 +403,26 @@ export const useHouse = create<Store>((set, get) => {
     },
 
     async connect(creds, opts) {
+      // Serialize connects — a resume retry must not overlap an in-flight handshake
+      // or the first call's catch can wipe a successful second socket.
+      if (connectInFlight) {
+        if (connectingForMs("connecting") < STUCK_CONNECTING_MS) {
+          return connectInFlight;
+        }
+        // Stuck past handshake budget (common when Tailscale is still asleep) —
+        // abort the socket so the hung connect rejects, then start fresh.
+        socket.close();
+        try {
+          await connectInFlight;
+        } catch {
+          // Prior attempt failed as expected after close.
+        }
+      }
+
       const preserveData = Boolean(opts?.preserveData) || hadLiveSession;
       reconnectAllowed = true;
       clearReconnectTimer();
+      markConnecting();
       set({
         status: "connecting",
         error: undefined,
@@ -320,9 +439,13 @@ export const useHouse = create<Store>((set, get) => {
       socket.onStatus = (s, err) => {
         // Stay on "connecting" until the first state payload. A Live badge
         // with the demo snapshot would read as dusk (0 W, 16.68 kWh).
-        if (s === "connecting") set({ status: "connecting", error: undefined });
+        if (s === "connecting") {
+          markConnecting();
+          set({ status: "connecting", error: undefined });
+        }
         if (s === "error") {
           socket.interest = null;
+          clearConnectingClock();
           if (hadLiveSession) {
             // Keep last live readings — do not silently drop to demo curves.
             set({
@@ -350,6 +473,7 @@ export const useHouse = create<Store>((set, get) => {
           hadLiveSession = true;
           reconnectAttempt = 0;
           clearReconnectTimer();
+          clearConnectingClock();
         }
         const mapped = get().map;
         const haRates = tariffsFromStates(list, mapped);
@@ -365,25 +489,32 @@ export const useHouse = create<Store>((set, get) => {
           void refreshRegistries();
         }
       };
-      try {
-        await socket.connect(creds.url, creds.token);
-      } catch (err) {
-        socket.close();
-        const message = wsFailureMessage(
-          err instanceof Error ? err.message : "Could not connect.",
-        );
-        if (hadLiveSession) {
-          set({ status: "error", error: message });
-          scheduleReconnect(get);
-          return;
+
+      connectInFlight = (async () => {
+        try {
+          await socket.connect(creds.url, creds.token);
+        } catch (err) {
+          socket.close();
+          clearConnectingClock();
+          const message = wsFailureMessage(
+            err instanceof Error ? err.message : "Could not connect.",
+          );
+          if (hadLiveSession) {
+            set({ status: "error", error: message });
+            scheduleReconnect(get);
+            return;
+          }
+          set({
+            status: "error",
+            error: message,
+            live: { ...SNAPSHOT },
+            historyStatus: "idle",
+          });
         }
-        set({
-          status: "error",
-          error: message,
-          live: { ...SNAPSHOT },
-          historyStatus: "idle",
-        });
-      }
+      })().finally(() => {
+        connectInFlight = null;
+      });
+      return connectInFlight;
     },
 
     async refreshHistory() {
@@ -493,6 +624,8 @@ export const useHouse = create<Store>((set, get) => {
       clearReconnectTimer();
       hadLiveSession = false;
       reconnectAttempt = 0;
+      clearConnectingClock();
+      pageHiddenAt = null;
       socket.onStatus = null;
       socket.onStates = null;
       socket.interest = null;
