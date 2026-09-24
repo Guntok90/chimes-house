@@ -334,9 +334,10 @@ function GlassTile({
   const [z, setZ] = useState(10);
 
   useEffect(() => {
+    // Restore the user's last size/position. Do not discard smaller Energy Flow
+    // boxes — an old w<560 "stale" migration ignored saved sizes on every open.
     const saved = readBox(storageKey);
-    const stale = storageKey === "chimes.overview.flow" && saved && saved.w < 560;
-    setBox(clamp(stale || !saved ? fallback() : saved));
+    setBox(clamp(saved ?? fallback()));
     const onResize = () => setBox((current) => clamp(current));
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
