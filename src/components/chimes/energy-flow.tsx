@@ -4,12 +4,21 @@ import { solarStatusHint } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 
+/**
+ * Default Energy Flow node positions (SVG viewBox 1000×560).
+ * Overview does not persist per-node placement — only the glass tile box
+ * (`chimes.overview.flow`). Driveway layout matches the house photo / Site
+ * scene: Range Rover on the left bay, Zappi (driveway charger) on the right.
+ */
 const P = {
   solar: { x: 500, y: 100 },
   grid: { x: 140, y: 258 },
   battery: { x: 355, y: 392 },
   home: { x: 800, y: 202 },
-  cars: { x: 800, y: 392 },
+  /** Left driveway bay — Range Rover (was off / front-garden). */
+  rover: { x: 700, y: 430 },
+  /** Right driveway bay — Zappi / Cupra charger side. */
+  zappi: { x: 900, y: 430 },
 } as const;
 
 type Tone = "paper" | "glass";
@@ -26,7 +35,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
   const solarOn = solar > 30;
   const gridIn = live.gridW > 30;
   const gridOut = live.gridW < -30;
-  const carOn = live.zappiW > 30;
+  const zappiOn = live.zappiW > 30;
   const glass = tone === "glass";
   const idle = glass ? "flow-idle stroke-sidebar-fg/35" : "flow-idle stroke-line";
   const badge = battOut ? "On battery" : solarOn && home > 0 ? "Solar" : "Idle";
@@ -45,7 +54,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
               Energy flow
             </div>
             <div className="mt-1 text-sm tabular-nums text-ink">
-              {solar} W solar · {home} W home · {live.zappiW} W car
+              {solar} W solar · {home} W home · {live.zappiW} W Zappi
             </div>
           </div>
           <div className="rounded-full border border-line bg-white/70 px-2.5 py-1 text-xs font-medium text-ink">
@@ -65,8 +74,12 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             className={cn("flow-line", gridIn || gridOut ? "flow-active stroke-teal-soft" : idle)}
           />
           <path
-            d={q(P.home, P.cars, 910, 300)}
-            className={cn("flow-line", carOn ? "flow-active stroke-umber" : idle)}
+            d={q(P.home, P.rover, 780, 320)}
+            className={cn("flow-line", idle)}
+          />
+          <path
+            d={q(P.home, P.zappi, 920, 300)}
+            className={cn("flow-line", zappiOn ? "flow-active stroke-umber" : idle)}
           />
           <path
             d={q(P.solar, P.battery, 340, 220)}
@@ -132,13 +145,23 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[80%] top-[70%]"
+          at="left-[70%] top-[77%]"
           icon={Car}
           ring="border-umber"
+          value="—"
+          label="Range Rover"
+          hint="driveway"
+          on={false}
+        />
+        <Node
+          tone={tone}
+          at="left-[90%] top-[77%]"
+          icon={Zap}
+          ring="border-umber"
           value={`${live.zappiW} W`}
-          label="Cars"
-          hint={carOn ? "charging" : "waiting"}
-          on={carOn}
+          label="Zappi"
+          hint={zappiOn ? "charging" : live.zappiPlugged ? "plugged in" : "driveway"}
+          on={zappiOn}
         />
       </div>
     </div>

@@ -95,7 +95,7 @@ export function ChargeView() {
           <VehicleCard
             icon={Car}
             name="Range Rover"
-            place="Front garden"
+            place="Driveway"
             status="Plug off"
             todayKwh={live.rangeRoverTodayKwh}
           />
