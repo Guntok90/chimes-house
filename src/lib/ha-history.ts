@@ -1,6 +1,7 @@
 import { deriveHouseW } from "./energy-balance.ts";
 import type { HaMap } from "./ha.ts";
 import type { DayPoint, HourPoint } from "./house.ts";
+import { DEFAULT_TARIFFS, estimateImportCost, type TariffRates } from "./tariffs.ts";
 
 type HistPoint = {
   state?: string;
@@ -142,6 +143,7 @@ export function daysFromStatistics(
   map: HaMap,
   count: number,
   now = new Date(),
+  rates: TariffRates = DEFAULT_TARIFFS,
 ): DayPoint[] {
   const solarId = map.solarTodayKwh ?? map.solarNowW;
   if (!solarId && !map.gridW && !map.houseW) return [];
@@ -166,7 +168,7 @@ export function daysFromStatistics(
       gridOut,
       battCharge: 0,
       battDischarge: 0,
-      cost: Number((gridIn * 0.226).toFixed(2)),
+      cost: estimateImportCost(gridIn, rates),
     });
   }
   if (out.every((d) => d.solar === 0 && d.house === 0 && d.gridIn === 0)) return [];

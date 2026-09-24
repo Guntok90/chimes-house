@@ -117,4 +117,19 @@ describe("ha history helpers", () => {
     assert.equal(today.solar, 12.3);
     assert.equal(today.gridIn, 12); // 500 W mean → 12 kWh
   });
+
+  it("applies custom tariff rates to daily cost", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const solarId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = { solarTodayKwh: solarId, gridW: "sensor.grid" };
+    const key = localDayKey(now);
+    const stats: HaStatisticsBag = {
+      [solarId]: [{ start: `${key}T00:00:00+01:00`, change: 12.3, mean: null, state: null }],
+      "sensor.grid": [{ start: `${key}T00:00:00.000Z`, mean: 500, change: null, state: null }],
+    };
+    const week = daysFromStatistics(stats, liveMap, 7, now, { cheap: 0.1, peak: 0.3 });
+    const today = week[week.length - 1];
+    // 12 kWh × (0.1×0.25 + 0.3×0.75) = 12 × 0.25 = 3.00
+    assert.equal(today.cost, 3);
+  });
 });

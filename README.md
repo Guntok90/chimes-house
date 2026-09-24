@@ -62,6 +62,29 @@ For a browser that is already on Tailscale, without `HA_TOKEN` on the host:
 
 When `HA_TOKEN` is set, the next load uses the server token again. Chimes maps Huawei / LUNA / Zappi / Octopus / lights / plugs / Stevie automatically. Sidebar shows **Live** instead of Demo.
 
+## Custom £/kWh rates (display only)
+
+Energy → **Custom rates** lets Steve set cheap/off-peak and peak/high £/kWh. History spend, Energy cost charts, and Charge “today cost” use these values.
+
+**They override dashboard maths only.** They do not change Octopus Intelligent Go, Dispatch, or any charge automation (including `automation.charge_cars_at_off_peak`). Huawei/inverter entities are never written.
+
+### Persistence
+
+1. **Preferred — Home Assistant helpers** (shared across every tablet). Create Number helpers on the Pi with these exact entity ids:
+
+   | Role            | Entity id                         | Suggested settings                          |
+   | --------------- | --------------------------------- | ------------------------------------------- |
+   | Cheap / off-peak | `input_number.chimes_tariff_cheap` | min 0, max 2, step 0.001, unit `£/kWh`     |
+   | Peak / high      | `input_number.chimes_tariff_peak`  | min 0, max 2, step 0.001, unit `£/kWh`     |
+
+   Also accepted: `number.chimes_tariff_cheap` / `number.chimes_tariff_peak`.
+
+   Chimes writes them via the existing tablet WebSocket (`input_number.set_value` / `number.set_value`). Until the helpers exist, the UI degrades gracefully.
+
+2. **Fallback — tablet localStorage** (`chimes.tariffs`) when helpers are missing. Rates stay on that device until HA helpers are created.
+
+Daily spend without a TOU import split is estimated as **25% cheap + 75% peak** × imported kWh (Intelligent-ish overnight share). Defaults are £0.070 / £0.226 per kWh.
+
 ## Pi panel
 
 Add to `/config/configuration.yaml`, then restart:
@@ -91,7 +114,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
 | Home     | Solar today, battery, house load, lights, Stevie       |
-| Energy   | Live 5-node flow + inverter / Octopus                  |
+| Energy   | Live 5-node flow + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge                               |
 | Charge   | Zappi Eco+, Intelligent                                |

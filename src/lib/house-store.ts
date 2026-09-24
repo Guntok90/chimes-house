@@ -15,6 +15,7 @@ import {
   readCreds,
   readMap,
   switchOn,
+  tariffsFromStates,
   writeCreds,
   writeMap,
   wsFailureMessage,
@@ -25,11 +26,32 @@ import {
   type SwitchId,
 } from "./ha";
 import { EMPTY_LIVE, SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
+import {
+  DEFAULT_TARIFFS,
+  clampRate,
+  estimateImportCost,
+  readLocalTariffs,
+  resolveTariffs,
+  writeLocalTariffs,
+  type TariffRates,
+  type TariffState,
+} from "./tariffs";
 
 const socket = new HaSocket();
 
 type Status = "demo" | "connecting" | "live" | "error";
 type HistoryStatus = "idle" | "loading" | "ready" | "empty";
+
+function bootTariffs(): TariffState {
+  if (typeof localStorage === "undefined") {
+    return { ...DEFAULT_TARIFFS, source: "default", haHelpers: false };
+  }
+  return resolveTariffs(null, readLocalTariffs());
+}
+
+function remapDayCosts(days: DayPoint[], rates: TariffRates): DayPoint[] {
+  return days.map((d) => ({ ...d, cost: estimateImportCost(d.gridIn, rates) }));
+}
 
 type Store = {
   live: HouseLive;
@@ -43,11 +65,15 @@ type Store = {
   historyWeek: DayPoint[];
   historyMonth: DayPoint[];
   historyStatus: HistoryStatus;
+  /** Custom £/kWh rates for History/Energy spend maths. */
+  tariffs: TariffState;
   connect: (creds: HaCreds) => Promise<void>;
   disconnect: () => void;
   boot: () => void;
   toggle: (id: string) => void;
   refreshHistory: () => Promise<void>;
+  /** Persist cheap/peak rates (HA helpers when mapped, else localStorage). */
+  setTariffs: (patch: Partial<TariffRates>) => Promise<void>;
 };
 
 let bootInFlight: Promise<void> | null = null;
@@ -64,11 +90,16 @@ export const useHouse = create<Store>((set, get) => {
     historyWeek: [],
     historyMonth: [],
     historyStatus: "idle",
+    tariffs: bootTariffs(),
 
     boot() {
       if (bootInFlight) return;
       bootInFlight = (async () => {
-        set({ status: "connecting", error: undefined });
+        set({
+          status: "connecting",
+          error: undefined,
+          tariffs: resolveTariffs(null, readLocalTariffs()),
+        });
         let bootstrap: HaBootstrapResponse | null = null;
         let bootstrapFailed = false;
         try {
@@ -131,6 +162,7 @@ export const useHouse = create<Store>((set, get) => {
             historyWeek: [],
             historyMonth: [],
             historyStatus: "idle",
+            tariffs: resolveTariffs(null, readLocalTariffs()),
           });
         }
       };
@@ -140,12 +172,23 @@ export const useHouse = create<Store>((set, get) => {
         const mapped = { ...saved, ...autoMap(states) };
         writeMap(mapped);
         const wasLive = get().status === "live";
+        const local = readLocalTariffs();
+        const haRates = tariffsFromStates(states, mapped);
+        const tariffs = resolveTariffs(
+          Object.keys(haRates).length ? haRates : null,
+          local,
+        );
+        // Cache HA values locally so demo / reconnect still has last-known rates.
+        if (tariffs.source === "ha") writeLocalTariffs(tariffs);
         set({
           live: liveFromStates(states, mapped, EMPTY_LIVE),
           switches: switchOn(states, mapped),
           map: mapped,
           status: "live",
           error: undefined,
+          tariffs,
+          historyWeek: remapDayCosts(get().historyWeek, tariffs),
+          historyMonth: remapDayCosts(get().historyMonth, tariffs),
         });
         if (!wasLive) void get().refreshHistory();
       };
@@ -158,6 +201,7 @@ export const useHouse = create<Store>((set, get) => {
           error: wsFailureMessage(err instanceof Error ? err.message : "Could not connect."),
           live: { ...SNAPSHOT },
           historyStatus: "idle",
+          tariffs: resolveTariffs(null, readLocalTariffs()),
         });
       }
     },
@@ -180,6 +224,7 @@ export const useHouse = create<Store>((set, get) => {
           let hours: HourPoint[] = [];
           let week: DayPoint[] = [];
           let month: DayPoint[] = [];
+          const rates: TariffRates = get().tariffs;
 
           // Hourly and daily paths are independent — a stats parse throw must
           // not wipe an otherwise-valid 24h series (and never invent demo data).
@@ -201,8 +246,8 @@ export const useHouse = create<Store>((set, get) => {
               end.toISOString(),
               "day",
             )) as HaStatisticsBag;
-            week = daysFromStatistics(stats, map, 7, end);
-            month = daysFromStatistics(stats, map, 28, end);
+            week = daysFromStatistics(stats, map, 7, end, rates);
+            month = daysFromStatistics(stats, map, 28, end, rates);
           } catch {
             week = [];
             month = [];
@@ -235,6 +280,7 @@ export const useHouse = create<Store>((set, get) => {
         historyWeek: [],
         historyMonth: [],
         historyStatus: "idle",
+        tariffs: resolveTariffs(null, readLocalTariffs()),
       });
     },
 
@@ -247,9 +293,55 @@ export const useHouse = create<Store>((set, get) => {
         void socket.call(entity);
       }
     },
+
+    async setTariffs(patch) {
+      const prev = get().tariffs;
+      const next: TariffState = {
+        cheap: clampRate(patch.cheap ?? prev.cheap),
+        peak: clampRate(patch.peak ?? prev.peak),
+        source: prev.haHelpers ? "ha" : "local",
+        haHelpers: prev.haHelpers,
+      };
+      writeLocalTariffs(next);
+      set({
+        tariffs: next,
+        historyWeek: remapDayCosts(get().historyWeek, next),
+        historyMonth: remapDayCosts(get().historyMonth, next),
+      });
+
+      const { map, status } = get();
+      if (status !== "live" || !readCreds()) return;
+
+      const writes: Promise<void>[] = [];
+      if (patch.cheap != null && map.tariffCheap) {
+        writes.push(socket.setNumber(map.tariffCheap, next.cheap));
+      }
+      if (patch.peak != null && map.tariffPeak) {
+        writes.push(socket.setNumber(map.tariffPeak, next.peak));
+      }
+      if (!writes.length) {
+        // Helpers not created yet — localStorage already holds the rates.
+        set({
+          tariffs: { ...next, source: "local", haHelpers: false },
+        });
+        return;
+      }
+      try {
+        await Promise.all(writes);
+      } catch {
+        // Keep local values; mark as local so the UI explains the fallback.
+        set({
+          tariffs: { ...next, source: "local", haHelpers: Boolean(map.tariffCheap || map.tariffPeak) },
+        });
+      }
+    },
   };
 });
 
 export function useLive() {
   return useHouse((s) => s.live);
+}
+
+export function useTariffs() {
+  return useHouse((s) => s.tariffs);
 }

@@ -1,3 +1,5 @@
+import { DEFAULT_TARIFFS, estimateImportCost } from "./tariffs.ts";
+
 export type HouseLive = {
   soc: number;
   batteryW: number;
@@ -119,7 +121,7 @@ export function lastDays(count: number): DayPoint[] {
     const short = Math.max(0, house - solar - battDischarge + battCharge * 0.15);
     const gridOut = clamp(surplus * 0.55, 0, 6.2);
     const gridIn = clamp(short * 0.7, 0.2, 8.4);
-    const cost = Number((gridIn * (SNAPSHOT.offPeak && i === 0 ? 0.07 : 0.226)).toFixed(2));
+    const cost = estimateImportCost(gridIn, DEFAULT_TARIFFS);
     out.push({
       key: d.toISOString().slice(0, 10),
       label: d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }),

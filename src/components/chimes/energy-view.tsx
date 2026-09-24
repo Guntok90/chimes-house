@@ -1,8 +1,10 @@
 import { WEEK, solarStatusHint } from "@/lib/house";
-import { useHouse, useLive } from "@/lib/house-store";
+import { useHouse, useLive, useTariffs } from "@/lib/house-store";
+import { estimateImportCost } from "@/lib/tariffs";
 import { CostBars, PowerArea } from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
+import { TariffEditor } from "./tariff-editor";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
 
 export function EnergyView() {
@@ -10,8 +12,11 @@ export function EnergyView() {
   const status = useHouse((s) => s.status);
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyWeek = useHouse((s) => s.historyWeek);
+  const tariffs = useTariffs();
   const liveMode = status === "live";
-  const week = liveMode ? historyWeek : WEEK;
+  const week = liveMode
+    ? historyWeek
+    : WEEK.map((d) => ({ ...d, cost: estimateImportCost(d.gridIn, tariffs) }));
   const today = week[week.length - 1];
   const chartsReady = !liveMode || (historyStatus === "ready" && week.length > 0);
   const solarHintRaw = solarStatusHint(status, LIVE);
@@ -103,6 +108,8 @@ export function EnergyView() {
           <Surface className="mb-3 px-5">
             <Row label="Tariff" value="Intelligent" />
             <Row label="Window" value={LIVE.offPeak ? "Off-peak now" : "Peak"} />
+            <Row label="Cheap rate" value={`£${tariffs.cheap.toFixed(3)}/kWh`} />
+            <Row label="Peak rate" value={`£${tariffs.peak.toFixed(3)}/kWh`} />
             <Row
               label="Today so far"
               value={today ? `£${today.cost.toFixed(2)}` : "—"}
@@ -117,6 +124,8 @@ export function EnergyView() {
           )}
         </section>
       </div>
+
+      <TariffEditor />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { MONTH, WEEK, type DayPoint } from "@/lib/house";
-import { useHouse } from "@/lib/house-store";
+import { useHouse, useTariffs } from "@/lib/house-store";
+import { estimateImportCost } from "@/lib/tariffs";
 import { CostBars, PowerArea } from "./charts";
 import { NoHistoryYet } from "./no-history";
 import { PageTitle, SectionLabel, Segmented, Surface } from "./ui";
@@ -13,15 +14,17 @@ export function HistoryView() {
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyWeek = useHouse((s) => s.historyWeek);
   const historyMonth = useHouse((s) => s.historyMonth);
+  const tariffs = useTariffs();
 
   const liveMode = status === "live";
   const rows: DayPoint[] = liveMode
     ? range === "week"
       ? historyWeek
       : historyMonth
-    : range === "week"
-      ? WEEK
-      : MONTH;
+    : (range === "week" ? WEEK : MONTH).map((d) => ({
+        ...d,
+        cost: estimateImportCost(d.gridIn, tariffs),
+      }));
 
   const showEmpty = liveMode && (historyStatus === "empty" || historyStatus === "loading" || rows.length === 0);
   const totals = useMemo(() => sum(rows), [rows]);
