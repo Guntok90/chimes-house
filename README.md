@@ -50,8 +50,9 @@ Mapped when present (preferred ids first):
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
 | Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
-| Range Rover     | Fuzzy only when entity id/name already contains `range_rover` / `range rover` (W, SOC, plug). No invented brand ids — Energy Flow shows a labeled node with `—` until mapped. |
-| Range Rover kWh | Optional daily energy entity if present; otherwise “—” on Charge                 |
+| Range Rover     | Fuzzy when id/name contains `range_rover` / `land_rover` / `jlr` (W, SOC, plug). Plug also falls back to Front garden **Range Rover Hybrid** `switch.*` (on = charging path). No invented Cupra/VAG ids on this node. |
+| Range Rover kWh | Daily energy / Hybrid “today’s consumption” when present; otherwise “—” on Charge  |
+| Cupra / VAG     | Driveway Cupra stays on the **Zappi** path (`zappiPlugged` / `zappiW` / today). Do not remap VAG `*_plug_connected` onto Range Rover. |
 | Stevie          | `person.stevie_w`                                                                |
 | Switches        | Lamp/Telly/blankets/Fish/Pergola/Ponds → `switch.smart_switch_*` / garden ids    |
 

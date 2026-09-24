@@ -54,8 +54,10 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
       : "driveway"
     : roverOn
       ? "charging"
-      : live.rangeRoverPlugged
-        ? "plugged"
+      : map.rangeRoverPlugged
+        ? live.rangeRoverPlugged
+          ? "plugged"
+          : "unplugged"
         : map.rangeRoverSoc
           ? "parked"
           : "driveway";

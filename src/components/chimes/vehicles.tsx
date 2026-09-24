@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Car, Zap } from "lucide-react";
-import { useLive } from "@/lib/house-store";
+import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 import { SectionLabel } from "./ui";
 
@@ -8,18 +8,33 @@ function formatTodayKwh(v: number | null): string {
   return v == null ? "—" : `${v} kWh`;
 }
 
-function rangeRoverStatus(live: {
-  rangeRoverPlugged: boolean;
-  rangeRoverW: number;
-}): string {
+function formatPlug(mapped: boolean, plugged: boolean): string {
+  if (!mapped) return "—";
+  return plugged ? "Plugged in" : "Unplugged";
+}
+
+function rangeRoverStatus(
+  live: {
+    rangeRoverPlugged: boolean;
+    rangeRoverW: number;
+    rangeRoverSoc: number;
+  },
+  plugMapped: boolean,
+): string {
   if (live.rangeRoverW > 30) return "Charging";
+  if (!plugMapped) return live.rangeRoverSoc > 0 ? "Parked" : "—";
   if (live.rangeRoverPlugged) return "Plugged in";
-  return "Plug off";
+  return "Unplugged";
 }
 
 /** Both driveway chargers — same labels as Site / Overview / Charge. */
 export function VehiclesSection({ className }: { className?: string }) {
   const live = useLive();
+  const map = useHouse((s) => s.map);
+  const status = useHouse((s) => s.status);
+  const demo = status === "demo";
+  const roverPlugMapped = demo || Boolean(map.rangeRoverPlugged);
+  const zappiPlugMapped = demo || Boolean(map.zappiPlugged);
   return (
     <section className={className}>
       <SectionLabel tone="umber">Vehicles</SectionLabel>
@@ -28,7 +43,7 @@ export function VehiclesSection({ className }: { className?: string }) {
           icon={Zap}
           name="Zappi Charger"
           place="Driveway"
-          status={live.zappiPlugged ? "Plugged in" : "Unplugged"}
+          status={formatPlug(zappiPlugMapped, live.zappiPlugged)}
           detail={
             live.zappiW > 30
               ? `${live.zappiW} W`
@@ -44,7 +59,7 @@ export function VehiclesSection({ className }: { className?: string }) {
           icon={Car}
           name="Range Rover"
           place="Driveway"
-          status={rangeRoverStatus(live)}
+          status={rangeRoverStatus(live, roverPlugMapped)}
           detail={
             live.rangeRoverW > 30
               ? `${live.rangeRoverW} W`
@@ -53,7 +68,7 @@ export function VehiclesSection({ className }: { className?: string }) {
                 : undefined
           }
           todayKwh={live.rangeRoverTodayKwh}
-          live={live.rangeRoverW > 30 || live.rangeRoverPlugged}
+          live={live.rangeRoverW > 30 || (roverPlugMapped && live.rangeRoverPlugged)}
           tone="teal"
         />
       </div>
