@@ -5,6 +5,7 @@ import {
   HOUSE_W_BLOCKLIST,
   PREFERRED,
   PREFERRED_SWITCHES,
+  PREFERRED_TARIFFS,
   SPARES_AREA,
   areaSwitchesFromStates,
   autoMap,
@@ -388,6 +389,26 @@ describe("deriveHouseW energy balance", () => {
   it("clamps noise below zero to 0", () => {
     assert.equal(deriveHouseW(0, -100, 50), 0);
     assert.equal(deriveHouseW(100, 0, 0, 200), 0);
+  });
+});
+
+describe("tariff helper mapping", () => {
+  it("maps preferred chimes tariff helpers when present", () => {
+    const states = [
+      ...CHIMES_PI,
+      state("input_number.chimes_tariff_cheap", "0.08", "Chimes cheap", "£/kWh"),
+      state("input_number.chimes_tariff_peak", "0.24", "Chimes peak", "£/kWh"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.tariffCheap, "input_number.chimes_tariff_cheap");
+    assert.equal(map.tariffPeak, "input_number.chimes_tariff_peak");
+    assert.equal(PREFERRED_TARIFFS.tariffCheap[0], "input_number.chimes_tariff_cheap");
+  });
+
+  it("leaves tariff helpers unmapped until dad creates them", () => {
+    const map = autoMap(CHIMES_PI);
+    assert.equal(map.tariffCheap, undefined);
+    assert.equal(map.tariffPeak, undefined);
   });
 });
 

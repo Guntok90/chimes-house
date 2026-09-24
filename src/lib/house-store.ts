@@ -16,6 +16,7 @@ import {
   credsForBoot,
   demoAreaSwitches,
   readCreds,
+  tariffsFromStates,
   writeCreds,
   wsFailureMessage,
   type AreaSwitch,
@@ -31,6 +32,14 @@ import {
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
 import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
+import {
+  clampRate,
+  readLocalTariffs,
+  resolveTariffs,
+  writeLocalTariffs,
+  type TariffRates,
+  type TariffState,
+} from "./tariffs";
 
 const socket = new HaSocket();
 
@@ -40,6 +49,30 @@ let lastStates: HaState[] = [];
 
 function rebuildAreaSwitches(states: HaState[]) {
   return areaSwitchesFromStates(states, areasCache, entityRegCache);
+}
+
+function bootTariffs(): TariffState {
+  return resolveTariffs(null, readLocalTariffs());
+}
+
+function remapDayCosts(days: DayPoint[], rates: TariffRates): DayPoint[] {
+  return days.map((d) => ({
+    ...d,
+    cost: Number(
+      (
+        // Prefer TOU window weighting when we lack per-day hourly rows here;
+        // refreshHistory recomputes with hourStats when live.
+        (d.gridIn * (rates.cheap * 0.25 + rates.peak * 0.75))
+      ).toFixed(2),
+    ),
+  }));
+}
+
+function ratesForHistory(tariffs: TariffRates): {
+  lowGbpPerKwh: number;
+  highGbpPerKwh: number;
+} {
+  return { lowGbpPerKwh: tariffs.cheap, highGbpPerKwh: tariffs.peak };
 }
 
 /** Hourly points for Overview day tab (past week, scrollable). */
@@ -81,6 +114,8 @@ type Store = {
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
   /** Last write error from Battery charge-limit Apply (cleared on success). */
   writeError?: string;
+  /** Custom £/kWh rates for History/Energy spend maths (not Octopus Dispatch). */
+  tariffs: TariffState;
   connect: (creds: HaCreds) => Promise<void>;
   disconnect: () => void;
   boot: () => void;
@@ -91,6 +126,8 @@ type Store = {
   applyGridCharge: (allow: boolean) => Promise<boolean>;
   /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
   toggleEntity: (entityId: string) => void;
+  /** Save custom cheap/peak £/kWh — HA helpers when mapped, else localStorage. */
+  setTariffs: (patch: Partial<TariffRates>) => Promise<boolean>;
   refreshHistory: () => Promise<void>;
 };
 
@@ -118,6 +155,7 @@ export const useHouse = create<Store>((set, get) => {
     ...emptyHistory(),
     historyStatus: "idle",
     chargeLimitMeta: DEMO_CHARGE_META,
+    tariffs: bootTariffs(),
 
     boot() {
       if (bootInFlight) return;
@@ -135,6 +173,7 @@ export const useHouse = create<Store>((set, get) => {
               status: "demo",
               live: { ...SNAPSHOT },
               areaSwitches: demoAreaSwitches({}),
+              tariffs: resolveTariffs(null, readLocalTariffs()),
               error: undefined,
               historyStatus: "idle",
             });
@@ -197,9 +236,14 @@ export const useHouse = create<Store>((set, get) => {
         lastStates = list;
         const wasLive = get().status === "live";
         applyLiveStates(states, get, set, socket);
+        const mapped = get().map;
+        const haRates = tariffsFromStates(list, mapped);
+        const tariffs = resolveTariffs(haRates, readLocalTariffs());
+        if (tariffs.source === "ha") writeLocalTariffs(tariffs);
         set({
           areaSwitches: rebuildAreaSwitches(list),
-          chargeLimitMeta: chargeLimitMetaMap(list, get().map),
+          chargeLimitMeta: chargeLimitMetaMap(list, mapped),
+          tariffs,
         });
         if (!wasLive && get().status === "live") {
           void refreshRegistries();
@@ -277,11 +321,8 @@ export const useHouse = create<Store>((set, get) => {
               }
             }
 
-            const live = get().live;
-            const rates = {
-              lowGbpPerKwh: live.cheapRateGbp,
-              highGbpPerKwh: live.peakRateGbp,
-            };
+            const tariffs = get().tariffs;
+            const rates = ratesForHistory(tariffs);
             const opts = { hourStats, rates };
             days = daysFromStatistics(stats, map, HISTORY_DAY_COUNT, end, opts);
             week = days.length ? days.slice(-7) : daysFromStatistics(stats, map, 7, end, opts);
@@ -396,6 +437,50 @@ export const useHouse = create<Store>((set, get) => {
       }
     },
 
+    async setTariffs(patch) {
+      const prev = get().tariffs;
+      const next: TariffState = {
+        cheap: clampRate(patch.cheap ?? prev.cheap),
+        peak: clampRate(patch.peak ?? prev.peak),
+        source: prev.haHelpers ? "ha" : "local",
+        haHelpers: prev.haHelpers,
+      };
+      writeLocalTariffs(next);
+      set({
+        tariffs: next,
+        historyWeek: remapDayCosts(get().historyWeek, next),
+        historyMonth: remapDayCosts(get().historyMonth, next),
+      });
+
+      const { map, status } = get();
+      if (status !== "live" || !readCreds()) return true;
+
+      const writes: Promise<void>[] = [];
+      if (patch.cheap != null && map.tariffCheap) {
+        writes.push(socket.setNumber(map.tariffCheap, next.cheap));
+      }
+      if (patch.peak != null && map.tariffPeak) {
+        writes.push(socket.setNumber(map.tariffPeak, next.peak));
+      }
+      if (!writes.length) {
+        // Helpers not created yet — localStorage already holds the rates.
+        set({
+          tariffs: { ...next, source: "local", haHelpers: false },
+        });
+        return true;
+      }
+      try {
+        await Promise.all(writes);
+        return true;
+      } catch {
+        // Keep local values; mark as local so the UI explains the fallback.
+        set({
+          tariffs: { ...next, source: "local", haHelpers: Boolean(map.tariffCheap || map.tariffPeak) },
+        });
+        return false;
+      }
+    },
+
     toggleEntity(entityId) {
       const { areaSwitches, status, map } = get();
       const hit = areaSwitches.find((s) => s.entityId === entityId);
@@ -459,4 +544,8 @@ async function refreshRegistries() {
 
 export function useLive() {
   return useHouse((s) => s.live);
+}
+
+export function useTariffs() {
+  return useHouse((s) => s.tariffs);
 }

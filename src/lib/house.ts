@@ -3,6 +3,7 @@ import {
   gridSpendGbp,
   splitDailyImportByWindow,
 } from "./octopus.ts";
+import { DEFAULT_TARIFFS } from "./tariffs.ts";
 
 export type HouseLive = {
   soc: number;
@@ -179,11 +180,12 @@ export function lastDays(count: number): DayPoint[] {
     const gridOut = clamp(surplus * 0.55, 0, 6.2);
     const gridIn = clamp(short * 0.7, 0.2, 8.4);
     const cars = clamp((seed % 7) * 0.35, 0, 4.2);
-    // Demo has no hourly import series — split by Intelligent Go window hours.
+    // Demo has no hourly import series — split by Intelligent Go window hours,
+    // priced with custom tariff defaults (same as editable Energy rates).
     const { lowKwh, highKwh } = splitDailyImportByWindow(gridIn);
     const cost = gridSpendGbp(lowKwh, highKwh, {
-      lowGbpPerKwh: SNAPSHOT.cheapRateGbp,
-      highGbpPerKwh: SNAPSHOT.peakRateGbp,
+      lowGbpPerKwh: DEFAULT_TARIFFS.cheap,
+      highGbpPerKwh: DEFAULT_TARIFFS.peak,
     });
     out.push({
       key: d.toISOString().slice(0, 10),

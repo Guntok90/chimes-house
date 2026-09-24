@@ -1,5 +1,6 @@
 import { deriveHouseW } from "./energy-balance.ts";
 import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house.ts";
+import { PREFERRED_TARIFF_ENTITIES, type TariffRates } from "./tariffs.ts";
 
 export type HaState = {
   entity_id: string;
@@ -7,7 +8,9 @@ export type HaState = {
   attributes: Record<string, unknown>;
 };
 
-export type HaMap = Partial<Record<keyof HouseLive | SwitchId, string>>;
+export type TariffEntityId = "tariffCheap" | "tariffPeak";
+
+export type HaMap = Partial<Record<keyof HouseLive | SwitchId | TariffEntityId, string>>;
 
 export type SwitchId =
   | "lamp"
@@ -139,6 +142,11 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   peakRateGbp: [],
 };
 
+/** Preferred input_number / number helpers for custom £/kWh display rates. */
+export const PREFERRED_TARIFFS: Record<TariffEntityId, readonly string[]> = {
+  tariffCheap: PREFERRED_TARIFF_ENTITIES.cheap,
+  tariffPeak: PREFERRED_TARIFF_ENTITIES.peak,
+};
 /** Defaults when HA number entities omit min/max/step attributes. */
 export const CHARGE_LIMIT_DEFAULTS = {
   gridChargeCutoffSoc: { min: 20, max: 100, step: 1 },
@@ -693,6 +701,30 @@ export function autoMap(states: HaState[]): HaMap {
   if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
   if (peakRate) map.peakRateGbp = peakRate.entity_id;
 
+  const tariffCheap =
+    prefer(states, [...PREFERRED_TARIFFS.tariffCheap]) ??
+    find(
+      states,
+      (s, b) =>
+        (s.entity_id.startsWith("input_number.") || s.entity_id.startsWith("number.")) &&
+        (b.includes("tariff") || b.includes("chimes")) &&
+        (b.includes("cheap") || b.includes("off_peak") || b.includes("off-peak") || b.includes("low")),
+    );
+  const tariffPeak =
+    prefer(states, [...PREFERRED_TARIFFS.tariffPeak]) ??
+    find(
+      states,
+      (s, b) =>
+        (s.entity_id.startsWith("input_number.") || s.entity_id.startsWith("number.")) &&
+        (b.includes("tariff") || b.includes("chimes")) &&
+        (b.includes("peak") || b.includes("high")) &&
+        !b.includes("off_peak") &&
+        !b.includes("off-peak") &&
+        !b.includes("cheap"),
+    );
+  if (tariffCheap) map.tariffCheap = tariffCheap.entity_id;
+  if (tariffPeak) map.tariffPeak = tariffPeak.entity_id;
+
   for (const sw of SWITCHES) {
     const preferred = prefer(states, PREFERRED_SWITCHES[sw.id]);
     if (preferred) {
@@ -960,6 +992,24 @@ export function switchOn(
   }
   return out;
 }
+
+/** Read custom £/kWh helpers from mapped HA states. Missing helpers → {}. */
+export function tariffsFromStates(states: HaState[], map: HaMap): Partial<TariffRates> {
+  const byId = new Map(states.map((s) => [s.entity_id, s]));
+  const out: Partial<TariffRates> = {};
+  const cheap = map.tariffCheap ? byId.get(map.tariffCheap) : undefined;
+  const peak = map.tariffPeak ? byId.get(map.tariffPeak) : undefined;
+  if (cheap && available(cheap)) {
+    const n = num(cheap.state);
+    if (n != null) out.cheap = n;
+  }
+  if (peak && available(peak)) {
+    const n = num(peak.state);
+    if (n != null) out.peak = n;
+  }
+  return out;
+}
+
 
 /** HA area registry row (config/area_registry/list). */
 export type HaArea = {
@@ -1231,10 +1281,14 @@ export class HaSocket {
     });
   }
 
-  /** Set a `number.*` entity via `number.set_value` (Huawei charge cutoffs). */
+  /** Set a `number.*` / `input_number.*` via `*.set_value` (charge cutoffs + tariff helpers). */
   async setNumber(entityId: string, value: number) {
+    const [domain] = entityId.split(".");
+    if (domain !== "input_number" && domain !== "number") {
+      throw new Error("Only input_number / number helpers can be written.");
+    }
     await this.send("call_service", {
-      domain: "number",
+      domain,
       service: "set_value",
       service_data: { value },
       target: { entity_id: entityId },
