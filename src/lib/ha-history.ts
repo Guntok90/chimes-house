@@ -15,8 +15,9 @@ type HistPoint = {
 export type HaHistoryBag = Record<string, HistPoint[]>;
 
 export type HaStatRow = {
-  start: string;
-  end?: string;
+  /** ISO string or Unix epoch milliseconds (HA WS often sends numbers). */
+  start: string | number;
+  end?: string | number;
   mean?: number | null;
   state?: number | null;
   sum?: number | null;
@@ -30,6 +31,37 @@ function num(v: string | number | null | undefined) {
   if (v == null) return null;
   const n = Number.parseFloat(String(v));
   return Number.isFinite(n) ? n : null;
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+/** Local calendar YYYY-MM-DD — matches house-dashboard day buckets. */
+export function localDayKey(d: Date): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/**
+ * Normalise a statistics row `start` (ISO string, epoch ms number, or numeric
+ * string) to YYYY-MM-DD. Never assume `start` is a string — HA WS returns ms.
+ */
+export function dayKeyFromStart(start: string | number | null | undefined): string | null {
+  if (start == null || start === "") return null;
+  if (typeof start === "number") {
+    if (!Number.isFinite(start)) return null;
+    return localDayKey(new Date(start));
+  }
+  const s = String(start).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const n = Number(s);
+    if (!Number.isFinite(n)) return null;
+    return localDayKey(new Date(n));
+  }
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return null;
+  return localDayKey(new Date(t));
 }
 
 function sampleAt(series: HistPoint[] | undefined, atMs: number): number | null {
@@ -90,12 +122,14 @@ function dayLabel(isoDay: string) {
 
 function dayValue(rows: HaStatRow[] | undefined, key: string): number {
   if (!rows?.length) return 0;
-  const row = rows.find((r) => (r.start ?? "").slice(0, 10) === key);
+  const row = rows.find((r) => dayKeyFromStart(r.start) === key);
   if (!row) return 0;
   const change = num(row.change);
   if (change != null) return Number(change.toFixed(2));
   const state = num(row.state);
   if (state != null) return Number(state.toFixed(2));
+  const sum = num(row.sum);
+  if (sum != null) return Number(sum.toFixed(2));
   const mean = num(row.mean);
   // Power sensor mean W → rough daily kWh.
   if (mean != null) return Number(((mean * 24) / 1000).toFixed(2));
@@ -117,7 +151,7 @@ export function daysFromStatistics(
     const d = new Date(now);
     d.setHours(12, 0, 0, 0);
     d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
+    const key = localDayKey(d);
     const solar = dayValue(solarId ? stats[solarId] : undefined, key);
     const house = dayValue(map.houseW ? stats[map.houseW] : undefined, key);
     const gridRaw = dayValue(map.gridW ? stats[map.gridW] : undefined, key);
