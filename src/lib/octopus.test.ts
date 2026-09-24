@@ -36,6 +36,8 @@ describe("octopus Intelligent Go helpers", () => {
 
   it("gridSpendPartsGbp breaks out off-peak, peak, and total", () => {
     const parts = gridSpendPartsGbp(10, 10, DEFAULT_TARIFF);
+    assert.equal(parts.lowKwh, 10);
+    assert.equal(parts.highKwh, 10);
     assert.equal(parts.offPeak, 0.7);
     assert.equal(parts.peak, 2.26);
     assert.equal(parts.total, 2.96);

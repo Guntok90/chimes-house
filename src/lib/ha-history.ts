@@ -207,14 +207,19 @@ function periodValue(
   const row = rows.find((r) => keyOf(r.start) === key);
   if (!row) return 0;
   const change = num(row.change);
-  if (change != null) return Number(change.toFixed(2));
+  const mean = num(row.mean);
+  // Energy sensors: non-zero change is the period delta (kWh).
+  // Power sensors often report change: 0 with mean in W — prefer mean then.
+  if (change != null && change !== 0) return Number(change.toFixed(2));
+  if (mean != null && mean !== 0) {
+    return Number(((mean * hoursInPeriod) / 1000).toFixed(2));
+  }
   const state = num(row.state);
-  if (state != null) return Number(state.toFixed(2));
+  if (state != null && state !== 0) return Number(state.toFixed(2));
+  // Genuine zero-energy period (or flat zero power).
+  if (change === 0 || mean === 0 || state === 0) return 0;
   const sum = num(row.sum);
   if (sum != null) return Number(sum.toFixed(2));
-  const mean = num(row.mean);
-  // Power sensor mean W → rough period kWh.
-  if (mean != null) return Number(((mean * hoursInPeriod) / 1000).toFixed(2));
   return 0;
 }
 
@@ -232,7 +237,16 @@ function metersForPeriod(
   map: HaMap,
   key: string,
   valueFn: (rows: HaStatRow[] | undefined, key: string) => number,
-): Omit<DayPoint, "key" | "label" | "cost" | "costOffPeak" | "costPeak"> {
+): Omit<
+  DayPoint,
+  | "key"
+  | "label"
+  | "cost"
+  | "costOffPeak"
+  | "costPeak"
+  | "importOffPeakKwh"
+  | "importPeakKwh"
+> {
   const solarId = map.solarTodayKwh ?? map.solarNowW;
   const solar = valueFn(solarId ? stats[solarId] : undefined, key);
   const house = valueFn(map.houseW ? stats[map.houseW] : undefined, key);
@@ -267,16 +281,21 @@ function hasMeterSignal(d: Omit<DayPoint, "key" | "label">): boolean {
   );
 }
 
-/** kWh for one hour row: prefer change/state/sum; else mean W → kWh. */
-function hourKwh(row: HaStatRow): number {
+/**
+ * kWh for one hour row from HA statistics.
+ *
+ * Prefer energy `change` (kWh delta). For power sensors (myenergi grid W), HA
+ * often returns `change: 0` with `mean` in watts — use mean W → kWh.
+ *
+ * Never treat `state` or cumulative `sum` as hourly kWh: on power sensors
+ * `state` is watts; on energy sensors `sum` is lifetime — both inflate Peak £.
+ */
+export function hourKwh(row: HaStatRow): number {
   const change = num(row.change);
-  if (change != null) return change;
-  const state = num(row.state);
-  if (state != null) return state;
-  const sum = num(row.sum);
-  if (sum != null) return sum;
   const mean = num(row.mean);
-  if (mean != null) return mean / 1000; // mean W over 1h ≈ kWh
+  if (change != null && change !== 0) return change;
+  if (mean != null && mean !== 0) return mean / 1000; // mean W over 1h ≈ kWh
+  if (change === 0 || mean === 0) return 0;
   return 0;
 }
 
@@ -334,7 +353,10 @@ export function splitGridImportForDay(
   };
 }
 
-/** Daily spend parts from low+high grid import × tariff rates (never a flat average). */
+/**
+ * Daily spend parts from low+high grid import × tariff rates.
+ * Prefers hourly Intelligent Go window split; never prices all kWh at peak.
+ */
 export function daySpendPartsGbp(
   gridIn: number,
   dayKey: string,
@@ -342,8 +364,13 @@ export function daySpendPartsGbp(
   rates: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh"> = DEFAULT_TARIFF,
 ) {
   const split = splitGridImportForDay(hourRows, dayKey);
-  if (split) return gridSpendPartsGbp(split.lowKwh, split.highKwh, rates);
-  // Gap: no hourly import series — best available is window-hour weighting.
+  const splitTotal = split ? split.lowKwh + split.highKwh : 0;
+  // Use hourly TOU when it actually measured import. An all-zero split while
+  // daily gridIn > 0 means hourKwh failed (e.g. change:0 masking mean) — fall back.
+  if (split && (splitTotal > 0.0001 || gridIn <= 0.0001)) {
+    return gridSpendPartsGbp(split.lowKwh, split.highKwh, rates);
+  }
+  // Gap: no usable hourly import series — best available is window-hour weighting.
   const approx = splitDailyImportByWindow(gridIn);
   return gridSpendPartsGbp(approx.lowKwh, approx.highKwh, rates);
 }
@@ -384,6 +411,8 @@ export function daysFromStatistics(
       key,
       label: dayLabel(key),
       ...meters,
+      importOffPeakKwh: Number(spend.lowKwh.toFixed(4)),
+      importPeakKwh: Number(spend.highKwh.toFixed(4)),
       costOffPeak: spend.offPeak,
       costPeak: spend.peak,
       cost: spend.total,
@@ -399,21 +428,25 @@ export function monthsFromStatistics(
   map: HaMap,
   count: number,
   now = new Date(),
+  opts: DaysFromStatisticsOpts = {},
 ): DayPoint[] {
   const solarId = map.solarTodayKwh ?? map.solarNowW;
   if (!solarId && !map.gridW && !map.houseW && !map.batteryW && !map.zappiW) return [];
 
+  const rates = opts.rates ?? DEFAULT_TARIFF;
   const out: DayPoint[] = [];
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1, 12, 0, 0, 0);
     const key = localMonthKey(d);
     const meters = metersForPeriod(stats, map, key, monthValue);
-    const spend = daySpendPartsGbp(meters.gridIn, key, undefined, DEFAULT_TARIFF);
+    const spend = daySpendPartsGbp(meters.gridIn, key, undefined, rates);
     out.push({
       key,
       label: monthLabel(key),
       ...meters,
       // No hourly series for monthly buckets — window-hour weighting.
+      importOffPeakKwh: Number(spend.lowKwh.toFixed(4)),
+      importPeakKwh: Number(spend.highKwh.toFixed(4)),
       costOffPeak: spend.offPeak,
       costPeak: spend.peak,
       cost: spend.total,

@@ -49,6 +49,10 @@ export function cheapFractionInLocalHour(hourStart: Date): number {
 
 /** Off-peak / peak / total £ from grid import split across low / high rates. */
 export type SpendPartsGbp = {
+  /** Off-peak (cheap window) import kWh used for the £ figure. */
+  lowKwh: number;
+  /** Peak-window import kWh used for the £ figure. */
+  highKwh: number;
   /** Off-peak (cheap window) £. */
   offPeak: number;
   /** Peak / high £. */
@@ -63,11 +67,13 @@ export function gridSpendPartsGbp(
   gridImportHighKwh: number,
   rates: Pick<TariffRates, "lowGbpPerKwh" | "highGbpPerKwh"> = DEFAULT_TARIFF,
 ): SpendPartsGbp {
-  const low = Math.max(0, gridImportLowKwh);
-  const high = Math.max(0, gridImportHighKwh);
-  const offPeak = Number((low * rates.lowGbpPerKwh).toFixed(2));
-  const peak = Number((high * rates.highGbpPerKwh).toFixed(2));
+  const lowKwh = Math.max(0, gridImportLowKwh);
+  const highKwh = Math.max(0, gridImportHighKwh);
+  const offPeak = Number((lowKwh * rates.lowGbpPerKwh).toFixed(2));
+  const peak = Number((highKwh * rates.highGbpPerKwh).toFixed(2));
   return {
+    lowKwh,
+    highKwh,
     offPeak,
     peak,
     total: Number((offPeak + peak).toFixed(2)),

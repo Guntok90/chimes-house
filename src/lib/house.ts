@@ -155,6 +155,13 @@ export type DayPoint = {
   battDischarge: number;
   /** EV / Zappi charge energy (kWh) when a charge-power entity is mapped. */
   cars: number;
+  /**
+   * Grid import kWh during the Intelligent Go cheap window (23:30–05:30).
+   * Kept so tariff edits can reprice without re-falling back to 25%/75%.
+   */
+  importOffPeakKwh: number;
+  /** Grid import kWh outside the cheap window. */
+  importPeakKwh: number;
   /** Off-peak (cheap window) grid import £. */
   costOffPeak: number;
   /** Peak / high grid import £. */
@@ -213,6 +220,8 @@ export function lastDays(count: number): DayPoint[] {
       battCharge: Number(battCharge.toFixed(2)),
       battDischarge: Number(battDischarge.toFixed(2)),
       cars: Number(cars.toFixed(2)),
+      importOffPeakKwh: Number(lowKwh.toFixed(4)),
+      importPeakKwh: Number(highKwh.toFixed(4)),
       costOffPeak: spend.offPeak,
       costPeak: spend.peak,
       cost: spend.total,

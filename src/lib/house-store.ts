@@ -44,6 +44,7 @@ import {
   type TariffRates,
   type TariffState,
 } from "./tariffs";
+import { gridSpendPartsGbp } from "./octopus";
 
 export { decideResume } from "./ha-resume";
 export type { ResumeAction } from "./ha-resume";
@@ -64,11 +65,28 @@ function bootTariffs(): TariffState {
 
 function remapDayCosts(days: DayPoint[], rates: TariffRates): DayPoint[] {
   return days.map((d) => {
-    // Prefer TOU window weighting when we lack per-day hourly rows here;
-    // refreshHistory recomputes with hourStats when live.
+    // Reprice from the stored TOU kWh split when we have one (hourly stats or
+    // prior approx). Never re-apply the flat 25%/75% blend — that inflated
+    // Peak £ for overnight-charging homes after tariff Save.
+    const low = d.importOffPeakKwh;
+    const high = d.importPeakKwh;
+    if (typeof low === "number" && typeof high === "number" && (low > 0 || high > 0 || d.gridIn <= 0)) {
+      const spend = gridSpendPartsGbp(low, high, {
+        lowGbpPerKwh: rates.cheap,
+        highGbpPerKwh: rates.peak,
+      });
+      return {
+        ...d,
+        costOffPeak: spend.offPeak,
+        costPeak: spend.peak,
+        cost: spend.total,
+      };
+    }
     const spend = estimateImportCostParts(d.gridIn, rates);
     return {
       ...d,
+      importOffPeakKwh: Number((d.gridIn * 0.25).toFixed(4)),
+      importPeakKwh: Number((d.gridIn * 0.75).toFixed(4)),
       costOffPeak: spend.costOffPeak,
       costPeak: spend.costPeak,
       cost: spend.cost,
@@ -466,7 +484,9 @@ export const useHouse = create<Store>((set, get) => {
               end.toISOString(),
               "month",
             )) as HaStatisticsBag;
-            year = monthsFromStatistics(yearStats, map, HISTORY_YEAR_COUNT, end);
+            year = monthsFromStatistics(yearStats, map, HISTORY_YEAR_COUNT, end, {
+              rates: ratesForHistory(get().tariffs),
+            });
           } catch {
             year = [];
           }
@@ -609,9 +629,15 @@ export const useHouse = create<Store>((set, get) => {
         tariffs: next,
         historyWeek: remapDayCosts(get().historyWeek, next),
         historyMonth: remapDayCosts(get().historyMonth, next),
+        historyDays: remapDayCosts(get().historyDays, next),
+        historyYear: remapDayCosts(get().historyYear, next),
       });
 
       const { map, status } = get();
+      if (status === "live" && readCreds()) {
+        // Recompute from hourly TOU stats so Peak/Off-peak £ stay accurate.
+        void get().refreshHistory();
+      }
       if (status !== "live" || !readCreds()) return true;
 
       const writes: Promise<void>[] = [];

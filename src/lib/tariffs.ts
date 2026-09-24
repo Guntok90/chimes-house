@@ -64,7 +64,13 @@ export function parseRateInput(raw: string): number | null {
 export function estimateImportCostParts(
   gridInKwh: number,
   rates: TariffRates,
-): { costOffPeak: number; costPeak: number; cost: number } {
+): {
+  importOffPeakKwh: number;
+  importPeakKwh: number;
+  costOffPeak: number;
+  costPeak: number;
+  cost: number;
+} {
   const cheap = clampRate(rates.cheap);
   const peak = clampRate(rates.peak);
   const kwh = Math.max(0, gridInKwh);
@@ -73,6 +79,8 @@ export function estimateImportCostParts(
   const costOffPeak = Number((lowKwh * cheap).toFixed(2));
   const costPeak = Number((highKwh * peak).toFixed(2));
   return {
+    importOffPeakKwh: Number(lowKwh.toFixed(4)),
+    importPeakKwh: Number(highKwh.toFixed(4)),
     costOffPeak,
     costPeak,
     cost: Number((costOffPeak + costPeak).toFixed(2)),
