@@ -97,45 +97,44 @@ export function ChargeSection({
               </div>
             </div>
 
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex flex-wrap rounded-md bg-paper-deep p-1">
+                {(options.length ? options : ["Eco+", "Eco", "Fast", "Stop"]).map((opt) => (
+                  <button
+                    key={opt}
+                    type="button"
+                    disabled={!writable || busy}
+                    onClick={() => setDraftMode(opt)}
+                    className={cn(
+                      "min-h-9 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
+                      draftMode === opt
+                        ? "bg-paper-raised text-ink shadow-sm"
+                        : "text-ink-soft",
+                      (!writable || busy) && "opacity-60",
+                    )}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={!writable || busy || !dirty}
+                onClick={() => {
+                  void applyMode();
+                }}
+                className="rounded-md bg-teal px-3.5 py-2 text-sm text-paper disabled:opacity-50"
+              >
+                {busy ? "Sending…" : "Apply mode"}
+              </button>
+            </div>
             {!liveMode ? (
               <p className="text-sm text-ink-soft">Demo only — connect to the Pi to change.</p>
             ) : !modeMapped ? (
               <p className="text-sm text-ink-soft">
                 Zappi charge-mode select not found on this Pi — showing read-only.
               </p>
-            ) : (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="inline-flex flex-wrap rounded-md bg-paper-deep p-1">
-                  {options.map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      disabled={!writable || busy}
-                      onClick={() => setDraftMode(opt)}
-                      className={cn(
-                        "min-h-9 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
-                        draftMode === opt
-                          ? "bg-paper-raised text-ink shadow-sm"
-                          : "text-ink-soft",
-                      )}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  disabled={!writable || busy || !dirty}
-                  onClick={() => {
-                    void applyMode();
-                  }}
-                  className="rounded-md bg-teal px-3.5 py-2 text-sm text-paper disabled:opacity-50"
-                >
-                  {busy ? "Sending…" : "Apply mode"}
-                </button>
-              </div>
-            )}
-            {writable && map.zappiMode ? (
+            ) : map.zappiMode ? (
               <p className="text-xs text-ink-soft/80">
                 {map.zappiMode} · select.select_option
               </p>
