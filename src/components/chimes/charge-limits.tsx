@@ -183,41 +183,38 @@ function GridChargeAllowRow({
           Now: {current ? "Allowed" : "Off"}
         </div>
       </div>
-      {missingNote ? (
-        <p className="text-sm text-ink-soft">{missingNote}</p>
-      ) : (
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-md bg-paper-deep p-1">
-            {(
-              [
-                { id: true, label: "Allowed" },
-                { id: false, label: "Off" },
-              ] as const
-            ).map((opt) => (
-              <button
-                key={String(opt.id)}
-                type="button"
-                disabled={!writable || busy}
-                onClick={() => onDraft(opt.id)}
-                className={cn(
-                  "min-h-9 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
-                  draft === opt.id ? "bg-paper-raised text-ink shadow-sm" : "text-ink-soft",
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-          <button
-            type="button"
-            disabled={!writable || busy || !dirty}
-            onClick={onApply}
-            className="rounded-md bg-teal px-3.5 py-2 text-sm text-paper disabled:opacity-50"
-          >
-            {busy ? "Sending…" : "Apply grid charge"}
-          </button>
+      {missingNote ? <p className="text-sm text-ink-soft">{missingNote}</p> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="inline-flex rounded-md bg-paper-deep p-1">
+          {(
+            [
+              { id: true, label: "Allowed" },
+              { id: false, label: "Off" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={String(opt.id)}
+              type="button"
+              disabled={!writable || busy}
+              onClick={() => onDraft(opt.id)}
+              className={cn(
+                "min-h-9 rounded-sm px-3 text-sm font-medium transition-colors duration-150",
+                draft === opt.id ? "bg-paper-raised text-ink shadow-sm" : "text-ink-soft",
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
-      )}
+        <button
+          type="button"
+          disabled={!writable || busy || !dirty}
+          onClick={onApply}
+          className="rounded-md bg-teal px-3.5 py-2 text-sm text-paper disabled:opacity-50"
+        >
+          {busy ? "Sending…" : "Apply grid charge"}
+        </button>
+      </div>
       {writable && entityId ? (
         <p className="text-xs text-ink-soft/80">{entityId} · switch.turn_on / turn_off</p>
       ) : null}
@@ -262,47 +259,44 @@ function SocLimitRow({
         </div>
         <div className="text-sm tabular-nums text-ink-soft">Now: {valueLabel}</div>
       </div>
-      {missingNote ? (
-        <p className="text-sm text-ink-soft">{missingNote}</p>
-      ) : (
-        <div className="flex flex-wrap items-end gap-3">
-          <label className="block text-sm">
-            <span className="text-ink-soft">
-              New % ({meta.min}–{meta.max})
-            </span>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={meta.min}
-              max={meta.max}
-              step={meta.step}
-              value={draft}
-              disabled={!writable || busy}
-              onChange={(e) => onDraft(e.target.value)}
-              className="mt-1 w-28 rounded-md border border-line bg-paper px-3 py-2 text-sm tabular-nums disabled:opacity-60"
-            />
-          </label>
+      {missingNote ? <p className="text-sm text-ink-soft">{missingNote}</p> : null}
+      <div className="flex flex-wrap items-end gap-3">
+        <label className="block text-sm">
+          <span className="text-ink-soft">
+            New % ({meta.min}–{meta.max})
+          </span>
           <input
-            type="range"
+            type="number"
+            inputMode="numeric"
             min={meta.min}
             max={meta.max}
             step={meta.step}
-            value={Number.isFinite(draftNum) ? draftNum : meta.min}
+            value={draft}
             disabled={!writable || busy}
             onChange={(e) => onDraft(e.target.value)}
-            className="min-w-[10rem] flex-1 accent-teal disabled:opacity-60"
-            aria-label={`${title} slider`}
+            className="mt-1 w-28 rounded-md border border-line bg-paper px-3 py-2 text-sm tabular-nums disabled:opacity-60"
           />
-          <button
-            type="button"
-            disabled={!writable || busy || !dirty}
-            onClick={onApply}
-            className="rounded-md bg-teal px-3.5 py-2 text-sm text-paper disabled:opacity-50"
-          >
-            {busy ? "Sending…" : "Apply"}
-          </button>
-        </div>
-      )}
+        </label>
+        <input
+          type="range"
+          min={meta.min}
+          max={meta.max}
+          step={meta.step}
+          value={Number.isFinite(draftNum) ? draftNum : meta.min}
+          disabled={!writable || busy}
+          onChange={(e) => onDraft(e.target.value)}
+          className="min-w-[10rem] flex-1 accent-teal disabled:opacity-60"
+          aria-label={`${title} slider`}
+        />
+        <button
+          type="button"
+          disabled={!writable || busy || !dirty}
+          onClick={onApply}
+          className="rounded-md bg-teal px-3.5 py-2 text-sm text-paper disabled:opacity-50"
+        >
+          {busy ? "Sending…" : "Apply"}
+        </button>
+      </div>
       {writable && entityId ? (
         <p className="text-xs text-ink-soft/80">{entityId} · number.set_value</p>
       ) : null}
