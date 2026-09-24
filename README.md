@@ -41,6 +41,9 @@ Mapped when present (preferred ids first):
 | Inverter status | `sensor.inverter_device_status`                                                  |
 | Battery SOC     | `sensor.battery_1_state_of_capacity`                                             |
 | Battery W       | `sensor.batteries_charge_discharge_power` (signed; negative = discharging)       |
+| Grid charge     | `switch.batteries_charge_from_grid` (`switch.turn_on` / `turn_off`)              |
+| Grid cutoff SOC | `number.batteries_grid_charge_cutoff_soc` (`number.set_value`)                   |
+| Solar cutoff SOC| `number.batteries_charging_cutoff_capacity` — End-of-charge (`number.set_value`) |
 | Grid W          | `sensor.power_meter_active_power` (also `sensor.myenergi_chimes_power_grid`)     |
 | House W         | Real load W if present; else **derived** `solar + grid − battery` (never kWh)    |
 | Zappi mode      | `select.myenergi_zappi_25435526_charge_mode`                                     |
@@ -93,7 +96,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Home     | Solar today, battery, house load, lights, Stevie       |
 | Energy   | Live 5-node flow + inverter / Octopus                  |
 | Site     | 3D plot — house, solar, battery, both cars             |
-| Battery  | SOC / charge / discharge                               |
+| Battery  | SOC / charge / discharge + Grid & Solar charge cutoffs |
 | Charge   | Zappi Eco+, Intelligent                                |
 | History  | 7 / 28 day solar, house, grid, spend                   |
 | Garden   | Pergola, ponds                                         |

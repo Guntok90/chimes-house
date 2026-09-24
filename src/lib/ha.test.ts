@@ -6,6 +6,7 @@ import {
   PREFERRED,
   PREFERRED_SWITCHES,
   autoMap,
+  chargeLimitMeta,
   credsForBoot,
   liveFromStates,
   wsFailureMessage,
@@ -59,6 +60,9 @@ const CHIMES_PI: HaState[] = [
   state("switch.pergola_switch_1", "off", "Pergola"),
   state("switch.pond_1_switch_1", "on", "Pond 1"),
   state("switch.pond_2_switch_1", "off", "Pond 2"),
+  state("switch.batteries_charge_from_grid", "on", "Charge from grid"),
+  state("number.batteries_grid_charge_cutoff_soc", "85", "Grid charge cutoff SOC", "%"),
+  state("number.batteries_charging_cutoff_capacity", "100", "End-of-charge SOC", "%"),
 ];
 
 describe("ha autoMap preferences", () => {
@@ -78,6 +82,9 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.stevieHome, "person.stevie_w");
     assert.equal(map.offPeak, "binary_sensor.octopus_off_peak");
     assert.equal(map.intelligent, "binary_sensor.octopus_intelligent_ready");
+    assert.equal(map.gridCharge, "switch.batteries_charge_from_grid");
+    assert.equal(map.gridChargeCutoffSoc, "number.batteries_grid_charge_cutoff_soc");
+    assert.equal(map.solarChargeCutoffSoc, "number.batteries_charging_cutoff_capacity");
     // No true house-load W → leave unmapped (derive later); never lifetime kWh or myenergi home.
     assert.equal(map.houseW, undefined);
     assert.notEqual(map.houseW, "sensor.power_meter_consumption");
@@ -101,6 +108,9 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.stevieHome, true);
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
+    assert.equal(live.gridCharge, true);
+    assert.equal(live.gridChargeCutoffSoc, 85);
+    assert.equal(live.solarChargeCutoffSoc, 100);
     assert.equal(live.sunAboveHorizon, true);
     // houseW = solar + grid − battery − zappi = 1150 + 40 − (−380) − 0 = 1570
     assert.equal(live.houseW, deriveHouseW(1150, 40, -380, 0));
@@ -240,6 +250,61 @@ describe("ha autoMap preferences", () => {
     const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
     assert.equal(live.batteryW, -250);
     assert.equal(live.soc, 55);
+  });
+
+  it("maps Huawei grid + solar charge cutoffs and leaves them null when missing", () => {
+    const withLimits = [
+      state("switch.batteries_charge_from_grid", "off"),
+      state("number.batteries_grid_charge_cutoff_soc", "70", "", "%"),
+      state("number.batteries_charging_cutoff_capacity", "95", "", "%"),
+      // Must not steal solar cutoff mapping.
+      state("number.batteries_discharging_cutoff_capacity", "5", "", "%"),
+    ];
+    const map = autoMap(withLimits);
+    assert.equal(map.gridCharge, "switch.batteries_charge_from_grid");
+    assert.equal(map.gridChargeCutoffSoc, "number.batteries_grid_charge_cutoff_soc");
+    assert.equal(map.solarChargeCutoffSoc, "number.batteries_charging_cutoff_capacity");
+    assert.notEqual(map.solarChargeCutoffSoc, "number.batteries_discharging_cutoff_capacity");
+
+    const live = liveFromStates(withLimits, map, EMPTY_LIVE);
+    assert.equal(live.gridCharge, false);
+    assert.equal(live.gridChargeCutoffSoc, 70);
+    assert.equal(live.solarChargeCutoffSoc, 95);
+
+    const bare = liveFromStates([], {}, EMPTY_LIVE);
+    assert.equal(bare.gridChargeCutoffSoc, null);
+    assert.equal(bare.solarChargeCutoffSoc, null);
+  });
+
+  it("does not map number entities as the charge-from-grid switch", () => {
+    const states = [
+      state("number.batteries_grid_charge_cutoff_soc", "80", "", "%"),
+      state("switch.batteries_charge_from_grid", "on"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.gridCharge, "switch.batteries_charge_from_grid");
+    assert.equal(map.gridChargeCutoffSoc, "number.batteries_grid_charge_cutoff_soc");
+  });
+
+  it("reads charge-limit min/max/step from number attributes with Huawei defaults", () => {
+    const states = [
+      {
+        entity_id: "number.batteries_grid_charge_cutoff_soc",
+        state: "80",
+        attributes: { min: 20, max: 100, step: 1, unit_of_measurement: "%" },
+      },
+    ];
+    const map = autoMap(states);
+    assert.deepEqual(chargeLimitMeta(states, map, "gridChargeCutoffSoc"), {
+      min: 20,
+      max: 100,
+      step: 1,
+    });
+    assert.deepEqual(chargeLimitMeta([], {}, "solarChargeCutoffSoc"), {
+      min: 90,
+      max: 100,
+      step: 1,
+    });
   });
 });
 
