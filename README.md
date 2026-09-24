@@ -93,7 +93,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
-| Home     | Solar today, battery, house load, lights, Stevie       |
+| Home     | 24h energy graph, area-grouped switches (incl. Spares), Stevie |
 | Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + inverter / Octopus |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge                               |

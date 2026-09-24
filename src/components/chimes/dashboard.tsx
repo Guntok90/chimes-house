@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   BatteryMedium,
   Box,
@@ -10,22 +10,29 @@ import {
   Lamp,
   Leaf,
   Lightbulb,
+  Plug,
   Sun,
   Tv,
   Maximize2,
+  Waves,
   Zap,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { HOURS } from "@/lib/house";
+import { groupSwitchesByArea, SPARES_AREA, type AreaSwitch } from "@/lib/ha";
 import { useHouse, useLive } from "@/lib/house-store";
 import { BatteryView } from "./battery-view";
 import { ChargeView } from "./charge-view";
+import { DayAllChart, dayChartLegendColors } from "./charts";
 import { EnergyView } from "./energy-view";
 import { GardenView } from "./garden-view";
 import { HistoryView } from "./history-view";
+import { NoHistoryYet } from "./no-history";
 import { Overview } from "./overview";
 import { SiteView } from "./site-view";
 import { PiSetup } from "./pi-setup";
-import { Metric, PageTitle, Room, Tile } from "./ui";
+import { Metric, PageTitle, Room, SectionLabel, Surface, Tile } from "./ui";
 
 type View = "home" | "energy" | "site" | "battery" | "charge" | "history" | "garden" | "house";
 
@@ -101,7 +108,7 @@ export function ChimesDashboard() {
         </header>
 
         <main className="min-h-0 flex-1 overflow-auto px-5 pb-32 pt-2 md:px-8 md:pb-12 md:pt-7">
-          {view === "home" && <HomeView on={on} toggle={toggle} />}
+          {view === "home" && <HomeView />}
           {view === "energy" && <EnergyView />}
           {view === "site" && <SiteView />}
           {view === "battery" && <BatteryView />}
@@ -320,11 +327,21 @@ function NavButton({
   );
 }
 
-function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
+function HomeView() {
   const live = useLive();
   const status = useHouse((s) => s.status);
-  const map = useHouse((s) => s.map);
-  const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
+  const historyStatus = useHouse((s) => s.historyStatus);
+  const historyHours = useHouse((s) => s.historyHours);
+  const areaSwitches = useHouse((s) => s.areaSwitches);
+  const toggleEntity = useHouse((s) => s.toggleEntity);
+
+  const liveMode = status === "live";
+  const graphData = liveMode ? historyHours : HOURS;
+  const graphReady = !liveMode || (historyStatus === "ready" && graphData.length > 0);
+  const legend = dayChartLegendColors("paper");
+
+  const groups = useMemo(() => groupSwitchesByArea(areaSwitches), [areaSwitches]);
+
   return (
     <div className="space-y-8">
       <PageTitle>Home</PageTitle>
@@ -333,32 +350,45 @@ function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: st
         <Metric label="Battery" value={`${live.soc}%`} hint={`${Math.abs(live.batteryW)} W out`} />
         <Metric label="House" value={`${live.houseW} W`} />
       </div>
-      <Room title="Lights">
-        <Tile
-          id="lamp"
-          label="Lamp"
-          state={on.lamp}
-          onToggle={toggle}
-          icon={Lamp}
-          available={mapped("lamp")}
-        />
-        <Tile
-          id="kitchen"
-          label="Kitchen"
-          state={on.kitchen}
-          onToggle={toggle}
-          icon={Lightbulb}
-          available={mapped("kitchen")}
-        />
-        <Tile
-          id="pergola"
-          label="Pergola"
-          state={on.pergola}
-          onToggle={toggle}
-          icon={Sun}
-          available={mapped("pergola")}
-        />
-      </Room>
+
+      <section>
+        <SectionLabel>Last 24 hours</SectionLabel>
+        {graphReady ? (
+          <Surface className="h-72 p-3">
+            <div className="flex h-full flex-col">
+              <div className="min-h-0 flex-1">
+                <DayAllChart data={graphData} theme="paper" />
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 pt-1 text-xs text-ink-soft">
+                <ChartKey color={legend.solar} label="Solar" />
+                <ChartKey color={legend.house} label="House" />
+                <ChartKey color={legend.battery} label="Battery" />
+                <ChartKey color={legend.grid} label="Grid" />
+                <ChartKey color={legend.soc} label="SOC" dashed />
+              </div>
+            </div>
+          </Surface>
+        ) : (
+          <NoHistoryYet label={historyStatus === "loading" ? "24h graph (loading)" : "24h graph"} />
+        )}
+      </section>
+
+      {groups.map(({ area, items }) => (
+        <Room key={area} title={area}>
+          {items.map((sw) => (
+            <Tile
+              key={sw.entityId}
+              id={sw.entityId}
+              label={sw.label}
+              state={sw.on}
+              onToggle={toggleEntity}
+              icon={iconForSwitch(sw)}
+              available={sw.available}
+            />
+          ))}
+        </Room>
+      ))}
+
       <div>
         <h2 className="mb-3 text-xs font-semibold uppercase tracking-widest text-ink-soft">
           People
@@ -375,6 +405,39 @@ function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: st
       </div>
     </div>
   );
+}
+
+function ChartKey({
+  color,
+  label,
+  dashed = false,
+}: {
+  color: string;
+  label: string;
+  dashed?: boolean;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span
+        className="h-px w-3.5"
+        style={{ borderTop: `${dashed ? "1.5px dashed" : "2px solid"} ${color}` }}
+      />
+      {label}
+    </span>
+  );
+}
+
+function iconForSwitch(sw: AreaSwitch): LucideIcon {
+  const blob = `${sw.label} ${sw.entityId} ${sw.area}`.toLowerCase();
+  if (blob.includes("pond") || blob.includes("wave")) return Waves;
+  if (blob.includes("pergola") || blob.includes("garden")) return Sun;
+  if (blob.includes("fish") || blob.includes("aquarium")) return Fish;
+  if (blob.includes("telly") || blob.includes("tv") || blob.includes("television")) return Tv;
+  if (blob.includes("lamp")) return Lamp;
+  if (blob.includes("kitchen") || blob.includes("light")) return Lightbulb;
+  if (sw.area === SPARES_AREA || blob.includes("spare") || blob.includes("plug")) return Plug;
+  if (sw.entityId.startsWith("light.")) return Lightbulb;
+  return Plug;
 }
 
 function HouseView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {

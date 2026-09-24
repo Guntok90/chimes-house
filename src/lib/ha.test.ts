@@ -5,8 +5,12 @@ import {
   HOUSE_W_BLOCKLIST,
   PREFERRED,
   PREFERRED_SWITCHES,
+  SPARES_AREA,
+  areaSwitchesFromStates,
   autoMap,
   credsForBoot,
+  demoAreaSwitches,
+  groupSwitchesByArea,
   interestFromMap,
   liveFromStates,
   sameLive,
@@ -385,6 +389,89 @@ describe("browser boot creds", () => {
   it("explains a failed socket as a Tailscale reachability problem", () => {
     assert.match(wsFailureMessage("Could not reach Home Assistant."), /Tailscale/);
     assert.equal(wsFailureMessage("Token refused."), "Token refused.");
+  });
+});
+
+describe("area-grouped switches (Home)", () => {
+  it("lists every switch including unassigned Spares", () => {
+    const states: HaState[] = [
+      state("switch.smart_switch_4", "on", "Lamp"),
+      state("switch.smart_switch_7", "off", "Spare Meross"),
+      state("light.kitchen_spots", "on", "Kitchen"),
+      state("sensor.inverter_input_power", "100", "", "W"),
+    ];
+    const areas = [
+      { area_id: "living", name: "Living room" },
+      { area_id: "spares", name: "Spares" },
+    ];
+    const entities = [
+      { entity_id: "switch.smart_switch_4", area_id: "living", name: null },
+      { entity_id: "switch.smart_switch_7", area_id: "spares", name: null },
+      { entity_id: "light.kitchen_spots", area_id: null, name: null },
+    ];
+    const list = areaSwitchesFromStates(states, areas, entities);
+    assert.equal(list.length, 3);
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.area, "Living room");
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_7")?.area, "Spares");
+    assert.equal(list.find((s) => s.entityId === "light.kitchen_spots")?.area, SPARES_AREA);
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
+  });
+
+  it("skips disabled or hidden registry entities", () => {
+    const states = [
+      state("switch.smart_switch_4", "on", "Lamp"),
+      state("switch.hidden_spare", "off", "Hidden"),
+    ];
+    const entities = [
+      { entity_id: "switch.smart_switch_4", area_id: null, name: null },
+      {
+        entity_id: "switch.hidden_spare",
+        area_id: null,
+        name: null,
+        disabled_by: "user",
+        hidden_by: null,
+      },
+    ];
+    const list = areaSwitchesFromStates(states, [], entities);
+    assert.equal(list.length, 1);
+    assert.equal(list[0].entityId, "switch.smart_switch_4");
+    assert.equal(list[0].area, SPARES_AREA);
+  });
+
+  it("puts Spares last when grouping", () => {
+    const groups = groupSwitchesByArea([
+      {
+        entityId: "switch.a",
+        label: "A",
+        area: SPARES_AREA,
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.b",
+        label: "B",
+        area: "Garden",
+        on: true,
+        available: true,
+      },
+      {
+        entityId: "switch.c",
+        label: "C",
+        area: "Bedrooms",
+        on: false,
+        available: true,
+      },
+    ]);
+    assert.deepEqual(
+      groups.map((g) => g.area),
+      ["Bedrooms", "Garden", "Spares"],
+    );
+  });
+
+  it("demo list includes Spares plugs", () => {
+    const demo = demoAreaSwitches({ lamp: true });
+    assert.ok(demo.some((s) => s.area === SPARES_AREA));
+    assert.equal(demo.find((s) => s.entityId === "demo.lamp")?.on, true);
   });
 });
 

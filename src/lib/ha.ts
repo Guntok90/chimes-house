@@ -881,6 +881,135 @@ export function switchOn(
   return out;
 }
 
+/** HA area registry row (config/area_registry/list). */
+export type HaArea = {
+  area_id: string;
+  name: string;
+};
+
+/** HA entity registry row (config/entity_registry/list). */
+export type HaEntityReg = {
+  entity_id: string;
+  area_id: string | null;
+  name?: string | null;
+  disabled_by?: string | null;
+  hidden_by?: string | null;
+};
+
+/** Controllable switch/light for Home, grouped by HA area. */
+export type AreaSwitch = {
+  entityId: string;
+  label: string;
+  area: string;
+  on: boolean;
+  available: boolean;
+};
+
+/** Area label used when HA has no area_id (spare / unused plugs). */
+export const SPARES_AREA = "Spares";
+
+function isControllableSwitch(s: HaState) {
+  return s.entity_id.startsWith("switch.") || s.entity_id.startsWith("light.");
+}
+
+/**
+ * All switch/light entities from live states, grouped by HA area.
+ * Unassigned entities land in Spares so unused Meross/Tuya plugs stay visible.
+ */
+export function areaSwitchesFromStates(
+  states: HaState[],
+  areas: HaArea[] = [],
+  entities: HaEntityReg[] = [],
+): AreaSwitch[] {
+  const areaName = new Map(areas.map((a) => [a.area_id, a.name]));
+  const byEntity = new Map(entities.map((e) => [e.entity_id, e]));
+  const out: AreaSwitch[] = [];
+
+  for (const s of states) {
+    if (!isControllableSwitch(s)) continue;
+    const reg = byEntity.get(s.entity_id);
+    if (reg?.disabled_by || reg?.hidden_by) continue;
+    const areaId = reg?.area_id ?? null;
+    const area = areaId ? (areaName.get(areaId) ?? SPARES_AREA) : SPARES_AREA;
+    const label =
+      (reg?.name && String(reg.name).trim()) ||
+      String(s.attributes.friendly_name ?? "").trim() ||
+      s.entity_id.replace(/^(switch|light)\./, "").replace(/_/g, " ");
+    out.push({
+      entityId: s.entity_id,
+      label,
+      area,
+      on: s.state === "on",
+      available: available(s),
+    });
+  }
+
+  out.sort((a, b) => {
+    const areaCmp = a.area.localeCompare(b.area, undefined, { sensitivity: "base" });
+    if (areaCmp !== 0) return areaCmp;
+    return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
+  });
+  return out;
+}
+
+/** Demo tiles when not live — curated switches plus a Spares group. */
+export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[] {
+  const areas: Record<SwitchId, string> = {
+    lamp: "Living room",
+    kitchen: "Kitchen",
+    pergola: "Garden",
+    "pond-1": "Garden",
+    "pond-2": "Garden",
+    telly: "Living room",
+    fish: "Living room",
+    "stevie-blanket": "Bedrooms",
+    "baby-blanket": "Bedrooms",
+  };
+  const curated = SWITCHES.map((sw) => ({
+    entityId: `demo.${sw.id}`,
+    label: sw.label,
+    area: areas[sw.id],
+    on: Boolean(on[sw.id]),
+    available: true,
+  }));
+  const spares: AreaSwitch[] = [
+    {
+      entityId: "demo.spare-1",
+      label: "Spare plug 1",
+      area: SPARES_AREA,
+      on: Boolean(on["spare-1"]),
+      available: true,
+    },
+    {
+      entityId: "demo.spare-2",
+      label: "Spare plug 2",
+      area: SPARES_AREA,
+      on: Boolean(on["spare-2"]),
+      available: true,
+    },
+  ];
+  return [...curated, ...spares];
+}
+
+/** Group area switches preserving Spares last among equal sort. */
+export function groupSwitchesByArea(switches: AreaSwitch[]): { area: string; items: AreaSwitch[] }[] {
+  const order: string[] = [];
+  const bags = new Map<string, AreaSwitch[]>();
+  for (const sw of switches) {
+    if (!bags.has(sw.area)) {
+      bags.set(sw.area, []);
+      order.push(sw.area);
+    }
+    bags.get(sw.area)!.push(sw);
+  }
+  order.sort((a, b) => {
+    if (a === SPARES_AREA) return 1;
+    if (b === SPARES_AREA) return -1;
+    return a.localeCompare(b, undefined, { sensitivity: "base" });
+  });
+  return order.map((area) => ({ area, items: bags.get(area)! }));
+}
+
 type Msg = { id?: number; type: string; [k: string]: unknown };
 
 /**
@@ -1061,6 +1190,40 @@ export class HaSocket {
       });
     } catch {
       return {};
+    }
+  }
+
+  /** Area registry for grouping switches on Home (incl. Spares). */
+  async listAreas(): Promise<HaArea[]> {
+    if (!this.ws) return [];
+    try {
+      const result = await this.send("config/area_registry/list");
+      if (!Array.isArray(result)) return [];
+      return (result as HaArea[])
+        .filter((a) => a && typeof a.area_id === "string" && typeof a.name === "string")
+        .map((a) => ({ area_id: a.area_id, name: a.name }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Entity registry — maps entity_id → area_id for switch grouping. */
+  async listEntityRegistry(): Promise<HaEntityReg[]> {
+    if (!this.ws) return [];
+    try {
+      const result = await this.send("config/entity_registry/list");
+      if (!Array.isArray(result)) return [];
+      return (result as HaEntityReg[])
+        .filter((e) => e && typeof e.entity_id === "string")
+        .map((e) => ({
+          entity_id: e.entity_id,
+          area_id: e.area_id ?? null,
+          name: e.name ?? null,
+          disabled_by: e.disabled_by ?? null,
+          hidden_by: e.hidden_by ?? null,
+        }));
+    } catch {
+      return [];
     }
   }
 

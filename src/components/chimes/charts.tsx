@@ -132,25 +132,36 @@ export const METER_COLORS = {
   soc: "#f4efe8",
 } as const;
 
-function GlassTip({
-  active,
-  payload,
-  label,
-  unit = "W",
-}: {
+type DayTipProps = {
   active?: boolean;
   payload?: { name: string; value: number; color: string }[];
   label?: string;
+  glass?: boolean;
   unit?: "W" | "kWh";
-}) {
+};
+
+function DayTip({ active, payload, label, glass = true, unit = "W" }: DayTipProps) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-md border border-sidebar-fg/20 bg-teal-deep/85 px-3 py-2 text-xs text-sidebar-fg shadow-sm backdrop-blur-md">
+    <div
+      className={
+        glass
+          ? "rounded-md border border-sidebar-fg/20 bg-teal-deep/85 px-3 py-2 text-xs text-sidebar-fg shadow-sm backdrop-blur-md"
+          : "rounded-md border border-line bg-paper-raised px-3 py-2 text-xs shadow-sm"
+      }
+    >
       <div className="mb-1 font-medium">{label}</div>
       {payload.map((p) => (
-        <div key={p.name} className="flex justify-between gap-5 tabular-nums text-sidebar-fg/70">
+        <div
+          key={p.name}
+          className={
+            glass
+              ? "flex justify-between gap-5 tabular-nums text-sidebar-fg/70"
+              : "flex justify-between gap-5 tabular-nums text-ink-soft"
+          }
+        >
           <span>{p.name}</span>
-          <span className="text-sidebar-fg">
+          <span className={glass ? "text-sidebar-fg" : "text-ink"}>
             {p.name === "SOC"
               ? `${Math.round(p.value)}%`
               : unit === "kWh"
@@ -162,6 +173,27 @@ function GlassTip({
     </div>
   );
 }
+
+const DAY_SERIES = {
+  glass: {
+    solar: METER_COLORS.solar,
+    house: METER_COLORS.house,
+    battery: METER_COLORS.battery,
+    grid: METER_COLORS.grid,
+    cars: METER_COLORS.cars,
+    soc: METER_COLORS.soc,
+    gridStroke: "rgba(244,239,232,0.12)",
+  },
+  paper: {
+    solar: "var(--color-teal-soft)",
+    house: "var(--color-terra)",
+    battery: "var(--color-teal)",
+    grid: "var(--color-umber)",
+    cars: "var(--color-sand)",
+    soc: "var(--color-ink-soft)",
+    gridStroke: "var(--color-line)",
+  },
+} as const;
 
 /** Horizontally scrollable chart host — scrolls to the newest point on mount/data change. */
 export function ChartScroll({
@@ -192,46 +224,51 @@ export function ChartScroll({
   );
 }
 
+/** 24h multi-series energy chart — glass (Overview) or paper (Home). */
 export function DayAllChart({
   data,
   showCars = true,
+  theme = "glass",
 }: {
   data: HourPoint[];
   showCars?: boolean;
+  theme?: "glass" | "paper";
 }) {
+  const colors = DAY_SERIES[theme];
+  const tick = theme === "glass" ? glassTick : axis;
   const multiDay = data.length > 24;
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={data} margin={{ top: 10, right: 28, left: 0, bottom: 0 }}>
-        <CartesianGrid stroke="rgba(244,239,232,0.12)" strokeDasharray="3 3" vertical={false} />
+        <CartesianGrid stroke={colors.gridStroke} strokeDasharray="3 3" vertical={false} />
         <XAxis
           dataKey="hour"
-          tick={glassTick}
+          tick={tick}
           axisLine={false}
           tickLine={false}
           interval={multiDay ? 11 : 2}
           minTickGap={multiDay ? 28 : 8}
           tickFormatter={(v: string) => (multiDay ? v : v.slice(0, 2))}
         />
-        <YAxis yAxisId="w" tick={glassTick} axisLine={false} tickLine={false} width={40} />
+        <YAxis yAxisId="w" tick={tick} axisLine={false} tickLine={false} width={40} />
         <YAxis
           yAxisId="soc"
           orientation="right"
           domain={[0, 100]}
-          tick={glassTick}
+          tick={tick}
           axisLine={false}
           tickLine={false}
           width={32}
           tickFormatter={(v: number) => `${v}`}
         />
-        <Tooltip content={<GlassTip unit="W" />} />
+        <Tooltip content={<DayTip glass={theme === "glass"} unit="W" />} />
         <Area
           yAxisId="w"
           type="monotone"
           dataKey="solarW"
           name="Solar"
-          stroke={METER_COLORS.solar}
-          fill={METER_COLORS.solar}
+          stroke={colors.solar}
+          fill={colors.solar}
           fillOpacity={0.22}
           strokeWidth={1.6}
         />
@@ -240,7 +277,7 @@ export function DayAllChart({
           type="monotone"
           dataKey="houseW"
           name="House"
-          stroke={METER_COLORS.house}
+          stroke={colors.house}
           dot={false}
           strokeWidth={1.8}
         />
@@ -249,7 +286,7 @@ export function DayAllChart({
           type="monotone"
           dataKey="battW"
           name="Battery"
-          stroke={METER_COLORS.battery}
+          stroke={colors.battery}
           dot={false}
           strokeWidth={1.6}
         />
@@ -258,7 +295,7 @@ export function DayAllChart({
           type="monotone"
           dataKey="gridW"
           name="Grid"
-          stroke={METER_COLORS.grid}
+          stroke={colors.grid}
           dot={false}
           strokeWidth={1.4}
         />
@@ -268,7 +305,7 @@ export function DayAllChart({
             type="monotone"
             dataKey="carW"
             name="Cars"
-            stroke={METER_COLORS.cars}
+            stroke={colors.cars}
             dot={false}
             strokeWidth={1.5}
           />
@@ -278,7 +315,7 @@ export function DayAllChart({
           type="monotone"
           dataKey="soc"
           name="SOC"
-          stroke={METER_COLORS.soc}
+          stroke={colors.soc}
           strokeDasharray="4 5"
           dot={false}
           strokeWidth={1.3}
@@ -286,6 +323,18 @@ export function DayAllChart({
       </ComposedChart>
     </ResponsiveContainer>
   );
+}
+
+export function dayChartLegendColors(theme: "glass" | "paper" = "glass") {
+  const c = DAY_SERIES[theme];
+  return {
+    solar: c.solar,
+    house: c.house,
+    battery: c.battery,
+    grid: c.grid,
+    cars: c.cars,
+    soc: c.soc,
+  };
 }
 
 type EnergyRow = {
@@ -330,7 +379,7 @@ export function EnergyMetersChart({
           minTickGap={20}
         />
         <YAxis tick={glassTick} axisLine={false} tickLine={false} width={40} />
-        <Tooltip content={<GlassTip unit="kWh" />} />
+        <Tooltip content={<DayTip unit="kWh" />} />
         <Area
           type="monotone"
           dataKey="solar"

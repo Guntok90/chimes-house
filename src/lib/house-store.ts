@@ -10,19 +10,33 @@ import {
 import {
   DEFAULT_HA_URL,
   HaSocket,
+  areaSwitchesFromStates,
   credsForBoot,
+  demoAreaSwitches,
   readCreds,
   writeCreds,
   wsFailureMessage,
+  type AreaSwitch,
+  type HaArea,
   type HaBootstrapResponse,
   type HaCreds,
+  type HaEntityReg,
   type HaMap,
+  type HaState,
   type SwitchId,
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
 import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
 
 const socket = new HaSocket();
+
+let areasCache: HaArea[] = [];
+let entityRegCache: HaEntityReg[] = [];
+let lastStates: HaState[] = [];
+
+function rebuildAreaSwitches(states: HaState[]) {
+  return areaSwitchesFromStates(states, areasCache, entityRegCache);
+}
 
 /** Hourly points for Overview day tab (past week, scrollable). */
 export const HISTORY_HOUR_COUNT = 7 * 24;
@@ -37,6 +51,8 @@ type HistoryStatus = "idle" | "loading" | "ready" | "empty";
 type Store = {
   live: HouseLive;
   switches: Record<string, boolean>;
+  /** All controllable switches/lights by HA area (Home). */
+  areaSwitches: AreaSwitch[];
   status: Status;
   error?: string;
   map: HaMap;
@@ -56,6 +72,8 @@ type Store = {
   disconnect: () => void;
   boot: () => void;
   toggle: (id: string) => void;
+  /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
+  toggleEntity: (entityId: string) => void;
   refreshHistory: () => Promise<void>;
 };
 
@@ -76,6 +94,7 @@ export const useHouse = create<Store>((set, get) => {
   return {
     live: { ...SNAPSHOT },
     switches: {},
+    areaSwitches: demoAreaSwitches({}),
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
@@ -94,7 +113,13 @@ export const useHouse = create<Store>((set, get) => {
             cache: "no-store",
           });
           if (res.status === 401) {
-            set({ status: "demo", live: { ...SNAPSHOT }, error: undefined, historyStatus: "idle" });
+            set({
+              status: "demo",
+              live: { ...SNAPSHOT },
+              areaSwitches: demoAreaSwitches({}),
+              error: undefined,
+              historyStatus: "idle",
+            });
             return;
           }
           if (!res.ok) {
@@ -150,7 +175,14 @@ export const useHouse = create<Store>((set, get) => {
         }
       };
       socket.onStates = (states) => {
+        const list = states instanceof Map ? Array.from(states.values()) : states;
+        lastStates = list;
+        const wasLive = get().status === "live";
         applyLiveStates(states, get, set, socket);
+        set({ areaSwitches: rebuildAreaSwitches(list) });
+        if (!wasLive && get().status === "live") {
+          void refreshRegistries();
+        }
       };
       try {
         await socket.connect(creds.url, creds.token);
@@ -273,11 +305,13 @@ export const useHouse = create<Store>((set, get) => {
     disconnect() {
       socket.onStatus = null;
       socket.onStates = null;
+      socket.interest = null;
       socket.close();
       writeCreds(null);
       set({
         status: "demo",
         live: { ...SNAPSHOT },
+        areaSwitches: demoAreaSwitches({}),
         error: undefined,
         ...emptyHistory(),
         historyStatus: "idle",
@@ -293,8 +327,67 @@ export const useHouse = create<Store>((set, get) => {
         void socket.call(entity);
       }
     },
+
+    toggleEntity(entityId) {
+      const { areaSwitches, status, map } = get();
+      const hit = areaSwitches.find((s) => s.entityId === entityId);
+      if (!hit || !hit.available) return;
+
+      const nextOn = !hit.on;
+      const nextArea = areaSwitches.map((s) =>
+        s.entityId === entityId ? { ...s, on: nextOn } : s,
+      );
+
+      // Keep curated SwitchId map in sync when this entity is one of them.
+      const nextSwitches = { ...get().switches };
+      for (const [key, mapped] of Object.entries(map)) {
+        if (mapped === entityId && SWITCH_IDS.has(key)) {
+          nextSwitches[key] = nextOn;
+          break;
+        }
+      }
+      if (entityId.startsWith("demo.")) {
+        nextSwitches[entityId.slice("demo.".length)] = nextOn;
+      }
+
+      set({ areaSwitches: nextArea, switches: nextSwitches });
+
+      if (entityId.startsWith("demo.")) return;
+      if (status === "live" && readCreds()) {
+        void socket.call(entityId, nextOn);
+      }
+    },
   };
 });
+
+const SWITCH_IDS = new Set<string>([
+  "lamp",
+  "kitchen",
+  "pergola",
+  "pond-1",
+  "pond-2",
+  "telly",
+  "fish",
+  "stevie-blanket",
+  "baby-blanket",
+]);
+
+async function refreshRegistries() {
+  try {
+    const [areas, entities] = await Promise.all([
+      socket.listAreas(),
+      socket.listEntityRegistry(),
+    ]);
+    areasCache = areas;
+    entityRegCache = entities;
+  } catch {
+    // Keep empty caches — switches still list under Spares from states alone.
+  }
+  if (useHouse.getState().status !== "live") return;
+  useHouse.setState({
+    areaSwitches: rebuildAreaSwitches(lastStates),
+  });
+}
 
 export function useLive() {
   return useHouse((s) => s.live);
