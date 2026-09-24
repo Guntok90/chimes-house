@@ -32,6 +32,7 @@ import {
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
 import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
+import { decideResume } from "./ha-resume";
 import {
   clampRate,
   readLocalTariffs,
@@ -40,6 +41,9 @@ import {
   type TariffRates,
   type TariffState,
 } from "./tariffs";
+
+export { decideResume } from "./ha-resume";
+export type { ResumeAction } from "./ha-resume";
 
 const socket = new HaSocket();
 
@@ -171,6 +175,46 @@ function scheduleReconnect(get: () => Store) {
     if (status === "connecting") return;
     void get().connect(creds, { preserveData: true });
   }, delay);
+}
+
+let resumeInFlight: Promise<void> | null = null;
+
+/**
+ * Re-establish the HA WebSocket after the page returns to the foreground.
+ * Keeps last known readings (Connecting), never flips to Demo on a transient kill.
+ */
+export function resumeLiveSession(): Promise<void> {
+  if (resumeInFlight) return resumeInFlight;
+  resumeInFlight = (async () => {
+    const action = decideResume({
+      reconnectAllowed,
+      hasCreds: Boolean(readCreds()),
+      hadLiveSession,
+      status: useHouse.getState().status,
+      socketConnected: socket.connected,
+      bootInFlight: Boolean(bootInFlight),
+    });
+    if (action === "noop") return;
+
+    if (action === "probe") {
+      const ok = await socket.probe();
+      if (ok) return;
+      // Zombie OPEN socket (common after iPad Safari suspend) — fall through.
+    }
+
+    if (!reconnectAllowed) return;
+    const creds = readCreds();
+    if (!creds) return;
+    const { status } = useHouse.getState();
+    if (status === "connecting" || bootInFlight) return;
+
+    clearReconnectTimer();
+    reconnectAttempt = 0;
+    await useHouse.getState().connect(creds, { preserveData: true });
+  })().finally(() => {
+    resumeInFlight = null;
+  });
+  return resumeInFlight;
 }
 
 export const useHouse = create<Store>((set, get) => {

@@ -1169,6 +1169,20 @@ export class HaSocket {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /**
+   * HA `ping`/`pong` health check. Safari iPad often leaves readyState OPEN after
+   * backgrounding while the TCP session is already dead — probe before trusting it.
+   */
+  async probe(timeoutMs = 2500): Promise<boolean> {
+    if (!this.connected) return false;
+    try {
+      await this.send("ping", {}, timeoutMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async connect(url: string, token: string) {
     this.close();
     this.interest = null;
