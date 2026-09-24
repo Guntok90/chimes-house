@@ -10,6 +10,7 @@ import {
 import {
   CHARGE_LIMIT_DEFAULTS,
   DEFAULT_HA_URL,
+  DEFAULT_ZAPPI_MODES,
   HaSocket,
   areaSwitchesFromStates,
   chargeLimitMetaMap,
@@ -19,6 +20,7 @@ import {
   tariffsFromStates,
   writeCreds,
   wsFailureMessage,
+  zappiModeOptions,
   type AreaSwitch,
   type ChargeLimitKey,
   type HaArea,
@@ -118,6 +120,8 @@ type Store = {
   historyStatus: HistoryStatus;
   /** Min/max/step for mapped Huawei charge-limit number entities. */
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
+  /** Options for mapped Zappi charge-mode select (HA attributes or defaults). */
+  zappiModeOptions: string[];
   /** Last write error from Battery charge-limit Apply (cleared on success). */
   writeError?: string;
   /** Custom £/kWh rates for History/Energy spend maths (not Octopus Dispatch). */
@@ -130,6 +134,8 @@ type Store = {
   applyChargeLimit: (key: ChargeLimitKey, value: number) => Promise<boolean>;
   /** Explicit Apply: turn charge-from-grid switch on/off. */
   applyGridCharge: (allow: boolean) => Promise<boolean>;
+  /** Explicit Apply: set Zappi charge mode via select.select_option. */
+  applyZappiMode: (mode: string) => Promise<boolean>;
   /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
   toggleEntity: (entityId: string) => void;
   /** Save custom cheap/peak £/kWh — HA helpers when mapped, else localStorage. */
@@ -230,6 +236,7 @@ export const useHouse = create<Store>((set, get) => {
     ...emptyHistory(),
     historyStatus: "idle",
     chargeLimitMeta: DEMO_CHARGE_META,
+    zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
     tariffs: bootTariffs(),
 
     boot() {
@@ -351,6 +358,7 @@ export const useHouse = create<Store>((set, get) => {
         set({
           areaSwitches: rebuildAreaSwitches(list),
           chargeLimitMeta: chargeLimitMetaMap(list, mapped),
+          zappiModeOptions: zappiModeOptions(list, mapped),
           tariffs,
         });
         if (!wasLive && get().status === "live") {
@@ -497,6 +505,7 @@ export const useHouse = create<Store>((set, get) => {
         error: undefined,
         writeError: undefined,
         chargeLimitMeta: DEMO_CHARGE_META,
+        zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
         ...emptyHistory(),
         historyStatus: "idle",
       });
@@ -557,6 +566,31 @@ export const useHouse = create<Store>((set, get) => {
         set({
           writeError:
             err instanceof Error ? err.message : "Could not set charge from grid on the Pi.",
+        });
+        return false;
+      }
+    },
+
+    async applyZappiMode(mode) {
+      const { map, status, live, zappiModeOptions: options } = get();
+      const entity = map.zappiMode;
+      const trimmed = mode.trim();
+      if (!entity || status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — Zappi mode stays read-only." });
+        return false;
+      }
+      if (!trimmed || (options.length > 0 && !options.includes(trimmed))) {
+        set({ writeError: "Pick a Zappi mode the charger supports, then Apply." });
+        return false;
+      }
+      set({ live: { ...live, zappiMode: trimmed }, writeError: undefined });
+      try {
+        await socket.setSelect(entity, trimmed);
+        return true;
+      } catch (err) {
+        set({
+          writeError:
+            err instanceof Error ? err.message : "Could not set Zappi mode on the Pi.",
         });
         return false;
       }

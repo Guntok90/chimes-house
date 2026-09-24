@@ -21,6 +21,8 @@ import {
   sameSwitches,
   rateToGbpPerKwh,
   wsFailureMessage,
+  zappiModeOptions,
+  DEFAULT_ZAPPI_MODES,
   type HaState,
 } from "./ha.ts";
 import { EMPTY_LIVE, SNAPSHOT, solarStatusHint, usesDemoCharts } from "./house.ts";
@@ -349,6 +351,22 @@ describe("ha autoMap preferences", () => {
       max: 100,
       step: 1,
     });
+  });
+
+  it("reads Zappi mode options from select attributes, else myenergi defaults", () => {
+    const withOpts: HaState[] = [
+      {
+        entity_id: "select.myenergi_zappi_25435526_charge_mode",
+        state: "Eco+",
+        attributes: { options: ["Fast", "Eco", "Eco+", "Stop"] },
+      },
+    ];
+    const map = autoMap(withOpts);
+    assert.deepEqual(zappiModeOptions(withOpts, map), ["Fast", "Eco", "Eco+", "Stop"]);
+    assert.deepEqual(zappiModeOptions([], {}), [...DEFAULT_ZAPPI_MODES]);
+    assert.deepEqual(zappiModeOptions(CHIMES_PI, autoMap(CHIMES_PI)), [
+      ...DEFAULT_ZAPPI_MODES,
+    ]);
   });
 
   it("maps Zappi energy used today and leaves Range Rover null when missing", () => {

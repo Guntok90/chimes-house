@@ -1,13 +1,13 @@
 import { WEEK, solarStatusHint, usesDemoCharts } from "@/lib/house";
 import { useHouse, useLive, useTariffs } from "@/lib/house-store";
 import { estimateImportCostParts } from "@/lib/tariffs";
+import { ChargeSection } from "./charge-section";
 import { ChargeLimitsSection } from "./charge-limits";
 import { CostBars, PowerArea } from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
 import { TariffEditor } from "./tariff-editor";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
-import { VehiclesSection } from "./vehicles";
 
 export function EnergyView() {
   const LIVE = useLive();
@@ -53,7 +53,7 @@ export function EnergyView() {
         <Metric tone="teal" label="Grid" value={`${LIVE.gridW} W`} hint={gridHint} />
       </div>
 
-      <VehiclesSection />
+      <ChargeSection tone="umber" />
 
       <ChargeLimitsSection title="Battery" tone="sand" />
 

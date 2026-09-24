@@ -157,6 +157,12 @@ export type ChargeLimitKey = keyof typeof CHARGE_LIMIT_DEFAULTS;
 
 export type NumberControlMeta = { min: number; max: number; step: number };
 
+/**
+ * Typical myenergi Zappi charge modes when HA omits `attributes.options`.
+ * Live Pi usually lists these on `select.*_charge_mode`.
+ */
+export const DEFAULT_ZAPPI_MODES = ["Eco+", "Eco", "Fast", "Stop"] as const;
+
 /** True when entity name/id clearly refers to the Range Rover (second vehicle). */
 function isRangeRoverBlob(b: string) {
   return (
@@ -979,6 +985,21 @@ export function chargeLimitMetaMap(
   };
 }
 
+/**
+ * Options for the mapped Zappi `select.*_charge_mode` entity.
+ * Prefers HA `attributes.options`; falls back to myenergi defaults (demo / missing attrs).
+ */
+export function zappiModeOptions(states: HaState[], map: HaMap): string[] {
+  const id = map.zappiMode;
+  const s = id ? states.find((x) => x.entity_id === id) : undefined;
+  const raw = s?.attributes.options;
+  if (Array.isArray(raw)) {
+    const opts = raw.filter((o): o is string => typeof o === "string" && o.trim().length > 0);
+    if (opts.length) return opts;
+  }
+  return [...DEFAULT_ZAPPI_MODES];
+}
+
 export function switchOn(
   states: HaState[] | Map<string, HaState>,
   map: HaMap,
@@ -1379,6 +1400,20 @@ export class HaSocket {
       domain,
       service: "set_value",
       service_data: { value },
+      target: { entity_id: entityId },
+    });
+  }
+
+  /** Set a `select.*` / `input_select.*` via `*.select_option` (Zappi charge mode). */
+  async setSelect(entityId: string, option: string) {
+    const [domain] = entityId.split(".");
+    if (domain !== "select" && domain !== "input_select") {
+      throw new Error("Only select / input_select helpers can be written.");
+    }
+    await this.send("call_service", {
+      domain,
+      service: "select_option",
+      service_data: { option },
       target: { entity_id: entityId },
     });
   }
