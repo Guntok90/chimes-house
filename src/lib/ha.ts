@@ -109,6 +109,13 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_internal_load_ct1",
     "sensor.myenergi_zappi_25435526_ct_internal",
   ],
+  // myenergi daily energy used by the Zappi (resets at local midnight).
+  zappiTodayKwh: [
+    "sensor.myenergi_zappi_25435526_energy_used_today",
+    "sensor.myenergi_zappi_25435526_green_energy_today",
+  ],
+  // Optional — many JLR installs lack a daily charged-kWh entity.
+  rangeRoverTodayKwh: [],
   offPeak: [],
   intelligent: [],
   gridCharge: [],
@@ -433,6 +440,46 @@ export function autoMap(states: HaState[]): HaMap {
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
+  const zappiToday = resolve(
+    states,
+    "zappiTodayKwh",
+    (_s, b) =>
+      b.includes("zappi") &&
+      (b.includes("energy_used_today") ||
+        b.includes("green_energy_today") ||
+        b.includes("energy diverted today") ||
+        ((b.includes("energy") || b.includes("charged") || b.includes("charge")) &&
+          (b.includes("today") || b.includes("daily")) &&
+          !b.includes("session"))) &&
+      !b.includes("generation") &&
+      !b.includes("battery") &&
+      !b.includes("grid_import") &&
+      !b.includes("grid_export") &&
+      !b.includes("home_consumption"),
+    isEnergyUnit,
+  );
+
+  const rangeRoverToday = resolve(
+    states,
+    "rangeRoverTodayKwh",
+    (_s, b) =>
+      (b.includes("range_rover") ||
+        b.includes("range rover") ||
+        b.includes("land_rover") ||
+        b.includes("land rover") ||
+        b.includes("jlr")) &&
+      (b.includes("energy_used_today") ||
+        b.includes("charged_today") ||
+        b.includes("charge_today") ||
+        b.includes("energy_today") ||
+        b.includes("charging_energy") ||
+        ((b.includes("energy") || b.includes("charged") || b.includes("kwh")) &&
+          (b.includes("today") || b.includes("daily")))) &&
+      !b.includes("zappi") &&
+      !b.includes("myenergi"),
+    isEnergyUnit,
+  );
+
   const offPeak = find(
     states,
     (_s, b) =>
@@ -474,6 +521,8 @@ export function autoMap(states: HaState[]): HaMap {
   if (zappiMode) map.zappiMode = zappiMode.entity_id;
   if (zappiPlug) map.zappiPlugged = zappiPlug.entity_id;
   if (zappiW) map.zappiW = zappiW.entity_id;
+  if (zappiToday) map.zappiTodayKwh = zappiToday.entity_id;
+  if (rangeRoverToday) map.rangeRoverTodayKwh = rangeRoverToday.entity_id;
   if (offPeak) map.offPeak = offPeak.entity_id;
   if (intelligent) map.intelligent = intelligent.entity_id;
   if (gridCharge) map.gridCharge = gridCharge.entity_id;
@@ -592,6 +641,17 @@ export function liveFromStates(
     houseW = Math.round(fallback.houseW);
   }
 
+  /** Optional daily kWh — null when entity missing (never invent 0 as “no data”). */
+  const todayKwh = (key: "zappiTodayKwh" | "rangeRoverTodayKwh"): number | null => {
+    const s = take(key);
+    if (!s || !available(s)) return null;
+    const raw = num(s.state);
+    if (raw == null) return null;
+    const u = unitOf(s);
+    const kwh = u === "wh" || u.includes("watt-hour") ? raw / 1000 : raw;
+    return Number(kwh.toFixed(2));
+  };
+
   return {
     soc: Math.round(n("soc", fallback.soc)),
     batteryW,
@@ -604,6 +664,8 @@ export function liveFromStates(
     zappiMode: zappiModeState ?? fallback.zappiMode,
     zappiPlugged,
     zappiW,
+    zappiTodayKwh: todayKwh("zappiTodayKwh"),
+    rangeRoverTodayKwh: todayKwh("rangeRoverTodayKwh"),
     intelligent: flag("intelligent", fallback.intelligent),
     offPeak: flag("offPeak", fallback.offPeak),
     gridCharge: flag("gridCharge", fallback.gridCharge),

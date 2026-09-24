@@ -46,6 +46,8 @@ Mapped when present (preferred ids first):
 | Zappi mode      | `select.myenergi_zappi_25435526_charge_mode`                                     |
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
+| Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
+| Range Rover kWh | Optional daily energy entity if present; otherwise “—” on Charge                 |
 | Stevie          | `person.stevie_w`                                                                |
 | Switches        | Lamp/Telly/blankets/Fish/Pergola/Ponds → `switch.smart_switch_*` / garden ids    |
 
