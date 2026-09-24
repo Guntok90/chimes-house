@@ -125,7 +125,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Battery  | SOC / charge / discharge + Grid & Solar charge cutoffs |
 | Charge   | Zappi Eco+, Intelligent                                |
 | History  | 7 / 28 day solar, house, grid, spend                   |
-| Garden   | Front (Willow, Range Rover cams) · Back (Pergola, ponds, Frank) |
+| Garden   | Front (Willow Tree + Range Rover Hybrid switches) · Back (Pergola, ponds, Frank) |
 | House    | Lights, plugs, **Pi connection**, sign out             |
 | Overview | iPad wall — house film, glass tiles (flow + 24h graph) |
 

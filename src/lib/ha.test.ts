@@ -12,6 +12,7 @@ import {
   chargeLimitMeta,
   credsForBoot,
   demoAreaSwitches,
+  frontGardenSwitches,
   groupSwitchesByArea,
   hideHomeSwitch,
   interestFromMap,
@@ -561,6 +562,14 @@ describe("area-grouped switches (Home)", () => {
     assert.equal(demo.find((s) => s.entityId === "demo.lamp")?.on, true);
   });
 
+  it("demo list includes Front garden Willow + Range Rover Hybrid", () => {
+    const demo = demoAreaSwitches({ "willow-tree": true });
+    const front = frontGardenSwitches(demo);
+    assert.equal(front.length, 2);
+    assert.ok(front.some((s) => s.label === "Willow Tree" && s.on));
+    assert.ok(front.some((s) => s.label === "Range Rover Hybrid"));
+  });
+
   it("hideHomeSwitch drops Dnd twins, enable-*, and vehicle child locks", () => {
     assert.equal(hideHomeSwitch("switch.lamp_dnd", "Lamp Dnd"), true);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1 DND"), true);
@@ -594,6 +603,65 @@ describe("area-grouped switches (Home)", () => {
     );
     assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
     assert.equal(list.find((s) => s.entityId === "switch.pergola_switch_1")?.on, false);
+  });
+});
+
+describe("Front garden switch filter", () => {
+  it("keeps only Willow Tree and Range Rover Hybrid plugs", () => {
+    const list = frontGardenSwitches([
+      {
+        entityId: "switch.willow_tree",
+        label: "Willow Tree",
+        area: "Spares",
+        on: true,
+        available: true,
+      },
+      {
+        entityId: "switch.range_rover_hybrid",
+        label: "Range Rover Hybrid",
+        area: "Front garden",
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.pergola_switch_1",
+        label: "Pergola",
+        area: "Garden",
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.smart_switch_4",
+        label: "Lamp",
+        area: "Living room",
+        on: true,
+        available: true,
+      },
+    ]);
+    assert.deepEqual(
+      list.map((s) => s.entityId),
+      ["switch.willow_tree", "switch.range_rover_hybrid"],
+    );
+  });
+
+  it("does not match Range Rover without hybrid (or hybrid alone)", () => {
+    const list = frontGardenSwitches([
+      {
+        entityId: "switch.range_rover_plug",
+        label: "Range Rover",
+        area: "Spares",
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.garage_hybrid",
+        label: "Garage Hybrid",
+        area: "Spares",
+        on: false,
+        available: true,
+      },
+    ]);
+    assert.equal(list.length, 0);
   });
 });
 

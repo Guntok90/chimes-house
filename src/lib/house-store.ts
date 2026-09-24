@@ -383,12 +383,17 @@ export const useHouse = create<Store>((set, get) => {
     },
 
     toggle(id) {
-      const { map, switches, status } = get();
+      const { map, switches, status, areaSwitches } = get();
       const entity = map[id as SwitchId];
       if (!entity) return;
-      set({ switches: { ...switches, [id]: !switches[id] } });
+      const nextOn = !switches[id];
+      const nextArea = areaSwitches.map((s) =>
+        s.entityId === entity ? { ...s, on: nextOn } : s,
+      );
+      set({ switches: { ...switches, [id]: nextOn }, areaSwitches: nextArea });
+      // Same call path as Home: explicit turn_on / turn_off (not HA "toggle").
       if (status === "live" && readCreds()) {
-        void socket.call(entity);
+        void socket.call(entity, nextOn);
       }
     },
 
