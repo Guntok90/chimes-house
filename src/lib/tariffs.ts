@@ -60,12 +60,28 @@ export function parseRateInput(raw: string): number | null {
   return clampRate(n);
 }
 
-/** Daily import cost £ from kWh + custom rates (display estimate only). */
-export function estimateImportCost(gridInKwh: number, rates: TariffRates): number {
+/** Daily import cost parts £ from kWh + custom rates (display estimate only). */
+export function estimateImportCostParts(
+  gridInKwh: number,
+  rates: TariffRates,
+): { costOffPeak: number; costPeak: number; cost: number } {
   const cheap = clampRate(rates.cheap);
   const peak = clampRate(rates.peak);
-  const blended = cheap * OFF_PEAK_IMPORT_SHARE + peak * (1 - OFF_PEAK_IMPORT_SHARE);
-  return Number((Math.max(0, gridInKwh) * blended).toFixed(2));
+  const kwh = Math.max(0, gridInKwh);
+  const lowKwh = kwh * OFF_PEAK_IMPORT_SHARE;
+  const highKwh = kwh - lowKwh;
+  const costOffPeak = Number((lowKwh * cheap).toFixed(2));
+  const costPeak = Number((highKwh * peak).toFixed(2));
+  return {
+    costOffPeak,
+    costPeak,
+    cost: Number((costOffPeak + costPeak).toFixed(2)),
+  };
+}
+
+/** Daily import cost £ from kWh + custom rates (display estimate only). */
+export function estimateImportCost(gridInKwh: number, rates: TariffRates): number {
+  return estimateImportCostParts(gridInKwh, rates).cost;
 }
 
 export function formatGbpPerKwh(n: number): string {

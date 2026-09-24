@@ -1035,7 +1035,10 @@ export type AreaSwitch = {
   available: boolean;
 };
 
-/** Area label used when HA has no area_id (spare / unused plugs). */
+/**
+ * Internal bucket for unassigned plugs. Home UI must not show this as a
+ * section title — see `groupSwitchesByArea` / Room `title={null}`.
+ */
 export const SPARES_AREA = "Spares";
 
 function isControllableSwitch(s: HaState) {
@@ -1043,8 +1046,30 @@ function isControllableSwitch(s: HaState) {
 }
 
 /**
+ * Home switch list filters (dad feedback): drop Dnd twins, enable-* toggles,
+ * and vehicle child-lock switches. Match against entity_id + display label.
+ */
+export function hideHomeSwitch(entityId: string, label: string): boolean {
+  const hay = `${entityId} ${label}`.toLowerCase();
+  if (hay.includes("dnd")) return true;
+  if (hay.includes("enable")) return true;
+  const childLock = hay.includes("child_lock") || hay.includes("child lock");
+  if (
+    childLock &&
+    (hay.includes("range_rover") ||
+      hay.includes("range rover") ||
+      hay.includes("cupra") ||
+      hay.includes("vehicle"))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * All switch/light entities from live states, grouped by HA area.
- * Unassigned entities land in Spares so unused Meross/Tuya plugs stay visible.
+ * Unassigned entities land in Spares (shown without a labelled heading).
+ * Filters out Dnd twins, enable-* switches, and vehicle child locks.
  */
 export function areaSwitchesFromStates(
   states: HaState[],
@@ -1065,6 +1090,7 @@ export function areaSwitchesFromStates(
       (reg?.name && String(reg.name).trim()) ||
       String(s.attributes.friendly_name ?? "").trim() ||
       s.entity_id.replace(/^(switch|light)\./, "").replace(/_/g, " ");
+    if (hideHomeSwitch(s.entity_id, label)) continue;
     out.push({
       entityId: s.entity_id,
       label,
@@ -1082,7 +1108,7 @@ export function areaSwitchesFromStates(
   return out;
 }
 
-/** Demo tiles when not live — curated switches plus a Spares group. */
+/** Demo tiles when not live — curated switches plus an unlabelled Spares group. */
 export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[] {
   const areas: Record<SwitchId, string> = {
     lamp: "Living room",
@@ -1102,6 +1128,22 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
     on: Boolean(on[sw.id]),
     available: true,
   }));
+  const frontGarden: AreaSwitch[] = [
+    {
+      entityId: "demo.willow-tree",
+      label: "Willow Tree",
+      area: "Front garden",
+      on: Boolean(on["willow-tree"]),
+      available: true,
+    },
+    {
+      entityId: "demo.range-rover-hybrid",
+      label: "Range Rover Hybrid",
+      area: "Front garden",
+      on: Boolean(on["range-rover-hybrid"]),
+      available: true,
+    },
+  ];
   const spares: AreaSwitch[] = [
     {
       entityId: "demo.spare-1",
@@ -1118,10 +1160,10 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
       available: true,
     },
   ];
-  return [...curated, ...spares];
+  return [...curated, ...frontGarden, ...spares];
 }
 
-/** Group area switches preserving Spares last among equal sort. */
+/** Group area switches; Spares last (Home hides that heading). */
 export function groupSwitchesByArea(switches: AreaSwitch[]): { area: string; items: AreaSwitch[] }[] {
   const order: string[] = [];
   const bags = new Map<string, AreaSwitch[]>();
@@ -1138,6 +1180,33 @@ export function groupSwitchesByArea(switches: AreaSwitch[]): { area: string; ite
     return a.localeCompare(b, undefined, { sensitivity: "base" });
   });
   return order.map((area) => ({ area, items: bags.get(area)! }));
+}
+
+/** True when label/entity_id is the Willow Tree front-garden plug. */
+export function isWillowSwitch(sw: Pick<AreaSwitch, "label" | "entityId">): boolean {
+  const b = `${sw.label} ${sw.entityId}`.toLowerCase();
+  return b.includes("willow");
+}
+
+/**
+ * True when label/entity_id is the Range Rover Hybrid front-garden plug.
+ * Requires both a Range Rover token and "hybrid" so driveway EV sensors
+ * (power/SOC) never match if they ever appear as switch/light.
+ */
+export function isRangeRoverHybridSwitch(sw: Pick<AreaSwitch, "label" | "entityId">): boolean {
+  const b = `${sw.label} ${sw.entityId}`.toLowerCase();
+  if (!b.includes("hybrid")) return false;
+  return (
+    b.includes("range_rover") ||
+    b.includes("range rover") ||
+    b.includes("rangerover") ||
+    b.includes("range-rover")
+  );
+}
+
+/** Front garden controllable plugs — Willow Tree + Range Rover Hybrid only. */
+export function frontGardenSwitches(switches: AreaSwitch[]): AreaSwitch[] {
+  return switches.filter((sw) => isWillowSwitch(sw) || isRangeRoverHybridSwitch(sw));
 }
 
 type Msg = { id?: number; type: string; [k: string]: unknown };
@@ -1163,6 +1232,25 @@ export class HaSocket {
   interest: Set<string> | null = null;
   onStates: ((states: Map<string, HaState>) => void) | null = null;
   onStatus: ((s: "connecting" | "live" | "error", err?: string) => void) | null = null;
+
+  /** True while the HA WebSocket is open (post-handshake traffic OK). */
+  get connected() {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+
+  /**
+   * HA `ping`/`pong` health check. Safari iPad often leaves readyState OPEN after
+   * backgrounding while the TCP session is already dead — probe before trusting it.
+   */
+  async probe(timeoutMs = 2500): Promise<boolean> {
+    if (!this.connected) return false;
+    try {
+      await this.send("ping", {}, timeoutMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   async connect(url: string, token: string) {
     this.close();

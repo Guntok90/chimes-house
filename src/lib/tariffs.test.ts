@@ -5,6 +5,7 @@ import {
   OFF_PEAK_IMPORT_SHARE,
   clampRate,
   estimateImportCost,
+  estimateImportCostParts,
   parseRateInput,
   resolveTariffs,
 } from "./tariffs.ts";
@@ -25,9 +26,15 @@ describe("tariffs", () => {
 
   it("estimates import cost with the off-peak blend", () => {
     const rates = { cheap: 0.1, peak: 0.3 };
-    const blended = 0.1 * OFF_PEAK_IMPORT_SHARE + 0.3 * (1 - OFF_PEAK_IMPORT_SHARE);
-    assert.equal(estimateImportCost(10, rates), Number((10 * blended).toFixed(2)));
+    const parts = estimateImportCostParts(10, rates);
+    assert.equal(parts.costOffPeak, 0.25); // 2.5 kWh × 0.1
+    assert.equal(parts.costPeak, 2.25); // 7.5 kWh × 0.3
+    assert.equal(parts.cost, 2.5);
+    assert.equal(estimateImportCost(10, rates), parts.cost);
     assert.equal(estimateImportCost(0, DEFAULT_TARIFFS), 0);
+    // Total still matches the previous blended formula.
+    const blended = 0.1 * OFF_PEAK_IMPORT_SHARE + 0.3 * (1 - OFF_PEAK_IMPORT_SHARE);
+    assert.equal(parts.cost, Number((10 * blended).toFixed(2)));
   });
 
   it("prefers HA rates over local, then defaults", () => {

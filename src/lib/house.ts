@@ -1,6 +1,6 @@
 import {
   DEFAULT_TARIFF,
-  gridSpendGbp,
+  gridSpendPartsGbp,
   splitDailyImportByWindow,
 } from "./octopus.ts";
 import { DEFAULT_TARIFFS } from "./tariffs.ts";
@@ -123,11 +123,22 @@ export const LIVE = SNAPSHOT;
 export type ConnectionStatus = "demo" | "connecting" | "live" | "error";
 
 /**
+ * Charts / meters should only swap to canned demo series in true demo mode.
+ * While connecting or after a transient WS drop, keep the live data path
+ * (empty → “no history yet”, never a silent demo-curve flash).
+ */
+export function usesDemoCharts(status: ConnectionStatus): boolean {
+  return status === "demo";
+}
+
+/**
  * Solar caption. “after dusk” only while a live socket says sun.sun is below
  * the horizon — never for a failed connect or the demo snapshot.
  */
 export function solarStatusHint(status: ConnectionStatus, live: HouseLive): string {
-  if (status !== "live") return status === "error" ? "not connected" : "demo";
+  if (status === "error") return "not connected";
+  if (status === "connecting") return "connecting";
+  if (status === "demo") return "demo";
   if (live.solarNowW > 30) return "producing";
   if (live.sunAboveHorizon === false) return "after dusk";
   return "idle";
@@ -144,6 +155,11 @@ export type DayPoint = {
   battDischarge: number;
   /** EV / Zappi charge energy (kWh) when a charge-power entity is mapped. */
   cars: number;
+  /** Off-peak (cheap window) grid import £. */
+  costOffPeak: number;
+  /** Peak / high grid import £. */
+  costPeak: number;
+  /** Total spend £ (= costOffPeak + costPeak). */
   cost: number;
 };
 
@@ -183,7 +199,7 @@ export function lastDays(count: number): DayPoint[] {
     // Demo has no hourly import series — split by Intelligent Go window hours,
     // priced with custom tariff defaults (same as editable Energy rates).
     const { lowKwh, highKwh } = splitDailyImportByWindow(gridIn);
-    const cost = gridSpendGbp(lowKwh, highKwh, {
+    const spend = gridSpendPartsGbp(lowKwh, highKwh, {
       lowGbpPerKwh: DEFAULT_TARIFFS.cheap,
       highGbpPerKwh: DEFAULT_TARIFFS.peak,
     });
@@ -197,7 +213,9 @@ export function lastDays(count: number): DayPoint[] {
       battCharge: Number(battCharge.toFixed(2)),
       battDischarge: Number(battDischarge.toFixed(2)),
       cars: Number(cars.toFixed(2)),
-      cost,
+      costOffPeak: spend.offPeak,
+      costPeak: spend.peak,
+      cost: spend.total,
     });
   }
   return out;

@@ -208,9 +208,18 @@ export function Tile({
       >
         <Icon className="size-4" strokeWidth={1.7} />
       </span>
-      <span>
-        <span className="block font-medium">{label}</span>
-        <span className="text-sm text-ink-soft">
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{label}</span>
+        <span
+          className={cn(
+            "text-sm tabular-nums",
+            !available
+              ? "text-ink-soft"
+              : active
+                ? "font-medium text-terra"
+                : "text-ink-soft",
+          )}
+        >
           {detail ?? (!available ? "Unavailable" : active ? "On" : "Off")}
         </span>
       </span>
@@ -218,10 +227,17 @@ export function Tile({
   );
 }
 
-export function Room({ title, children }: { title: string; children: ReactNode }) {
+export function Room({
+  title,
+  children,
+}: {
+  /** Omit / null / empty = no section heading (e.g. unlabelled Spares). */
+  title?: string | null;
+  children: ReactNode;
+}) {
   return (
     <section>
-      <SectionLabel>{title}</SectionLabel>
+      {title ? <SectionLabel>{title}</SectionLabel> : null}
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">{children}</div>
     </section>
   );

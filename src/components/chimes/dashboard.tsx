@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { HOURS } from "@/lib/house";
+import { HOURS, usesDemoCharts } from "@/lib/house";
 import { groupSwitchesByArea, SPARES_AREA, type AreaSwitch } from "@/lib/ha";
 import { useHouse, useLive } from "@/lib/house-store";
 import { BatteryView } from "./battery-view";
@@ -52,11 +52,6 @@ export function ChimesDashboard() {
   const [overview, setOverview] = useState(false);
   const on = useHouse((s) => s.switches);
   const toggle = useHouse((s) => s.toggle);
-  const boot = useHouse((s) => s.boot);
-
-  useEffect(() => {
-    boot();
-  }, [boot]);
 
   return (
     <div className="flex h-dvh overflow-hidden bg-paper text-ink">
@@ -335,7 +330,7 @@ function HomeView() {
   const areaSwitches = useHouse((s) => s.areaSwitches);
   const toggleEntity = useHouse((s) => s.toggleEntity);
 
-  const liveMode = status === "live";
+  const liveMode = !usesDemoCharts(status);
   const graphData = liveMode ? historyHours : HOURS;
   const graphReady = !liveMode || (historyStatus === "ready" && graphData.length > 0);
   const legend = dayChartLegendColors("paper");
@@ -374,7 +369,10 @@ function HomeView() {
       </section>
 
       {groups.map(({ area, items }) => (
-        <Room key={area} title={area}>
+        <Room
+          key={area}
+          title={area.toLowerCase() === SPARES_AREA.toLowerCase() ? null : area}
+        >
           {items.map((sw) => (
             <Tile
               key={sw.entityId}

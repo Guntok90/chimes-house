@@ -73,7 +73,14 @@ export function PowerArea({
   );
 }
 
-export function CostBars({ data }: { data: { label: string; cost: number }[] }) {
+export function CostBars({
+  data,
+}: {
+  data: { label: string; cost: number; costOffPeak?: number; costPeak?: number }[];
+}) {
+  const stacked = data.some(
+    (d) => typeof d.costOffPeak === "number" && typeof d.costPeak === "number",
+  );
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
@@ -81,7 +88,26 @@ export function CostBars({ data }: { data: { label: string; cost: number }[] }) 
         <XAxis dataKey="label" tick={axis} axisLine={false} tickLine={false} />
         <YAxis tick={axis} axisLine={false} tickLine={false} width={36} />
         <Tooltip content={<Tip unit="" />} />
-        <Bar dataKey="cost" name="Cost £" fill="var(--color-teal)" radius={[4, 4, 0, 0]} />
+        {stacked ? (
+          <>
+            <Bar
+              dataKey="costOffPeak"
+              name="Off-peak £"
+              stackId="spend"
+              fill="var(--color-teal-soft)"
+              radius={[0, 0, 0, 0]}
+            />
+            <Bar
+              dataKey="costPeak"
+              name="Peak £"
+              stackId="spend"
+              fill="var(--color-teal)"
+              radius={[4, 4, 0, 0]}
+            />
+          </>
+        ) : (
+          <Bar dataKey="cost" name="Cost £" fill="var(--color-teal)" radius={[4, 4, 0, 0]} />
+        )}
       </BarChart>
     </ResponsiveContainer>
   );
