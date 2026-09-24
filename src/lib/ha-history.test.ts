@@ -5,6 +5,7 @@ import {
   daySpendGbp,
   daySpendPartsGbp,
   daysFromStatistics,
+  hourKwh,
   hoursFromHistory,
   localDayKey,
   localMonthKey,
@@ -155,6 +156,20 @@ describe("ha history helpers", () => {
     assert.equal(today.cars, 0);
   });
 
+  it("daily gridIn uses mean W when change is 0 (power sensors)", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const solarId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = { solarTodayKwh: solarId, gridW: "sensor.grid" };
+    const key = localDayKey(now);
+    const stats: HaStatisticsBag = {
+      [solarId]: [{ start: `${key}T00:00:00+01:00`, change: 12.3, mean: null, state: null }],
+      "sensor.grid": [{ start: `${key}T00:00:00.000Z`, mean: 500, change: 0, state: 500 }],
+    };
+    const week = daysFromStatistics(stats, liveMap, 7, now);
+    const today = week[week.length - 1];
+    assert.equal(today.gridIn, 12); // must not treat change:0 as zero energy
+  });
+
   it("builds monthly year series from epoch-ms month starts", () => {
     const now = new Date(2026, 8, 23, 15, 0, 0, 0);
     const solarId = "sensor.inverter_daily_yield";
@@ -259,5 +274,84 @@ describe("ha history helpers", () => {
     assert.equal(today.cost, 3);
     assert.equal(today.costOffPeak, 0.3); // 3 kWh × 0.1
     assert.equal(today.costPeak, 2.7); // 9 kWh × 0.3
+    assert.equal(today.importOffPeakKwh, 3);
+    assert.equal(today.importPeakKwh, 9);
+  });
+
+  it("hourKwh uses mean W when change is 0 (myenergi power sensors)", () => {
+    // HA often returns change:0 for measurement/power stats; mean is watts.
+    assert.equal(hourKwh({ start: 0, change: 0, mean: 3000, state: null }), 3);
+    assert.equal(hourKwh({ start: 0, change: null, mean: 1500, state: 1500 }), 1.5);
+    // Never treat state watts or cumulative sum as kWh.
+    assert.equal(hourKwh({ start: 0, change: null, mean: null, state: 2500 }), 0);
+    assert.equal(hourKwh({ start: 0, change: null, mean: null, sum: 99999 }), 0);
+    // Real energy delta still wins.
+    assert.equal(hourKwh({ start: 0, change: 2.5, mean: 9000, state: null }), 2.5);
+  });
+
+  it("overnight-heavy import prices almost all £ as off-peak (not 75% peak)", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const key = localDayKey(now);
+    const gridId = "sensor.myenergi_chimes_power_grid";
+    const solarId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = { solarTodayKwh: solarId, gridW: gridId };
+
+    // Typical Intelligent Go night: ~3 kW import 00:00–05:00, near-zero daytime.
+    const hourRows = [];
+    for (let h = 0; h < 24; h++) {
+      const mean = h >= 0 && h <= 4 ? 3000 : h === 5 ? 500 : 0;
+      hourRows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        // Power sensor shape from HA: change 0, mean in W.
+        change: 0,
+        mean,
+        state: mean,
+      });
+    }
+    // 00–04: 5×3 kWh = 15; 05: 0.5 kWh ≈ 0.5 → ~15.5 kWh all cheap-window.
+    const split = splitGridImportForDay(hourRows, key)!;
+    assert.ok(split.lowKwh > 14);
+    assert.ok(split.highKwh < 1);
+
+    const stats: HaStatisticsBag = {
+      [solarId]: [{ start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(), change: 5, mean: null }],
+      // Daily mean ≈ 15.5 kWh / 24 h × 1000 ≈ 646 W
+      [gridId]: [{ start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(), change: 0, mean: 646 }],
+    };
+    const week = daysFromStatistics(stats, liveMap, 7, now, {
+      hourStats: { [gridId]: hourRows },
+      rates: DEFAULT_TARIFF,
+    });
+    const today = week.find((d) => d.key === key)!;
+    assert.ok(today.importOffPeakKwh > 14);
+    assert.ok(today.importPeakKwh < 1);
+    // Off-peak £ ≈ 15.5 × 0.07 ≈ 1.09; Peak £ near zero — NOT 75%×peak.
+    assert.ok(today.costOffPeak > 0.9);
+    assert.ok(today.costPeak < 0.25);
+    const badPeak = Number((today.gridIn * 0.75 * DEFAULT_TARIFF.highGbpPerKwh).toFixed(2));
+    assert.ok(today.costPeak < badPeak * 0.2);
+    assert.equal(today.cost, Number((today.costOffPeak + today.costPeak).toFixed(2)));
+  });
+
+  it("does not inflate Peak £ from power-sensor state watts as kWh", () => {
+    const day = new Date(2026, 8, 23, 0, 0, 0, 0);
+    const key = localDayKey(day);
+    const rows = [];
+    for (let h = 0; h < 24; h++) {
+      // Broken shape if we trusted state: 2000 W read as 2000 kWh/hour.
+      rows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 0,
+        mean: h < 6 ? 2000 : 0,
+        state: h < 6 ? 2000 : 0,
+      });
+    }
+    const parts = daySpendPartsGbp(12, key, rows, DEFAULT_TARIFF);
+    // 00–04 full cheap (5×2) + 05 half (1) = 11 kWh off-peak; 0 peak from hours 6–23.
+    // Hour 5 mean 0 in this fixture → 10 kWh off-peak if only h<6 with h=5 mean 0...
+    // h 0–5 mean 2000 → hours 0–4 fully cheap (10 kWh), hour 5 half → +1 = 11 low, 1 high from half.
+    assert.ok(parts.offPeak < 5); // not thousands of £
+    assert.ok(parts.peak < 5);
+    assert.ok(parts.total < 5);
   });
 });

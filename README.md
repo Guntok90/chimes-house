@@ -50,9 +50,18 @@ Mapped when present (preferred ids first):
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
 | Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
-| Range Rover     | Fuzzy only when entity id/name already contains `range_rover` / `range rover` (W, SOC, plug). No invented brand ids — Energy Flow shows a labeled node with `—` until mapped. |
-| Range Rover kWh | Optional daily energy entity if present; otherwise “—” on Charge                 |
+| Range Rover     | Fuzzy when id/name contains `range_rover` / `land_rover` / `jlr` (W, SOC, plug). Plug also falls back to Front garden **Range Rover Hybrid** `switch.*` (on = charging path). No invented Cupra/VAG ids on this node. |
+| Range Rover kWh | Daily energy / Hybrid “today’s consumption” when present; otherwise “—” on Charge  |
+| Cupra / VAG     | Driveway Cupra stays on the **Zappi** path (`zappiPlugged` / `zappiW` / today). Do not remap VAG `*_plug_connected` onto Range Rover. |
 | Stevie          | `person.stevie_w`                                                                |
+
+If Range Rover Plug/Today still show “—” live, add (or rename) HA entities so the id/friendly name includes `range_rover` / `land_rover` / `jlr`, for example:
+
+- Plug: `binary_sensor.*_charging_cable_connected` / `*_plug_connected` / `*_plugged_in`, or leave the Front garden **Range Rover Hybrid** switch named with both tokens
+- Today kWh: `sensor.*_energy_charged_today` / Hybrid `*_today_s_consumption` (kWh), same naming rule
+- Optional: a utility meter that resets at midnight feeding today’s kWh
+
+Cupra portal / VAG Connect SOC work is out of scope here — keep those entities on the Zappi side.
 | Switches        | Lamp/Telly/blankets/Fish/Pergola/Ponds → `switch.smart_switch_*` / garden ids    |
 
 Live values use neutral zeros for unmapped fields — they never mix demo numbers (e.g. 16.68 kWh) with partial live data. History / Overview charts use HA recorder history over the same WebSocket when available; otherwise they show **No history yet** (never fake WEEK/HOURS curves while Live). “After dusk” only when a live `sun.sun` is `below_horizon`. If bootstrap is unconfigured, or the WebSocket cannot reach the Pi, the app stays on the demo snapshot and shows a connect error.
@@ -119,7 +128,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
-| Home     | 24h energy graph, area-grouped switches (no Spares heading; Dnd/enable/child-lock filtered), Stevie |
+| Home     | 24h energy graph, area-grouped switches (no Spares heading; hides dnd / myenergi / child lock / enable), Stevie |
 | Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover status; Dispatch read-only) + **Battery** charge limits (grid/solar cutoffs + min SOC) + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge + Grid / Solar cutoffs + min SOC |

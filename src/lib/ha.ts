@@ -21,7 +21,9 @@ export type SwitchId =
   | "telly"
   | "fish"
   | "stevie-blanket"
-  | "baby-blanket";
+  | "baby-blanket"
+  | "willow-tree"
+  | "range-rover-hybrid";
 
 export const SWITCHES: { id: SwitchId; label: string; match: string[] }[] = [
   { id: "lamp", label: "Lamp", match: ["lamp", "lounge lamp", "living lamp"] },
@@ -33,11 +35,23 @@ export const SWITCHES: { id: SwitchId; label: string; match: string[] }[] = [
   { id: "fish", label: "Fish", match: ["fish", "aquarium"] },
   { id: "stevie-blanket", label: "Stevie’s blanket", match: ["stevie"] },
   { id: "baby-blanket", label: "Baby’s blanket", match: ["baby"] },
+  { id: "willow-tree", label: "Willow Tree", match: ["willow"] },
+  {
+    id: "range-rover-hybrid",
+    label: "Range Rover Hybrid",
+    match: [
+      "range_rover_hybrid",
+      "range rover hybrid",
+      "rangerover hybrid",
+      "range-rover hybrid",
+    ],
+  },
 ];
 
 /**
  * Exact switch entity ids on Chimes-Pi (friendly names → smart_switch_* / garden).
  * Kitchen has no clear switch in the live inventory — leave unmapped.
+ * Front garden plugs: ids from PR #23 filter tests / HA naming (not invented brands).
  */
 export const PREFERRED_SWITCHES: Partial<Record<SwitchId, string[]>> = {
   lamp: ["switch.smart_switch_4"],
@@ -48,7 +62,18 @@ export const PREFERRED_SWITCHES: Partial<Record<SwitchId, string[]>> = {
   pergola: ["switch.pergola_switch_1"],
   "pond-1": ["switch.pond_1_switch_1"],
   "pond-2": ["switch.pond_2_switch_1"],
+  "willow-tree": ["switch.willow_tree"],
+  "range-rover-hybrid": ["switch.range_rover_hybrid"],
 };
+
+/** Curated Front garden slots — always shown (Willow + Range Rover Hybrid only). */
+export const FRONT_GARDEN_SLOTS: {
+  id: Extract<SwitchId, "willow-tree" | "range-rover-hybrid">;
+  label: string;
+}[] = [
+  { id: "willow-tree", label: "Willow Tree" },
+  { id: "range-rover-hybrid", label: "Range Rover Hybrid" },
+];
 
 const CREDS = "chimes.ha.creds";
 const MAP = "chimes.ha.map";
@@ -193,8 +218,81 @@ function isRangeRoverBlob(b: string) {
     b.includes("range_rover") ||
     b.includes("range rover") ||
     b.includes("rangerover") ||
-    b.includes("range-rover")
+    b.includes("range-rover") ||
+    b.includes("land_rover") ||
+    b.includes("land rover") ||
+    b.includes("landrover") ||
+    b.includes("jlr")
   );
+}
+
+/**
+ * Front-garden Range Rover Hybrid outdoor socket (already on Garden Front).
+ * Used as plug/power/today fallback when no dedicated vehicle charge sensor exists.
+ */
+function isRangeRoverHybridBlob(b: string) {
+  return isRangeRoverBlob(b) && b.includes("hybrid");
+}
+
+/** Dedicated plug / cable / connector wording (not generic charging_power). */
+function isPlugCableBlob(b: string) {
+  return (
+    b.includes("plug") ||
+    b.includes("plugged") ||
+    b.includes("cable") ||
+    b.includes("connector") ||
+    b.includes("external_power") ||
+    b.includes("external power") ||
+    b.includes("car_connected") ||
+    b.includes("charging_cable") ||
+    b.includes("charge_cable") ||
+    b.includes("cable_connected") ||
+    b.includes("plug_connected") ||
+    b.includes("plugged_in") ||
+    b.includes("ev_plugged")
+  );
+}
+
+/**
+ * Parse charger/vehicle plug text into boolean.
+ * Returns null when the state is unknown / unavailable (caller keeps fallback).
+ */
+export function parsePlugConnected(raw: string | undefined | null): boolean | null {
+  if (raw == null) return null;
+  const v = raw.toLowerCase().trim().replace(/[_-]+/g, " ");
+  if (!v || v === "unknown" || v === "unavailable" || v === "none" || v === "n/a") return null;
+
+  const negative =
+    v.includes("not connected") ||
+    v.includes("unplugged") ||
+    v.includes("disconnected") ||
+    v === "off" ||
+    v === "false" ||
+    v === "0" ||
+    v === "no" ||
+    v === "idle" ||
+    v === "a" || // EVCC status A = disconnected
+    v.includes("notconnected");
+  if (negative) return false;
+
+  const positive =
+    v === "on" ||
+    v === "true" ||
+    v === "yes" ||
+    v === "1" ||
+    v === "wired" ||
+    v === "b" || // EVCC B = connected
+    v === "c" || // EVCC C = charging (implies plugged)
+    v.includes("plugged") ||
+    v.includes("connected") ||
+    v.includes("charging") ||
+    v.includes("ready for charging") ||
+    v.includes("readyforcharging") ||
+    v.includes("cable locked") ||
+    v.includes("external power");
+  if (positive) return true;
+
+  return null;
 }
 
 /**
@@ -548,7 +646,8 @@ export function autoMap(states: HaState[]): HaMap {
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
-  // Second vehicle — only when entity names already say Range Rover (never invent brands).
+  // Second vehicle — only when entity names already say Range Rover / Land Rover / JLR
+  // (never invent Cupra/VAG brand ids — those belong on the Zappi / Cupra driveway path).
   const rangeRoverW = resolve(
     states,
     "rangeRoverW",
@@ -557,11 +656,16 @@ export function autoMap(states: HaState[]): HaMap {
       (b.includes("power") ||
         b.includes("charge_rate") ||
         b.includes("charging") ||
-        b.includes("watt")) &&
+        b.includes("watt") ||
+        b.includes("current_consumption") ||
+        b.includes("current consumption")) &&
       !b.includes("today") &&
       !b.includes("daily") &&
       !b.includes("energy") &&
-      !b.includes("zappi"),
+      !b.includes("consumption today") &&
+      !b.includes("zappi") &&
+      !b.includes("cupra") &&
+      !b.includes("vag"),
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
@@ -577,26 +681,43 @@ export function autoMap(states: HaState[]): HaMap {
         b.includes("fuel")) &&
       !b.includes("zappi") &&
       !b.includes("luna") &&
-      !b.includes("house"),
+      !b.includes("house") &&
+      !b.includes("cupra") &&
+      !b.includes("vag"),
   );
 
-  const rangeRoverPlug = resolve(
-    states,
-    "rangeRoverPlugged",
-    (s, b) =>
-      isRangeRoverBlob(b) &&
-      !b.includes("power") &&
-      !b.includes("watt") &&
-      !b.includes("soc") &&
-      !b.includes("charge_level") &&
-      !b.includes("battery") &&
-      (b.includes("plug") ||
-        b.includes("plugged") ||
-        b.includes("connected") ||
-        b.includes("cable") ||
-        (b.includes("status") && !b.includes("mode") && !b.includes("charg"))) &&
-      (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
-  );
+  // Prefer a dedicated plug/cable sensor; fall back to the Hybrid outdoor socket switch.
+  const rangeRoverPlug =
+    resolve(
+      states,
+      "rangeRoverPlugged",
+      (s, b) =>
+        isRangeRoverBlob(b) &&
+        !b.includes("power") &&
+        !b.includes("watt") &&
+        !b.includes("current_consumption") &&
+        !b.includes("soc") &&
+        !b.includes("charge_level") &&
+        !b.includes("battery") &&
+        !b.includes("cupra") &&
+        !b.includes("vag") &&
+        !b.includes("zappi") &&
+        (isPlugCableBlob(b) ||
+          (b.includes("status") &&
+            !b.includes("mode") &&
+            !b.includes("device") &&
+            (b.includes("charg") || b.includes("ev") || b.includes("plug")))) &&
+        (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
+    ) ??
+    find(
+      states,
+      (s, b) =>
+        s.entity_id.startsWith("switch.") &&
+        isRangeRoverHybridBlob(b) &&
+        !b.includes("child_lock") &&
+        !b.includes("child lock") &&
+        !b.includes("enable"),
+    );
 
   const zappiToday = resolve(
     states,
@@ -621,20 +742,24 @@ export function autoMap(states: HaState[]): HaMap {
     states,
     "rangeRoverTodayKwh",
     (_s, b) =>
-      (b.includes("range_rover") ||
-        b.includes("range rover") ||
-        b.includes("land_rover") ||
-        b.includes("land rover") ||
-        b.includes("jlr")) &&
+      isRangeRoverBlob(b) &&
       (b.includes("energy_used_today") ||
         b.includes("charged_today") ||
         b.includes("charge_today") ||
         b.includes("energy_today") ||
         b.includes("charging_energy") ||
-        ((b.includes("energy") || b.includes("charged") || b.includes("kwh")) &&
+        b.includes("today_s_consumption") ||
+        b.includes("todays_consumption") ||
+        b.includes("today's consumption") ||
+        ((b.includes("energy") ||
+          b.includes("charged") ||
+          b.includes("kwh") ||
+          b.includes("consumption")) &&
           (b.includes("today") || b.includes("daily")))) &&
       !b.includes("zappi") &&
-      !b.includes("myenergi"),
+      !b.includes("myenergi") &&
+      !b.includes("cupra") &&
+      !b.includes("vag"),
     isEnergyUnit,
   );
 
@@ -911,33 +1036,15 @@ export function liveFromStates(
   const zappiPlugState = take("zappiPlugged");
   let zappiPlugged = fallback.zappiPlugged;
   if (zappiPlugState) {
-    const v = zappiPlugState.state.toLowerCase();
-    const negative =
-      v.includes("not connected") ||
-      v.includes("not_connected") ||
-      v.includes("unplugged") ||
-      v.includes("disconnected") ||
-      v === "off" ||
-      v === "false";
-    zappiPlugged = negative
-      ? false
-      : flag("zappiPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
+    const parsed = parsePlugConnected(zappiPlugState.state);
+    if (parsed != null) zappiPlugged = parsed;
   }
 
   const rangeRoverPlugState = take("rangeRoverPlugged");
   let rangeRoverPlugged = fallback.rangeRoverPlugged;
   if (rangeRoverPlugState) {
-    const v = rangeRoverPlugState.state.toLowerCase();
-    const negative =
-      v.includes("not connected") ||
-      v.includes("not_connected") ||
-      v.includes("unplugged") ||
-      v.includes("disconnected") ||
-      v === "off" ||
-      v === "false";
-    rangeRoverPlugged = negative
-      ? false
-      : flag("rangeRoverPlugged", false) || /\b(plugged|connected|charging)\b/.test(v);
+    const parsed = parsePlugConnected(rangeRoverPlugState.state);
+    if (parsed != null) rangeRoverPlugged = parsed;
   }
 
   const solarNowW = Math.round(n("solarNowW", fallback.solarNowW));
@@ -1120,30 +1227,43 @@ function isControllableSwitch(s: HaState) {
 }
 
 /**
- * Home switch list filters (dad feedback): drop Dnd twins, enable-* toggles,
- * and vehicle child-lock switches. Match against entity_id + display label.
+ * Home switch list filters (dad follow-up after PR #22): drop junk so Home
+ * shows one real switch tile each. Match case-insensitively against entity_id,
+ * display label, registry name, and friendly_name:
+ * - dnd / do not disturb (twins)
+ * - myenergi / my energy
+ * - child lock (any device)
+ * - enable
  */
-export function hideHomeSwitch(entityId: string, label: string): boolean {
-  const hay = `${entityId} ${label}`.toLowerCase();
-  if (hay.includes("dnd")) return true;
-  if (hay.includes("enable")) return true;
-  const childLock = hay.includes("child_lock") || hay.includes("child lock");
+export function hideHomeSwitch(
+  entityId: string,
+  label: string,
+  extraNames: string[] = [],
+): boolean {
+  const hay = `${entityId} ${label} ${extraNames.join(" ")}`.toLowerCase();
   if (
-    childLock &&
-    (hay.includes("range_rover") ||
-      hay.includes("range rover") ||
-      hay.includes("cupra") ||
-      hay.includes("vehicle"))
+    hay.includes("dnd") ||
+    hay.includes("do not disturb") ||
+    hay.includes("do_not_disturb")
   ) {
     return true;
   }
+  if (
+    hay.includes("myenergi") ||
+    hay.includes("my energy") ||
+    hay.includes("my_energy")
+  ) {
+    return true;
+  }
+  if (hay.includes("child_lock") || hay.includes("child lock")) return true;
+  if (hay.includes("enable")) return true;
   return false;
 }
 
 /**
  * All switch/light entities from live states, grouped by HA area.
  * Unassigned entities land in Spares (shown without a labelled heading).
- * Filters out Dnd twins, enable-* switches, and vehicle child locks.
+ * Filters out Dnd / myenergi / child-lock / enable junk (see hideHomeSwitch).
  */
 export function areaSwitchesFromStates(
   states: HaState[],
@@ -1160,11 +1280,14 @@ export function areaSwitchesFromStates(
     if (reg?.disabled_by || reg?.hidden_by) continue;
     const areaId = reg?.area_id ?? null;
     const area = areaId ? (areaName.get(areaId) ?? SPARES_AREA) : SPARES_AREA;
+    const friendly = String(s.attributes.friendly_name ?? "").trim();
+    const regName = reg?.name ? String(reg.name).trim() : "";
     const label =
-      (reg?.name && String(reg.name).trim()) ||
-      String(s.attributes.friendly_name ?? "").trim() ||
+      regName ||
+      friendly ||
       s.entity_id.replace(/^(switch|light)\./, "").replace(/_/g, " ");
-    if (hideHomeSwitch(s.entity_id, label)) continue;
+    // Include every name source so a cleaned registry alias cannot un-hide junk.
+    if (hideHomeSwitch(s.entity_id, label, [friendly, regName])) continue;
     out.push({
       entityId: s.entity_id,
       label,
@@ -1194,6 +1317,8 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
     fish: "Living room",
     "stevie-blanket": "Bedrooms",
     "baby-blanket": "Bedrooms",
+    "willow-tree": "Front garden",
+    "range-rover-hybrid": "Front garden",
   };
   const curated = SWITCHES.map((sw) => ({
     entityId: `demo.${sw.id}`,
@@ -1202,22 +1327,6 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
     on: Boolean(on[sw.id]),
     available: true,
   }));
-  const frontGarden: AreaSwitch[] = [
-    {
-      entityId: "demo.willow-tree",
-      label: "Willow Tree",
-      area: "Front garden",
-      on: Boolean(on["willow-tree"]),
-      available: true,
-    },
-    {
-      entityId: "demo.range-rover-hybrid",
-      label: "Range Rover Hybrid",
-      area: "Front garden",
-      on: Boolean(on["range-rover-hybrid"]),
-      available: true,
-    },
-  ];
   const spares: AreaSwitch[] = [
     {
       entityId: "demo.spare-1",
@@ -1234,7 +1343,7 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
       available: true,
     },
   ];
-  return [...curated, ...frontGarden, ...spares];
+  return [...curated, ...spares];
 }
 
 /** Group area switches; Spares last (Home hides that heading). */
@@ -1283,6 +1392,60 @@ export function frontGardenSwitches(switches: AreaSwitch[]): AreaSwitch[] {
   return switches.filter((sw) => isWillowSwitch(sw) || isRangeRoverHybridSwitch(sw));
 }
 
+/**
+ * Always return Willow Tree + Range Rover Hybrid tiles for Garden Front.
+ *
+ * Live `areaSwitches` can drop Willow when the entity is registry-hidden or
+ * renamed away from a fuzzy "willow" label. Prefer (1) area list hit,
+ * (2) curated HaMap slot from PREFERRED / fuzzy autoMap, (3) demo.* off-live,
+ * (4) preferred entity id shell (unavailable) so the control never disappears.
+ */
+export function resolveFrontGardenTiles(
+  areaSwitches: AreaSwitch[],
+  map: HaMap,
+  status: "demo" | "connecting" | "live" | "error",
+  switchState: Record<string, boolean> = {},
+): AreaSwitch[] {
+  return FRONT_GARDEN_SLOTS.map((slot) => {
+    const fromArea = areaSwitches.find((sw) =>
+      slot.id === "willow-tree" ? isWillowSwitch(sw) : isRangeRoverHybridSwitch(sw),
+    );
+    if (fromArea) {
+      return { ...fromArea, label: slot.label, area: "Front garden" };
+    }
+
+    const mapped = map[slot.id];
+    if (mapped) {
+      return {
+        entityId: mapped,
+        label: slot.label,
+        area: "Front garden",
+        on: Boolean(switchState[slot.id]),
+        available: true,
+      };
+    }
+
+    if (status !== "live") {
+      return {
+        entityId: `demo.${slot.id}`,
+        label: slot.label,
+        area: "Front garden",
+        on: Boolean(switchState[slot.id]),
+        available: true,
+      };
+    }
+
+    const preferred = PREFERRED_SWITCHES[slot.id]?.[0];
+    return {
+      entityId: preferred ?? `demo.${slot.id}`,
+      label: slot.label,
+      area: "Front garden",
+      on: false,
+      available: false,
+    };
+  });
+}
+
 type Msg = { id?: number; type: string; [k: string]: unknown };
 
 /**
@@ -1312,14 +1475,40 @@ export class HaSocket {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** Reject every in-flight command so probe/reconnect fail fast on close. */
+  private rejectPending(message: string) {
+    if (this.pending.size === 0) return;
+    const err = new Error(message);
+    for (const [, p] of this.pending) p.err(err);
+    this.pending.clear();
+  }
+
   /**
    * HA `ping`/`pong` health check. Safari iPad often leaves readyState OPEN after
    * backgrounding while the TCP session is already dead — probe before trusting it.
    */
-  async probe(timeoutMs = 2500): Promise<boolean> {
+  async probe(timeoutMs = 1200): Promise<boolean> {
     if (!this.connected) return false;
     try {
       await this.send("ping", {}, timeoutMs);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Pull a fresh get_states snapshot after a successful ping.
+   * Ping alone can succeed on a half-alive socket that no longer delivers events.
+   */
+  async refreshStates(timeoutMs = 4000): Promise<boolean> {
+    if (!this.connected) return false;
+    try {
+      const states = (await this.send("get_states", {}, timeoutMs)) as HaState[];
+      if (!Array.isArray(states)) return false;
+      this.statesByEntity = new Map(states.map((s) => [s.entity_id, s]));
+      this.bootstrapFlush = true;
+      this.flushStates();
       return true;
     } catch {
       return false;
@@ -1359,6 +1548,7 @@ export class HaSocket {
           const p = this.pending.get(msg.id);
           if (p) {
             this.pending.delete(msg.id);
+            // HA `pong` has no `success` field — treat anything but explicit failure as ok.
             if (msg.success === false) p.err(new Error("Home Assistant request failed."));
             else p.ok(msg.result);
           }
@@ -1377,6 +1567,7 @@ export class HaSocket {
       ws.onclose = () => {
         if (this.ws !== ws) return;
         this.ws = null;
+        this.rejectPending("Disconnected.");
         if (handshake) {
           window.clearTimeout(timer);
           reject(new Error("Could not reach Home Assistant."));
@@ -1622,7 +1813,19 @@ export class HaSocket {
           err(e);
         },
       });
-      this.ws?.send(JSON.stringify({ id, type, ...extra }));
+      try {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          this.pending.delete(id);
+          window.clearTimeout(timer);
+          err(new Error("Home Assistant socket is not open."));
+          return;
+        }
+        this.ws.send(JSON.stringify({ id, type, ...extra }));
+      } catch (e) {
+        this.pending.delete(id);
+        window.clearTimeout(timer);
+        err(e instanceof Error ? e : new Error("Home Assistant send failed."));
+      }
     });
   }
 
@@ -1637,12 +1840,16 @@ export class HaSocket {
     this.statesByEntity.clear();
     const ws = this.ws;
     this.ws = null;
-    this.pending.clear();
+    this.rejectPending("Disconnected.");
     if (!ws) return;
     ws.onmessage = null;
     ws.onerror = null;
     ws.onclose = null;
-    ws.close();
+    try {
+      ws.close();
+    } catch {
+      // Ignore — already closing/closed after iOS suspend.
+    }
   }
 }
 

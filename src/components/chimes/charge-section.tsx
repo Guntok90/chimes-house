@@ -8,14 +8,23 @@ function formatTodayKwh(v: number | null): string {
   return v == null ? "—" : `${v} kWh`;
 }
 
-function rangeRoverStatus(live: {
-  rangeRoverPlugged: boolean;
-  rangeRoverW: number;
-  rangeRoverSoc: number;
-}): string {
+function formatPlug(mapped: boolean, plugged: boolean): string {
+  if (!mapped) return "—";
+  return plugged ? "Connected" : "Unplugged";
+}
+
+function rangeRoverStatus(
+  live: {
+    rangeRoverPlugged: boolean;
+    rangeRoverW: number;
+    rangeRoverSoc: number;
+  },
+  plugMapped: boolean,
+): string {
   if (live.rangeRoverW > 30) return "Charging";
+  if (!plugMapped) return live.rangeRoverSoc > 0 ? "Parked" : "—";
   if (live.rangeRoverPlugged) return "Plugged in";
-  return "Plug off";
+  return "Unplugged";
 }
 
 /**
@@ -39,6 +48,11 @@ export function ChargeSection({
 
   const liveMode = status === "live";
   const modeMapped = Boolean(map.zappiMode);
+  const demo = status === "demo";
+  const zappiPlugMapped = demo || Boolean(map.zappiPlugged);
+  const roverPlugMapped = demo || Boolean(map.rangeRoverPlugged);
+  const roverWMapped = demo || Boolean(map.rangeRoverW);
+  const roverSocMapped = demo || Boolean(map.rangeRoverSoc);
   const [draftMode, setDraftMode] = useState(live.zappiMode);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -82,7 +96,10 @@ export function ChargeSection({
 
           <div className="px-1">
             <Row label="Mode" value={live.zappiMode} />
-            <Row label="Plug" value={live.zappiPlugged ? "Connected" : "Unplugged"} />
+            <Row
+              label="Plug"
+              value={formatPlug(zappiPlugMapped, live.zappiPlugged)}
+            />
             <Row label="Charge" value={live.zappiW > 30 ? `${live.zappiW} W` : "Idle"} />
             <Row label="Today" value={formatTodayKwh(live.zappiTodayKwh)} />
           </div>
@@ -159,26 +176,33 @@ export function ChargeSection({
             <div>
               <div className="font-medium">Range Rover</div>
               <div className="text-sm text-ink-soft">
-                {rangeRoverStatus(live)}
+                {rangeRoverStatus(live, roverPlugMapped)}
                 {live.rangeRoverSoc > 0 ? ` · ${live.rangeRoverSoc}%` : ""}
               </div>
             </div>
           </div>
           <div className="px-1">
-            <Row label="Plug" value={live.rangeRoverPlugged ? "Connected" : "Unplugged"} />
+            <Row label="Plug" value={formatPlug(roverPlugMapped, live.rangeRoverPlugged)} />
             <Row
               label="Charge"
-              value={live.rangeRoverW > 30 ? `${live.rangeRoverW} W` : "Idle"}
+              value={
+                roverWMapped
+                  ? live.rangeRoverW > 30
+                    ? `${live.rangeRoverW} W`
+                    : "Idle"
+                  : "—"
+              }
             />
             <Row
               label="SOC"
-              value={live.rangeRoverSoc > 0 ? `${live.rangeRoverSoc}%` : "—"}
+              value={roverSocMapped ? `${live.rangeRoverSoc}%` : "—"}
             />
             <Row label="Today" value={formatTodayKwh(live.rangeRoverTodayKwh)} />
           </div>
           <p className="text-sm leading-relaxed text-ink-soft">
-            Status only from entities already on the Pi — no invented charge writes for the
-            Rover.
+            Status from Range Rover / Land Rover / JLR sensors when present, else the Front
+            garden Hybrid socket switch. Cupra / VAG Connect stays on the Zappi path — no
+            invented Rover charge writes.
           </p>
         </Surface>
       </div>

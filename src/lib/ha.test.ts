@@ -15,6 +15,7 @@ import {
   frontGardenSwitches,
   groupSwitchesByArea,
   hideHomeSwitch,
+  resolveFrontGardenTiles,
   interestFromMap,
   isHaTimeoutError,
   haWriteFailureMessage,
@@ -22,9 +23,11 @@ import {
   sameLive,
   sameSwitches,
   rateToGbpPerKwh,
+  parsePlugConnected,
   wsFailureMessage,
   zappiModeOptions,
   DEFAULT_ZAPPI_MODES,
+  type HaEntityReg,
   type HaState,
 } from "./ha.ts";
 import { EMPTY_LIVE, SNAPSHOT, solarStatusHint, usesDemoCharts } from "./house.ts";
@@ -405,6 +408,21 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.rangeRoverTodayKwh, 9.5);
   });
 
+  it("maps Hybrid socket today's consumption as Range Rover daily kWh", () => {
+    const states = [
+      state(
+        "sensor.range_rover_hybrid_today_s_consumption",
+        "4.2",
+        "Range Rover Hybrid Today's consumption",
+        "kWh",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_hybrid_today_s_consumption");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverTodayKwh, 4.2);
+  });
+
   it("converts Wh Zappi today sensors to kWh", () => {
     const states = [
       state("sensor.myenergi_zappi_25435526_energy_used_today", "2500", "", "Wh"),
@@ -615,9 +633,13 @@ describe("area-grouped switches (Home)", () => {
     assert.ok(front.some((s) => s.label === "Range Rover Hybrid"));
   });
 
-  it("hideHomeSwitch drops Dnd twins, enable-*, and vehicle child locks", () => {
+  it("hideHomeSwitch drops dnd / myenergi / child lock / enable (any device)", () => {
     assert.equal(hideHomeSwitch("switch.lamp_dnd", "Lamp Dnd"), true);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1 DND"), true);
+    assert.equal(
+      hideHomeSwitch("switch.lamp_do_not_disturb", "Lamp Do Not Disturb"),
+      true,
+    );
     assert.equal(hideHomeSwitch("switch.smart_switch_enable", "Enable charging"), true);
     assert.equal(hideHomeSwitch("switch.enable_notifications", "Notifications"), true);
     assert.equal(
@@ -625,20 +647,38 @@ describe("area-grouped switches (Home)", () => {
       true,
     );
     assert.equal(hideHomeSwitch("switch.cupra_child_lock", "Cupra Child Lock"), true);
-    assert.equal(hideHomeSwitch("switch.vehicle_child_lock", "Vehicle child lock"), true);
+    assert.equal(hideHomeSwitch("switch.cabinet_child_lock", "Cabinet child lock"), true);
+    assert.equal(hideHomeSwitch("switch.myenergi_zappi_boost", "Boost"), true);
+    assert.equal(hideHomeSwitch("switch.garage_plug", "My Energy boost"), true);
+    assert.equal(hideHomeSwitch("switch.garage_plug", "Myenergi boost"), true);
     // Real switches stay
     assert.equal(hideHomeSwitch("switch.smart_switch_4", "Lamp"), false);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1"), false);
-    // Child lock alone (non-vehicle) stays — filter needs vehicle cue
-    assert.equal(hideHomeSwitch("switch.cabinet_child_lock", "Cabinet child lock"), false);
+    assert.equal(hideHomeSwitch("switch.batteries_charge_from_grid", "Charge from grid"), false);
+  });
+
+  it("hideHomeSwitch still catches junk when registry alias cleans the label", () => {
+    // Display label looks real; friendly_name / entity still name the twin.
+    assert.equal(
+      hideHomeSwitch("switch.smart_switch_4_dnd", "Lamp", ["Lamp Dnd", "Lamp"]),
+      true,
+    );
+    assert.equal(
+      hideHomeSwitch("switch.random_id", "Boost", ["Myenergi boost", "Boost"]),
+      true,
+    );
   });
 
   it("areaSwitchesFromStates omits filtered twins from the Home list", () => {
     const states: HaState[] = [
       state("switch.smart_switch_4", "on", "Lamp"),
       state("switch.smart_switch_4_dnd", "off", "Lamp Dnd"),
+      state("switch.lamp_do_not_disturb", "off", "Lamp Do Not Disturb"),
       state("switch.batteries_enable_charge", "on", "Enable charge"),
       state("switch.range_rover_child_lock", "off", "Range Rover child lock"),
+      state("switch.cabinet_child_lock", "off", "Cabinet child lock"),
+      state("switch.myenergi_zappi_boost", "off", "Boost"),
+      state("switch.spare_boost", "off", "My Energy boost"),
       state("switch.pergola_switch_1", "off", "Pergola"),
     ];
     const list = areaSwitchesFromStates(states, [], []);
@@ -648,6 +688,23 @@ describe("area-grouped switches (Home)", () => {
     );
     assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
     assert.equal(list.find((s) => s.entityId === "switch.pergola_switch_1")?.on, false);
+  });
+
+  it("areaSwitchesFromStates hides Dnd twin even when registry name is cleaned", () => {
+    const states: HaState[] = [
+      state("switch.smart_switch_4", "on", "Lamp"),
+      state("switch.smart_switch_4_dnd", "off", "Lamp Dnd"),
+    ];
+    const entities: HaEntityReg[] = [
+      { entity_id: "switch.smart_switch_4", area_id: null, name: "Lamp" },
+      // Cleaned alias would previously keep the twin on Home.
+      { entity_id: "switch.smart_switch_4_dnd", area_id: null, name: "Lamp" },
+    ];
+    const list = areaSwitchesFromStates(states, [], entities);
+    assert.deepEqual(
+      list.map((s) => s.entityId),
+      ["switch.smart_switch_4"],
+    );
   });
 });
 
@@ -708,6 +765,57 @@ describe("Front garden switch filter", () => {
     ]);
     assert.equal(list.length, 0);
   });
+
+  it("maps preferred Willow + Range Rover Hybrid when those switches exist", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      state("switch.willow_tree", "on", "Willow Tree"),
+      state("switch.range_rover_hybrid", "off", "Range Rover Hybrid"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map["willow-tree"], "switch.willow_tree");
+    assert.equal(map["range-rover-hybrid"], "switch.range_rover_hybrid");
+    assert.equal(PREFERRED_SWITCHES["willow-tree"]?.[0], "switch.willow_tree");
+    assert.equal(PREFERRED_SWITCHES["range-rover-hybrid"]?.[0], "switch.range_rover_hybrid");
+  });
+
+  it("resolveFrontGardenTiles always returns Willow + Range Rover Hybrid", () => {
+    const demo = resolveFrontGardenTiles([], {}, "demo", { "willow-tree": true });
+    assert.equal(demo.length, 2);
+    assert.deepEqual(
+      demo.map((s) => s.label),
+      ["Willow Tree", "Range Rover Hybrid"],
+    );
+    assert.equal(demo[0]?.on, true);
+    assert.equal(demo[0]?.entityId, "demo.willow-tree");
+  });
+
+  it("restores Willow from curated map when area list omitted it (e.g. registry-hidden)", () => {
+    const area = [
+      {
+        entityId: "switch.range_rover_hybrid",
+        label: "Range Rover Hybrid",
+        area: "Front garden",
+        on: false,
+        available: true,
+      },
+    ];
+    const tiles = resolveFrontGardenTiles(
+      area,
+      {
+        "willow-tree": "switch.willow_tree",
+        "range-rover-hybrid": "switch.range_rover_hybrid",
+      },
+      "live",
+      { "willow-tree": true },
+    );
+    assert.equal(tiles.length, 2);
+    assert.equal(tiles[0]?.entityId, "switch.willow_tree");
+    assert.equal(tiles[0]?.label, "Willow Tree");
+    assert.equal(tiles[0]?.on, true);
+    assert.equal(tiles[0]?.available, true);
+    assert.equal(tiles[1]?.entityId, "switch.range_rover_hybrid");
+  });
 });
 
 describe("Range Rover entity discovery", () => {
@@ -731,12 +839,79 @@ describe("Range Rover entity discovery", () => {
     assert.equal(live.rangeRoverPlugged, false);
   });
 
+  it("maps charging_cable_connected and WIRED plug states", () => {
+    const states: HaState[] = [
+      state(
+        "binary_sensor.land_rover_charging_cable_connected",
+        "on",
+        "Land Rover charging cable connected",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, "binary_sensor.land_rover_charging_cable_connected");
+    assert.equal(liveFromStates(states, map, EMPTY_LIVE).rangeRoverPlugged, true);
+
+    const wired: HaState[] = [
+      state("sensor.jlr_plug_status", "WIRED", "JLR plug status"),
+    ];
+    const wiredMap = autoMap(wired);
+    assert.equal(wiredMap.rangeRoverPlugged, "sensor.jlr_plug_status");
+    assert.equal(liveFromStates(wired, wiredMap, EMPTY_LIVE).rangeRoverPlugged, true);
+  });
+
+  it("falls back to Range Rover Hybrid switch for plug when no cable sensor exists", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
+      state(
+        "sensor.range_rover_hybrid_current_consumption",
+        "2200",
+        "Range Rover Hybrid Current consumption",
+        "W",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, "switch.range_rover_hybrid");
+    assert.equal(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverPlugged, true);
+    assert.equal(live.rangeRoverW, 2200);
+  });
+
+  it("does not map Cupra / VAG Connect entities onto Range Rover", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      state("binary_sensor.cupra_born_plug_connected", "on", "Cupra plug connected"),
+      state("sensor.cupra_born_battery", "80", "Cupra battery", "%"),
+      state("sensor.cupra_born_charging_power", "7000", "Cupra charging power", "W"),
+      state("sensor.cupra_energy_charged_today", "11", "Cupra charged today", "kWh"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, undefined);
+    assert.equal(map.rangeRoverSoc, undefined);
+    assert.equal(map.rangeRoverW, undefined);
+    assert.equal(map.rangeRoverTodayKwh, undefined);
+  });
+
   it("does not invent brand entities when none are present", () => {
     const map = autoMap(CHIMES_PI);
     assert.equal(map.rangeRoverW, undefined);
     assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(map.rangeRoverPlugged, undefined);
     assert.equal(PREFERRED.rangeRoverW?.length, 0);
+  });
+});
+
+describe("parsePlugConnected", () => {
+  it("treats common connected / disconnected strings", () => {
+    assert.equal(parsePlugConnected("on"), true);
+    assert.equal(parsePlugConnected("WIRED"), true);
+    assert.equal(parsePlugConnected("Cable Connected"), true);
+    assert.equal(parsePlugConnected("charging"), true);
+    assert.equal(parsePlugConnected("Not Connected"), false);
+    assert.equal(parsePlugConnected("off"), false);
+    assert.equal(parsePlugConnected("unplugged"), false);
+    assert.equal(parsePlugConnected("unknown"), null);
   });
 });
 
