@@ -16,17 +16,17 @@ const labelTone: Record<Tint, string> = {
 };
 
 const surfaceTone: Record<Tint, string> = {
-  teal: "border-teal/25 bg-gradient-to-br from-teal/[0.07] to-white/55",
-  terra: "border-terra/25 bg-gradient-to-br from-terra/[0.08] to-white/55",
-  sand: "border-sand bg-gradient-to-br from-sand/50 to-white/55",
-  umber: "border-umber/20 bg-gradient-to-br from-umber/[0.06] to-white/55",
+  teal: "border-teal/35 bg-gradient-to-br from-teal/[0.14] via-white/50 to-sand/25",
+  terra: "border-terra/35 bg-gradient-to-br from-terra/[0.14] via-white/50 to-sand/20",
+  sand: "border-sand bg-gradient-to-br from-sand/70 via-sand/35 to-white/50",
+  umber: "border-umber/30 bg-gradient-to-br from-umber/[0.1] via-sand/30 to-white/55",
 };
 
 const metricTone: Record<Tint, string> = {
-  teal: "border-teal/25 bg-gradient-to-br from-teal/[0.08] to-white/60",
-  terra: "border-terra/25 bg-gradient-to-br from-terra/[0.09] to-white/60",
-  sand: "border-sand bg-gradient-to-br from-sand/45 to-white/60",
-  umber: "border-umber/20 bg-gradient-to-br from-umber/[0.07] to-white/60",
+  teal: "border-teal/35 bg-gradient-to-br from-teal/[0.16] to-sand/30",
+  terra: "border-terra/35 bg-gradient-to-br from-terra/[0.16] to-sand/25",
+  sand: "border-sand bg-gradient-to-br from-sand/65 to-white/55",
+  umber: "border-umber/30 bg-gradient-to-br from-umber/[0.12] to-sand/30",
 };
 
 export function SectionLabel({
@@ -41,9 +41,21 @@ export function SectionLabel({
     <h2
       className={cn(
         "mb-3 text-xs font-semibold uppercase tracking-widest",
-        tone ? labelTone[tone] : "text-ink-soft",
+        tone ? cn("flex items-center gap-2", labelTone[tone]) : "text-ink-soft",
       )}
     >
+      {tone ? (
+        <span
+          aria-hidden
+          className={cn(
+            "inline-block h-3 w-1 shrink-0 rounded-full",
+            tone === "teal" && "bg-teal",
+            tone === "terra" && "bg-terra",
+            tone === "sand" && "bg-sand",
+            tone === "umber" && "bg-umber",
+          )}
+        />
+      ) : null}
       {children}
     </h2>
   );

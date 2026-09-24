@@ -29,7 +29,8 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
   const gridOut = live.gridW < -30;
   const zappiOn = live.zappiW > 30;
   const glass = tone === "glass";
-  const idle = glass ? "flow-idle stroke-sidebar-fg/40" : "flow-idle stroke-teal-soft/45";
+  const idle = glass ? "flow-idle stroke-sidebar-fg/45" : "flow-idle stroke-teal-soft/55";
+  const roverIdle = glass ? "flow-idle stroke-sidebar-fg/40" : "flow-idle stroke-umber/50";
   const badge = battOut ? "On battery" : solarOn && home > 0 ? "Solar" : "Idle";
 
   return (
@@ -38,7 +39,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         "relative",
         bare
           ? "h-full w-full"
-          : "overflow-hidden rounded-lg border border-teal/20 bg-gradient-to-br from-sand/35 via-paper-raised to-teal/[0.06] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.55)]",
+          : "overflow-hidden rounded-lg border border-teal/25 bg-gradient-to-br from-sand/55 via-paper-raised to-teal/[0.1] shadow-[inset_0_1px_0_rgb(255_255_255_/_0.55)]",
       )}
     >
       {bare ? null : (
@@ -73,7 +74,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
           />
           <path
             d={q(P.home, P.rover, 920, 300)}
-            className={cn("flow-line", idle)}
+            className={cn("flow-line", roverIdle)}
           />
           <path
             d={q(P.solar, P.battery, 340, 220)}

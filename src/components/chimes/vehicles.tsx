@@ -54,8 +54,8 @@ export function VehicleCard({
       className={cn(
         "flex items-center gap-3 rounded-md border px-4 py-4 backdrop-blur-sm",
         tone === "terra"
-          ? "border-terra/25 bg-gradient-to-br from-terra/[0.08] to-white/55"
-          : "border-teal/25 bg-gradient-to-br from-teal/[0.08] to-white/55",
+          ? "border-terra/35 bg-gradient-to-br from-terra/[0.16] via-sand/30 to-white/55"
+          : "border-teal/35 bg-gradient-to-br from-teal/[0.14] via-sand/25 to-white/55",
       )}
     >
       <span
