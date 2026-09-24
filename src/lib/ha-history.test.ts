@@ -2,13 +2,16 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   dayKeyFromStart,
+  daySpendGbp,
   daysFromStatistics,
   hoursFromHistory,
   localDayKey,
   normalizeHistoryResult,
+  splitGridImportForDay,
   type HaStatisticsBag,
 } from "./ha-history.ts";
 import type { HaMap } from "./ha.ts";
+import { DEFAULT_TARIFF } from "./octopus.ts";
 
 describe("ha history helpers", () => {
   const map: HaMap = {
@@ -116,5 +119,66 @@ describe("ha history helpers", () => {
     const today = week[week.length - 1];
     assert.equal(today.solar, 12.3);
     assert.equal(today.gridIn, 12); // 500 W mean → 12 kWh
+  });
+
+  it("splits hourly grid import into cheap vs peak using Intelligent Go window", () => {
+    const day = new Date(2026, 8, 23, 0, 0, 0, 0);
+    const key = localDayKey(day);
+    const rows = [];
+    for (let h = 0; h < 24; h++) {
+      const start = new Date(2026, 8, 23, h, 0, 0, 0);
+      // 1 kWh import every hour
+      rows.push({ start: start.getTime(), change: 1, mean: null, state: null });
+    }
+    const split = splitGridImportForDay(rows, key);
+    assert.ok(split);
+    // Cheap: 00–04 full (5) + 05 half (0.5) + 23 half (0.5) = 6
+    assert.equal(split!.lowKwh, 6);
+    assert.equal(split!.highKwh, 18);
+  });
+
+  it("day spend uses low×cheap + high×peak from hourly grid, not flat peak×total", () => {
+    const day = new Date(2026, 8, 23, 0, 0, 0, 0);
+    const key = localDayKey(day);
+    const rows = [];
+    for (let h = 0; h < 24; h++) {
+      rows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 1,
+        mean: null,
+        state: null,
+      });
+    }
+    // 6×0.07 + 18×0.226 = 0.42 + 4.068 = 4.49
+    assert.equal(daySpendGbp(24, key, rows, DEFAULT_TARIFF), 4.49);
+    assert.notEqual(daySpendGbp(24, key, rows, DEFAULT_TARIFF), Number((24 * 0.226).toFixed(2)));
+  });
+
+  it("daysFromStatistics prefers hourly grid split for cost", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const key = localDayKey(now);
+    const gridId = "sensor.myenergi_chimes_power_grid";
+    const solarId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = { solarTodayKwh: solarId, gridW: gridId };
+    const stats: HaStatisticsBag = {
+      [solarId]: [{ start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(), change: 5, mean: null }],
+      [gridId]: [{ start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(), change: 24, mean: null }],
+    };
+    const hourRows = [];
+    for (let h = 0; h < 24; h++) {
+      hourRows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 1,
+        mean: null,
+        state: null,
+      });
+    }
+    const week = daysFromStatistics(stats, liveMap, 7, now, {
+      hourStats: { [gridId]: hourRows },
+      rates: DEFAULT_TARIFF,
+    });
+    const today = week.find((d) => d.key === key)!;
+    assert.equal(today.gridIn, 24);
+    assert.equal(today.cost, 4.49); // not 24 * 0.226 = 5.42
   });
 });

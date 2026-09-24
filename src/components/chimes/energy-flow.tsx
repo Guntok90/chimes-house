@@ -1,16 +1,24 @@
 import type { LucideIcon } from "lucide-react";
-import { BatteryMedium, Car, Home, PlugZap, Sun, Zap } from "lucide-react";
+import { BatteryMedium, Car, Home, Sun, Zap } from "lucide-react";
 import { solarStatusHint } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 
+/**
+ * Default Energy Flow node positions (SVG viewBox 1000×560).
+ * Overview does not persist per-node placement — only the glass tile box
+ * (`chimes.overview.flow`). Driveway layout matches the house photo / Site
+ * scene: Range Rover on the left bay, Zappi (driveway charger) on the right.
+ */
 const P = {
   solar: { x: 500, y: 100 },
   grid: { x: 140, y: 258 },
   battery: { x: 355, y: 392 },
-  home: { x: 780, y: 180 },
-  zappi: { x: 680, y: 400 },
-  rangeRover: { x: 900, y: 400 },
+  home: { x: 800, y: 202 },
+  /** Left driveway bay — Range Rover (was off / front-garden). */
+  rangeRover: { x: 700, y: 430 },
+  /** Right driveway bay — Zappi / Cupra charger side. */
+  zappi: { x: 900, y: 430 },
 } as const;
 
 type Tone = "paper" | "glass";
@@ -43,14 +51,14 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
   const roverHint = !roverMapped
     ? status === "live"
       ? "no sensor"
-      : "waiting"
+      : "driveway"
     : roverOn
       ? "charging"
       : live.rangeRoverPlugged
         ? "plugged"
         : map.rangeRoverSoc
           ? "parked"
-          : "waiting";
+          : "driveway";
 
   return (
     <div
@@ -144,16 +152,16 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             markerStart={gridOut ? "url(#flow-arrow-teal)" : undefined}
           />
           <FlowPath
-            d={q(P.home, P.zappi, 720, 280)}
-            active={zappiOn}
+            d={q(P.home, P.rangeRover, 780, 320)}
+            active={roverOn}
             idle={idle}
             stroke="stroke-umber"
             fill="fill-umber"
             marker="url(#flow-arrow-umber)"
           />
           <FlowPath
-            d={q(P.home, P.rangeRover, 900, 260)}
-            active={roverOn}
+            d={q(P.home, P.zappi, 920, 300)}
+            active={zappiOn}
             idle={idle}
             stroke="stroke-umber"
             fill="fill-umber"
@@ -231,25 +239,23 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         />
         <Node
           tone={tone}
-          at="left-[68%] top-[71%]"
-          icon={PlugZap}
-          ring="border-umber"
-          value={`${live.zappiW} W`}
-          label="Zappi"
-          hint={
-            zappiOn ? "charging" : live.zappiPlugged ? "plugged" : "waiting"
-          }
-          on={zappiOn}
-        />
-        <Node
-          tone={tone}
-          at="left-[90%] top-[71%]"
+          at="left-[70%] top-[77%]"
           icon={Car}
           ring="border-umber"
           value={roverValue}
           label="Range Rover"
           hint={roverHint}
           on={roverOn || live.rangeRoverPlugged}
+        />
+        <Node
+          tone={tone}
+          at="left-[90%] top-[77%]"
+          icon={Zap}
+          ring="border-umber"
+          value={`${live.zappiW} W`}
+          label="Zappi"
+          hint={zappiOn ? "charging" : live.zappiPlugged ? "plugged in" : "driveway"}
+          on={zappiOn}
         />
       </div>
     </div>

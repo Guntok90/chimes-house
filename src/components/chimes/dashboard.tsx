@@ -12,7 +12,6 @@ import {
   Lightbulb,
   Sun,
   Tv,
-  Waves,
   Maximize2,
   Zap,
 } from "lucide-react";
@@ -21,6 +20,7 @@ import { useHouse, useLive } from "@/lib/house-store";
 import { BatteryView } from "./battery-view";
 import { ChargeView } from "./charge-view";
 import { EnergyView } from "./energy-view";
+import { GardenView } from "./garden-view";
 import { HistoryView } from "./history-view";
 import { Overview } from "./overview";
 import { SiteView } from "./site-view";
@@ -373,43 +373,6 @@ function HomeView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: st
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function GardenView({ on, toggle }: { on: Record<string, boolean>; toggle: (id: string) => void }) {
-  const status = useHouse((s) => s.status);
-  const map = useHouse((s) => s.map);
-  const mapped = (id: string) => status !== "live" || Boolean(map[id as keyof typeof map]);
-  return (
-    <div className="space-y-8">
-      <PageTitle>Garden</PageTitle>
-      <Room title="Back garden">
-        <Tile
-          id="pergola"
-          label="Pergola"
-          state={on.pergola}
-          onToggle={toggle}
-          icon={Sun}
-          available={mapped("pergola")}
-        />
-        <Tile
-          id="pond-1"
-          label="Pond 1"
-          state={on["pond-1"]}
-          onToggle={toggle}
-          icon={Waves}
-          available={mapped("pond-1")}
-        />
-        <Tile
-          id="pond-2"
-          label="Pond 2"
-          state={on["pond-2"]}
-          onToggle={toggle}
-          icon={Waves}
-          available={mapped("pond-2")}
-        />
-      </Room>
     </div>
   );
 }

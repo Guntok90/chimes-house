@@ -8,10 +8,12 @@ import {
   autoMap,
   credsForBoot,
   liveFromStates,
+  rateToGbpPerKwh,
   wsFailureMessage,
   type HaState,
 } from "./ha.ts";
 import { EMPTY_LIVE, SNAPSHOT, solarStatusHint } from "./house.ts";
+import { DEFAULT_TARIFF } from "./octopus.ts";
 
 function state(
   entity_id: string,
@@ -47,6 +49,7 @@ const CHIMES_PI: HaState[] = [
   state("sensor.myenergi_zappi_25435526_plug_status", "Not Connected"),
   state("sensor.myenergi_zappi_25435526_power_ct_internal", "0", "", "W"),
   state("sensor.myenergi_zappi_25435526_power_generation", "900", "Generation", "W"),
+  state("sensor.myenergi_zappi_25435526_energy_used_today", "6.35", "Energy used today", "kWh"),
   state("binary_sensor.octopus_off_peak", "on"),
   state("binary_sensor.octopus_intelligent_ready", "off"),
   state("person.stevie_w", "home"),
@@ -75,6 +78,8 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.zappiPlugged, "sensor.myenergi_zappi_25435526_plug_status");
     assert.equal(map.zappiW, "sensor.myenergi_chimes_power_charging");
     assert.notEqual(map.zappiW, "sensor.myenergi_zappi_25435526_power_generation");
+    assert.equal(map.zappiTodayKwh, "sensor.myenergi_zappi_25435526_energy_used_today");
+    assert.equal(map.rangeRoverTodayKwh, undefined);
     assert.equal(map.stevieHome, "person.stevie_w");
     assert.equal(map.offPeak, "binary_sensor.octopus_off_peak");
     assert.equal(map.intelligent, "binary_sensor.octopus_intelligent_ready");
@@ -103,16 +108,35 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.rangeRoverPlugged, false);
     assert.equal(map.rangeRoverW, undefined);
     assert.equal(map.rangeRoverSoc, undefined);
+    assert.equal(live.zappiTodayKwh, 6.35);
+    assert.equal(live.rangeRoverTodayKwh, null);
     assert.equal(live.stevieHome, true);
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
     assert.equal(live.sunAboveHorizon, true);
+    // No rate sensors on Pi inventory → fallback Intelligent Go constants.
+    assert.equal(live.cheapRateGbp, DEFAULT_TARIFF.lowGbpPerKwh);
+    assert.equal(live.peakRateGbp, DEFAULT_TARIFF.highGbpPerKwh);
     // houseW = solar + grid − battery − zappi = 1150 + 40 − (−380) − 0 = 1570
     assert.equal(live.houseW, deriveHouseW(1150, 40, -380, 0));
     assert.equal(live.houseW, 1570);
     assert.notEqual(live.solarTodayKwh, SNAPSHOT.solarTodayKwh);
     assert.notEqual(live.houseW, 7);
     assert.notEqual(live.houseW, SNAPSHOT.houseW);
+  });
+
+  it("maps Octopus cheap/peak rate sensors and normalises pence to £/kWh", () => {
+    const withRates: HaState[] = [
+      ...CHIMES_PI,
+      state("sensor.octopus_cheap_rate", "7", "Octopus cheap rate", "p/kWh"),
+      state("sensor.octopus_peak_rate", "0.226", "Octopus peak rate", "GBP/kWh"),
+    ];
+    const map = autoMap(withRates);
+    assert.equal(map.cheapRateGbp, "sensor.octopus_cheap_rate");
+    assert.equal(map.peakRateGbp, "sensor.octopus_peak_rate");
+    const live = liveFromStates(withRates, map, EMPTY_LIVE);
+    assert.equal(live.cheapRateGbp, 0.07);
+    assert.equal(live.peakRateGbp, 0.226);
   });
 
   it("maps preferred switch entity ids (kitchen stays unmapped)", () => {
@@ -246,6 +270,37 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.batteryW, -250);
     assert.equal(live.soc, 55);
   });
+
+  it("maps Zappi energy used today and leaves Range Rover null when missing", () => {
+    const states = [
+      state("sensor.myenergi_zappi_25435526_energy_used_today", "3.2", "", "kWh"),
+      state("select.myenergi_zappi_25435526_charge_mode", "Eco+"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.zappiTodayKwh, "sensor.myenergi_zappi_25435526_energy_used_today");
+    assert.equal(map.rangeRoverTodayKwh, undefined);
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.zappiTodayKwh, 3.2);
+    assert.equal(live.rangeRoverTodayKwh, null);
+  });
+
+  it("maps Range Rover daily kWh when a today energy entity exists", () => {
+    const states = [
+      state("sensor.range_rover_energy_charged_today", "9.5", "Range Rover charged today", "kWh"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_energy_charged_today");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverTodayKwh, 9.5);
+  });
+
+  it("converts Wh Zappi today sensors to kWh", () => {
+    const states = [
+      state("sensor.myenergi_zappi_25435526_energy_used_today", "2500", "", "Wh"),
+    ];
+    const live = liveFromStates(states, autoMap(states), EMPTY_LIVE);
+    assert.equal(live.zappiTodayKwh, 2.5);
+  });
 });
 
 describe("deriveHouseW energy balance", () => {
@@ -319,5 +374,13 @@ describe("Range Rover entity discovery", () => {
     assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(map.rangeRoverPlugged, undefined);
     assert.equal(PREFERRED.rangeRoverW?.length, 0);
+  });
+});
+
+describe("rateToGbpPerKwh", () => {
+  it("treats values > 1 as pence", () => {
+    assert.equal(rateToGbpPerKwh(7), 0.07);
+    assert.equal(rateToGbpPerKwh(22.6), 0.226);
+    assert.equal(rateToGbpPerKwh(0.08), 0.08);
   });
 });
