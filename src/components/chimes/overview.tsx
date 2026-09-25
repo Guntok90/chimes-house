@@ -19,6 +19,19 @@ import {
   type HourPoint,
 } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
+import {
+  GLASS_OPACITY_DEFAULT,
+  GLASS_OPACITY_KEY,
+  GLASS_OPACITY_MAX,
+  GLASS_OPACITY_MIN,
+  clampGlassOpacity,
+  clampOverviewBox,
+  glassBackdropBlurPx,
+  glassFill,
+  nudgeOverviewBoxPosition,
+  prefersManualOnlyBoxResize,
+  type OverviewBox,
+} from "@/lib/overview-glass";
 import { cn } from "@/lib/utils";
 import {
   ChartScroll,
@@ -29,18 +42,12 @@ import {
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
 
-type Box = { x: number; y: number; w: number; h: number };
+type Box = OverviewBox;
 type ChartRange = "day" | "week" | "month" | "year";
 
 /** Match Tailwind `md` — freeform tiles above; stacked scroll below. */
 const STACK_MQ = "(max-width: 767px)";
 
-const MIN_W = 300;
-const MIN_H = 220;
-const GLASS_OPACITY_KEY = "chimes.overview.glassOpacity";
-const GLASS_OPACITY_MIN = 0;
-const GLASS_OPACITY_MAX = 100;
-const GLASS_OPACITY_DEFAULT = 50;
 let zTop = 20;
 
 const RANGE_OPTS: { id: ChartRange; label: string }[] = [
@@ -50,18 +57,11 @@ const RANGE_OPTS: { id: ChartRange; label: string }[] = [
   { id: "year", label: "Year" },
 ];
 
-/** Teal-deep #1c3940 — glass fill only; content stays fully opaque. */
-function glassFill(pct: number): string {
-  return `rgb(28 57 64 / ${pct / 100})`;
-}
-
 function readGlassOpacity(): number {
   try {
     const raw = localStorage.getItem(GLASS_OPACITY_KEY);
     if (!raw) return GLASS_OPACITY_DEFAULT;
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return GLASS_OPACITY_DEFAULT;
-    return Math.min(GLASS_OPACITY_MAX, Math.max(GLASS_OPACITY_MIN, Math.round(n)));
+    return clampGlassOpacity(Number(raw));
   } catch {
     return GLASS_OPACITY_DEFAULT;
   }
@@ -69,7 +69,7 @@ function readGlassOpacity(): number {
 
 function writeGlassOpacity(pct: number) {
   try {
-    localStorage.setItem(GLASS_OPACITY_KEY, String(pct));
+    localStorage.setItem(GLASS_OPACITY_KEY, String(clampGlassOpacity(pct)));
   } catch {
     /* private mode */
   }
@@ -83,12 +83,28 @@ function useGlassOpacity() {
   }, []);
 
   function setAndPersist(next: number) {
-    const clamped = Math.min(GLASS_OPACITY_MAX, Math.max(GLASS_OPACITY_MIN, Math.round(next)));
+    const clamped = clampGlassOpacity(next);
     setOpacity(clamped);
     writeGlassOpacity(clamped);
   }
 
   return [opacity, setAndPersist] as const;
+}
+
+function viewportNow() {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+function detectManualOnlyResize() {
+  if (typeof window === "undefined") return false;
+  const coarse =
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(pointer: coarse)").matches;
+  return prefersManualOnlyBoxResize({
+    maxTouchPoints: navigator.maxTouchPoints ?? 0,
+    pointerCoarse: coarse,
+    userAgent: navigator.userAgent,
+  });
 }
 
 
@@ -154,7 +170,11 @@ export function Overview({ onClose }: { onClose: () => void }) {
         : range === "month"
           ? "28 days"
           : "12 months";
-  const tileStyle = { backgroundColor: glassFill(glassOpacity) } satisfies CSSProperties;
+  const tileStyle = {
+    backgroundColor: glassFill(glassOpacity),
+    backdropFilter: `blur(${glassBackdropBlurPx(glassOpacity)}px)`,
+    WebkitBackdropFilter: `blur(${glassBackdropBlurPx(glassOpacity)}px)`,
+  } satisfies CSSProperties;
 
   return (
     <div
@@ -184,6 +204,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
               House
             </div>
           </div>
+          <RateWindowBadge offPeak={live.offPeak} compact={stacked} />
         </div>
         <OverviewClock compact={stacked} />
         <div className="flex shrink-0 items-center gap-2 sm:gap-3">
@@ -236,6 +257,26 @@ export function Overview({ onClose }: { onClose: () => void }) {
         </>
       )}
     </div>
+  );
+}
+
+/** Live Octopus / off-peak window — green Cheap, amber Peak. Updates with WS bootstrap. */
+function RateWindowBadge({ offPeak, compact = false }: { offPeak: boolean; compact?: boolean }) {
+  return (
+    <span
+      role="status"
+      aria-live="polite"
+      aria-label={offPeak ? "Cheap rate window" : "Peak rate window"}
+      className={cn(
+        "shrink-0 rounded-md border px-2 py-1 text-[0.65rem] font-semibold uppercase tracking-widest tabular-nums",
+        compact ? "px-1.5 py-0.5 text-[0.6rem]" : "sm:px-2.5 sm:text-xs",
+        offPeak
+          ? "border-emerald-300/45 bg-emerald-500/30 text-emerald-100"
+          : "border-amber-300/50 bg-amber-500/35 text-amber-50",
+      )}
+    >
+      {offPeak ? "Cheap" : "Peak"}
+    </span>
   );
 }
 
@@ -294,7 +335,7 @@ function StackedTile({
     <div
       style={style}
       className={cn(
-        "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card backdrop-blur-xl",
+        "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card",
         tall === "chart" ? "h-[min(42dvh,20rem)] min-h-[14rem]" : "h-[min(52dvh,24rem)] min-h-[17.5rem]",
       )}
     >
@@ -329,6 +370,7 @@ function GlassTile({
   const tile = useRef<HTMLDivElement>(null);
   const mode = useRef<"drag" | "resize" | null>(null);
   const origin = useRef({ px: 0, py: 0, x: 0, y: 0, w: 0, h: 0 });
+  const manualOnly = useRef(false);
   const [box, setBox] = useState<Box>({ x: 40, y: 110, w: 420, h: 300 });
   const [grab, setGrab] = useState(false);
   const [z, setZ] = useState(10);
@@ -336,9 +378,27 @@ function GlassTile({
   useEffect(() => {
     // Restore the user's last size/position. Do not discard smaller Energy Flow
     // boxes — an old w<560 "stale" migration ignored saved sizes on every open.
+    manualOnly.current = detectManualOnlyResize();
     const saved = readBox(storageKey);
-    setBox(clamp(saved ?? fallback()));
-    const onResize = () => setBox((current) => clamp(current));
+    const vp = viewportNow();
+    const initial = saved ?? fallback();
+    // Touch/iPad: keep the exact saved size on reopen (no orientation clamp).
+    // Desktop: full clamp so oversize boxes still fit after a window shrink.
+    setBox(
+      manualOnly.current
+        ? nudgeOverviewBoxPosition(initial, vp)
+        : clampOverviewBox(initial, vp),
+    );
+    const onResize = () => {
+      setBox((current) => {
+        const nextVp = viewportNow();
+        // iPad / touch: never auto-mutate size (orientation, safe-area, keyboard).
+        // Desktop: full clamp so boxes stay usable after a window shrink.
+        return manualOnly.current
+          ? nudgeOverviewBoxPosition(current, nextVp)
+          : clampOverviewBox(current, nextVp);
+      });
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [storageKey, fallback]);
@@ -348,23 +408,31 @@ function GlassTile({
       if (!mode.current) return;
       const dx = event.clientX - origin.current.px;
       const dy = event.clientY - origin.current.py;
+      const vp = viewportNow();
       if (mode.current === "drag") {
+        const next = {
+          x: origin.current.x + dx,
+          y: origin.current.y + dy,
+          w: origin.current.w,
+          h: origin.current.h,
+        };
+        // Touch/iPad: drag must not shrink the box via viewport clamp.
         setBox(
-          clamp({
-            x: origin.current.x + dx,
-            y: origin.current.y + dy,
-            w: origin.current.w,
-            h: origin.current.h,
-          }),
+          manualOnly.current
+            ? nudgeOverviewBoxPosition(next, vp)
+            : clampOverviewBox(next, vp),
         );
       } else {
         setBox(
-          clamp({
-            x: origin.current.x,
-            y: origin.current.y,
-            w: origin.current.w + dx,
-            h: origin.current.h + dy,
-          }),
+          clampOverviewBox(
+            {
+              x: origin.current.x,
+              y: origin.current.y,
+              w: origin.current.w + dx,
+              h: origin.current.h + dy,
+            },
+            vp,
+          ),
         );
       }
     };
@@ -416,7 +484,7 @@ function GlassTile({
       ref={tile}
       style={{ ...style, left: box.x, top: box.y, width: box.w, height: box.h, zIndex: z }}
       className={cn(
-        "absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card backdrop-blur-xl",
+        "absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card",
         grab ? "cursor-grabbing" : handleOnly ? "" : "cursor-grab",
       )}
       onPointerDown={handleOnly ? undefined : (event) => begin(event, "drag")}
@@ -632,17 +700,6 @@ function defaultFlow(): Box {
     y: Math.max(88, window.innerHeight - h - 28),
     w,
     h,
-  };
-}
-
-function clamp(box: Box): Box {
-  const w = Math.min(Math.max(MIN_W, box.w), Math.max(MIN_W, window.innerWidth - 24));
-  const h = Math.min(Math.max(MIN_H, box.h), Math.max(MIN_H, window.innerHeight - 24));
-  return {
-    w,
-    h,
-    x: Math.min(Math.max(-w + 72, box.x), window.innerWidth - 72),
-    y: Math.min(Math.max(0, box.y), window.innerHeight - 56),
   };
 }
 
