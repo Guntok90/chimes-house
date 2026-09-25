@@ -593,7 +593,7 @@ function OverviewGraph({
             <Key color={METER_COLORS.house} label="House" />
             <Key color={METER_COLORS.battery} label="Battery" />
             <Key color={METER_COLORS.grid} label="Grid" />
-            {showCars ? <Key color={METER_COLORS.cars} label="Cars" /> : null}
+            {showCars ? <Key color={METER_COLORS.cars} label="Cars (+ into vehicle)" /> : null}
             {range === "day" ? <Key color={METER_COLORS.soc} label="SOC" dashed /> : null}
           </div>
         </>
