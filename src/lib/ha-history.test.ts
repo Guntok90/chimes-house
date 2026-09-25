@@ -354,4 +354,100 @@ describe("ha history helpers", () => {
     assert.ok(parts.peak < 5);
     assert.ok(parts.total < 5);
   });
+
+  it("daily periodValue never treats state watts / lifetime sum as gridIn kWh", () => {
+    // Round-4 blow-up: change:0, mean missing, state ≈ 3000 W → was read as 3000 kWh,
+    // hourly TOU all-zero → 75% peak blend → Peak £ ≈ 3000×0.75×0.226 ≈ £508.
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const key = localDayKey(now);
+    const gridId = "sensor.myenergi_chimes_power_grid";
+    const solarId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = { solarTodayKwh: solarId, gridW: gridId };
+
+    const hourRows = [];
+    for (let h = 0; h < 24; h++) {
+      hourRows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 0,
+        mean: 0,
+        state: 3000,
+      });
+    }
+    const stats: HaStatisticsBag = {
+      [solarId]: [{ start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(), change: 5, mean: null }],
+      [gridId]: [
+        {
+          start: new Date(2026, 8, 23, 0, 0, 0, 0).getTime(),
+          change: 0,
+          mean: null,
+          state: 3000,
+          sum: 128450,
+        },
+      ],
+    };
+    const week = daysFromStatistics(stats, liveMap, 7, now, {
+      hourStats: { [gridId]: hourRows },
+      rates: DEFAULT_TARIFF,
+    });
+    const today = week.find((d) => d.key === key)!;
+    assert.equal(today.gridIn, 0);
+    assert.equal(today.costOffPeak, 0);
+    assert.equal(today.costPeak, 0);
+    assert.equal(today.cost, 0);
+    assert.ok(today.cost < 50); // must never be hundreds
+  });
+
+  it("refuses watts-as-kWh daily gridIn when hourly TOU is unusable (no £hundreds)", () => {
+    // Same failure mode without hour mean: daily state watts + empty hourly split
+    // used to fall back to splitDailyImportByWindow(3000) → Peak £ ≈ £508.
+    const day = new Date(2026, 8, 23, 0, 0, 0, 0);
+    const key = localDayKey(day);
+    const hourRows = [];
+    for (let h = 0; h < 24; h++) {
+      hourRows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 0,
+        mean: null,
+        state: 3000,
+      });
+    }
+    const parts = daySpendPartsGbp(3000, key, hourRows, DEFAULT_TARIFF);
+    assert.equal(parts.offPeak, 0);
+    assert.equal(parts.peak, 0);
+    assert.equal(parts.total, 0);
+    const exploded = Number((3000 * 0.75 * DEFAULT_TARIFF.highGbpPerKwh).toFixed(2));
+    assert.ok(exploded > 100);
+    assert.ok(parts.total < 10);
+  });
+
+  it("still prices large monthly-scale import when no hourly series exists", () => {
+    // monthsFromStatistics has no hour rows; 400 kWh/month is normal — must not
+    // be zeroed by the daily watts-as-kWh guard.
+    const parts = daySpendPartsGbp(400, "2026-09", undefined, DEFAULT_TARIFF);
+    assert.ok(parts.total > 50);
+    assert.equal(parts.total, Number((parts.offPeak + parts.peak).toFixed(2)));
+  });
+
+  it("plausible overnight-only day stays single-digit £ (cheap + peak = total)", () => {
+    // ~15 kWh overnight import, almost no daytime — typical Intelligent Go night.
+    const day = new Date(2026, 8, 23, 0, 0, 0, 0);
+    const key = localDayKey(day);
+    const hourRows = [];
+    for (let h = 0; h < 24; h++) {
+      const mean = h >= 0 && h <= 4 ? 3000 : 0;
+      hourRows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        change: 0,
+        mean,
+        state: mean,
+      });
+    }
+    const parts = daySpendPartsGbp(15, key, hourRows, DEFAULT_TARIFF);
+    // 5h × 3 kWh all cheap → 15 × 0.07 = 1.05
+    assert.equal(parts.offPeak, 1.05);
+    assert.equal(parts.peak, 0);
+    assert.equal(parts.total, 1.05);
+    assert.equal(parts.total, Number((parts.offPeak + parts.peak).toFixed(2)));
+    assert.ok(parts.total < 20);
+  });
 });
