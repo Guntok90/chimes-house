@@ -50,15 +50,17 @@ Mapped when present (preferred ids first):
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
 | Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
-| Range Rover     | Fuzzy when id/name contains `range_rover` / `land_rover` / `jlr` (W, SOC, plug). Plug also falls back to Front garden **Range Rover Hybrid** `switch.*` (on = charging path). No invented Cupra/VAG ids on this node. |
-| Range Rover kWh | Daily energy / Hybrid “today’s consumption” when present; otherwise “—” on Charge  |
+| Range Rover     | Meross Hybrid preferred: plug = cable sensor → `switch.range_rover_hybrid` (on = charging path) → ambiguous plug binary last. Power = `sensor.range_rover_hybrid_current_consumption`. No Cupra/VAG ids. |
+| Range Rover kWh | `sensor.range_rover_hybrid_today_s_consumption` (Meross today) when present — same idea as Zappi `energy_used_today`; else “—” |
 | Cupra / VAG     | Driveway Cupra stays on the **Zappi** path (`zappiPlugged` / `zappiW` / today). Do not remap VAG `*_plug_connected` onto Range Rover. |
+| Cheap window    | `binary_sensor.octopus_off_peak` (and Intelligent dispatch/ready binaries) — UI: Cheap Energy Available / Cheap window |
+| EV Ready by     | `select.octopus_energy_<DEVICE_ID>_intelligent_target_time` (or `time.*_intelligent_target_time`) via `select.select_option` / `time.set_value` |
 | Stevie          | `person.stevie_w`                                                                |
 
 If Range Rover Plug/Today still show “—” live, add (or rename) HA entities so the id/friendly name includes `range_rover` / `land_rover` / `jlr`, for example:
 
-- Plug: `binary_sensor.*_charging_cable_connected` / `*_plug_connected` / `*_plugged_in`, or leave the Front garden **Range Rover Hybrid** switch named with both tokens
-- Today kWh: `sensor.*_energy_charged_today` / Hybrid `*_today_s_consumption` (kWh), same naming rule
+- Plug: `binary_sensor.*_charging_cable_connected` / `*_plug_connected` / `*_plugged_in`, or leave the Front garden **Range Rover Hybrid** Meross switch named with both tokens (preferred over stale `*_plug_status` binaries that stay off on AC charge)
+- Today kWh: Hybrid `*_today_s_consumption` (kWh) or `*_energy_charged_today`, same naming rule
 - Optional: a utility meter that resets at midnight feeding today’s kWh
 
 Cupra portal / VAG Connect SOC work is out of scope here — keep those entities on the Zappi side.
@@ -81,7 +83,7 @@ When `HA_TOKEN` is set, the next load uses the server token again. Chimes maps H
 
 Energy → **Custom rates** lets Steve set cheap/off-peak and peak/high £/kWh. History spend, Energy cost charts, and Charge “today cost” use these values.
 
-**They override dashboard maths only.** They do not change Octopus Intelligent Go, Dispatch, or any charge automation (including `automation.charge_cars_at_off_peak`). Huawei/inverter entities are never written.
+**They override dashboard maths only.** They do not change Octopus Intelligent Go, Cheap Energy Available / EV Ready by writes on their own entities, or any charge automation (including `automation.charge_cars_at_off_peak`). Huawei/inverter entities are never written from the tariff editor.
 
 ### Persistence
 
@@ -129,10 +131,10 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
 | Home     | 24h energy graph, area-grouped switches (no Spares heading; hides dnd / myenergi / child lock / enable), Stevie |
-| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover status; Dispatch read-only) + **Battery** charge limits (grid/solar cutoffs + min SOC) + inverter / Octopus + custom £/kWh rates |
+| Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover + Cheap Energy Available + EV Ready by) + **Battery** charge limits (grid/solar cutoffs + min SOC) + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
-| Battery  | SOC / charge / discharge + Grid / Solar cutoffs + min SOC |
-| Charge   | Zappi Eco+ mode control, Range Rover status, Intelligent (read-only) |
+| Battery  | SOC / charge / discharge + Grid / Solar cutoffs + min SOC (Allow vs actively charging clarified) |
+| Charge   | Zappi Eco+ mode, Range Rover status, Cheap Energy Available (read-only), EV Ready by Apply |
 | History  | 7 / 28 day solar, house, grid, spend                   |
 | Garden   | Front (Willow Tree + Range Rover Hybrid switches) · Back (Pergola, ponds, Frank) |
 | House    | Lights, plugs, **Pi connection**, sign out             |

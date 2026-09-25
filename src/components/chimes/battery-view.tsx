@@ -87,6 +87,9 @@ export function BatteryView() {
           ) : (
             <NoHistoryYet label="power chart" />
           )}
+          <p className="mt-2 text-xs text-ink-soft">
+            + charging into pack · − discharging to the house
+          </p>
         </section>
       </div>
 
@@ -98,7 +101,16 @@ export function BatteryView() {
             <Row label="Mode" value={live.inverterStatus} />
             <Row label="Power" value={`${live.batteryW} W`} />
             <Row label="Through inverter" value={`${live.inverterW} W`} />
-            <Row label="Charge from grid" value={live.gridCharge ? "Allowed" : "Off"} />
+            <Row
+              label="Charge from grid"
+              value={
+                live.gridCharge
+                  ? live.batteryW > 30
+                    ? "Allowed · actively charging"
+                    : "Allowed · not charging yet"
+                  : "Off"
+              }
+            />
             <Row
               label="Grid charge cutoff"
               value={

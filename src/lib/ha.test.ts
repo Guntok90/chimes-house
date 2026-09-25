@@ -26,7 +26,9 @@ import {
   parsePlugConnected,
   wsFailureMessage,
   zappiModeOptions,
+  evReadyByOptions,
   DEFAULT_ZAPPI_MODES,
+  DEFAULT_EV_READY_BY_OPTIONS,
   type HaEntityReg,
   type HaState,
 } from "./ha.ts";
@@ -70,6 +72,11 @@ const CHIMES_PI: HaState[] = [
   state("sensor.myenergi_zappi_25435526_energy_used_today", "6.35", "Energy used today", "kWh"),
   state("binary_sensor.octopus_off_peak", "on"),
   state("binary_sensor.octopus_intelligent_ready", "off"),
+  state(
+    "select.octopus_energy_a_account_intelligent_target_time",
+    "07:00",
+    "Intelligent target time",
+  ),
   state("person.stevie_w", "home"),
   state("sun.sun", "above_horizon"),
   state("switch.smart_switch_4", "on", "Lamp"),
@@ -80,6 +87,19 @@ const CHIMES_PI: HaState[] = [
   state("switch.pergola_switch_1", "off", "Pergola"),
   state("switch.pond_1_switch_1", "on", "Pond 1"),
   state("switch.pond_2_switch_1", "off", "Pond 2"),
+  state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
+  state(
+    "sensor.range_rover_hybrid_current_consumption",
+    "0",
+    "Range Rover Hybrid Current consumption",
+    "W",
+  ),
+  state(
+    "sensor.range_rover_hybrid_today_s_consumption",
+    "3.2",
+    "Range Rover Hybrid Today's consumption",
+    "kWh",
+  ),
   state("switch.batteries_charge_from_grid", "on", "Charge from grid"),
   state("number.batteries_grid_charge_cutoff_soc", "85", "Grid charge cutoff SOC", "%"),
   state("number.batteries_charging_cutoff_capacity", "100", "End-of-charge SOC", "%"),
@@ -101,10 +121,16 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.zappiW, "sensor.myenergi_chimes_power_charging");
     assert.notEqual(map.zappiW, "sensor.myenergi_zappi_25435526_power_generation");
     assert.equal(map.zappiTodayKwh, "sensor.myenergi_zappi_25435526_energy_used_today");
-    assert.equal(map.rangeRoverTodayKwh, undefined);
+    assert.equal(map.rangeRoverPlugged, "switch.range_rover_hybrid");
+    assert.equal(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
+    assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_hybrid_today_s_consumption");
     assert.equal(map.stevieHome, "person.stevie_w");
     assert.equal(map.offPeak, "binary_sensor.octopus_off_peak");
     assert.equal(map.intelligent, "binary_sensor.octopus_intelligent_ready");
+    assert.equal(
+      map.evReadyBy,
+      "select.octopus_energy_a_account_intelligent_target_time",
+    );
     assert.equal(map.gridCharge, "switch.batteries_charge_from_grid");
     assert.equal(map.gridChargeCutoffSoc, "number.batteries_grid_charge_cutoff_soc");
     assert.equal(map.solarChargeCutoffSoc, "number.batteries_charging_cutoff_capacity");
@@ -131,11 +157,12 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.zappiW, 0);
     assert.equal(live.rangeRoverW, 0);
     assert.equal(live.rangeRoverSoc, 0);
-    assert.equal(live.rangeRoverPlugged, false);
-    assert.equal(map.rangeRoverW, undefined);
+    assert.equal(live.rangeRoverPlugged, true);
+    assert.equal(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
     assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(live.zappiTodayKwh, 6.35);
-    assert.equal(live.rangeRoverTodayKwh, null);
+    assert.equal(live.rangeRoverTodayKwh, 3.2);
+    assert.equal(live.evReadyBy, "07:00");
     assert.equal(live.stevieHome, true);
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
@@ -821,7 +848,7 @@ describe("Front garden switch filter", () => {
 describe("Range Rover entity discovery", () => {
   it("maps Range Rover power/SOC/plug only when entity names already say so", () => {
     const states: HaState[] = [
-      ...CHIMES_PI,
+      ...CHIMES_PI.filter((s) => !s.entity_id.includes("range_rover")),
       state("sensor.range_rover_battery", "64", "Range Rover battery", "%"),
       state("sensor.range_rover_charging_power", "0", "Range Rover charging power", "W"),
       state("binary_sensor.range_rover_plug_status", "off", "Range Rover plug"),
@@ -861,7 +888,11 @@ describe("Range Rover entity discovery", () => {
 
   it("falls back to Range Rover Hybrid switch for plug when no cable sensor exists", () => {
     const states: HaState[] = [
-      ...CHIMES_PI,
+      ...CHIMES_PI.filter(
+        (s) =>
+          !s.entity_id.includes("range_rover_hybrid") &&
+          !s.entity_id.includes("range_rover"),
+      ),
       state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
       state(
         "sensor.range_rover_hybrid_current_consumption",
@@ -878,9 +909,59 @@ describe("Range Rover entity discovery", () => {
     assert.equal(live.rangeRoverW, 2200);
   });
 
+  it("prefers Hybrid Meross switch over ambiguous plug_status binary that stays off", () => {
+    const states: HaState[] = [
+      state("binary_sensor.range_rover_plug_status", "off", "Range Rover plug"),
+      state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
+      state(
+        "sensor.range_rover_hybrid_current_consumption",
+        "0",
+        "Range Rover Hybrid Current consumption",
+        "W",
+      ),
+      state(
+        "sensor.range_rover_hybrid_today_s_consumption",
+        "1.5",
+        "Range Rover Hybrid Today's consumption",
+        "kWh",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, "switch.range_rover_hybrid");
+    assert.notEqual(map.rangeRoverPlugged, "binary_sensor.range_rover_plug_status");
+    assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_hybrid_today_s_consumption");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverPlugged, true);
+    assert.equal(live.rangeRoverTodayKwh, 1.5);
+  });
+
+  it("prefers dedicated cable sensor over Hybrid switch", () => {
+    const states: HaState[] = [
+      state(
+        "binary_sensor.land_rover_charging_cable_connected",
+        "on",
+        "Land Rover charging cable connected",
+      ),
+      state("switch.range_rover_hybrid", "off", "Range Rover Hybrid"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverPlugged, "binary_sensor.land_rover_charging_cable_connected");
+    assert.equal(liveFromStates(states, map, EMPTY_LIVE).rangeRoverPlugged, true);
+  });
+
+  it("treats Range Rover charge power as plugged even when plug binary is off", () => {
+    const states: HaState[] = [
+      state("binary_sensor.land_rover_charging_cable_connected", "off", "Cable"),
+      state("sensor.range_rover_hybrid_current_consumption", "1800", "", "W"),
+    ];
+    const map = autoMap(states);
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverW, 1800);
+    assert.equal(live.rangeRoverPlugged, true);
+  });
+
   it("does not map Cupra / VAG Connect entities onto Range Rover", () => {
     const states: HaState[] = [
-      ...CHIMES_PI,
       state("binary_sensor.cupra_born_plug_connected", "on", "Cupra plug connected"),
       state("sensor.cupra_born_battery", "80", "Cupra battery", "%"),
       state("sensor.cupra_born_charging_power", "7000", "Cupra charging power", "W"),
@@ -894,11 +975,30 @@ describe("Range Rover entity discovery", () => {
   });
 
   it("does not invent brand entities when none are present", () => {
-    const map = autoMap(CHIMES_PI);
+    const bare = CHIMES_PI.filter(
+      (s) => !s.entity_id.includes("range_rover") && !s.attributes.friendly_name?.toString().toLowerCase().includes("range rover"),
+    );
+    const map = autoMap(bare);
     assert.equal(map.rangeRoverW, undefined);
     assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(map.rangeRoverPlugged, undefined);
-    assert.equal(PREFERRED.rangeRoverW?.length, 0);
+    assert.equal(PREFERRED.rangeRoverW?.[0], "sensor.range_rover_hybrid_current_consumption");
+  });
+
+  it("maps Octopus Intelligent EV ready-by select and options", () => {
+    const states: HaState[] = [
+      state(
+        "select.octopus_energy_xyz_intelligent_target_time",
+        "08:30",
+        "Intelligent target time",
+      ),
+    ];
+    states[0]!.attributes.options = ["04:00", "07:00", "08:30", "11:00"];
+    const map = autoMap(states);
+    assert.equal(map.evReadyBy, "select.octopus_energy_xyz_intelligent_target_time");
+    assert.equal(liveFromStates(states, map, EMPTY_LIVE).evReadyBy, "08:30");
+    assert.deepEqual(evReadyByOptions(states, map), ["04:00", "07:00", "08:30", "11:00"]);
+    assert.deepEqual(evReadyByOptions([], {}), [...DEFAULT_EV_READY_BY_OPTIONS]);
   });
 });
 

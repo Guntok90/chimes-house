@@ -85,7 +85,7 @@ export function EnergyView() {
             <Row label="Active power" value={`${LIVE.inverterW} W`} />
             <Row label="Input" value={`${LIVE.solarNowW} W`} />
             <Row label="Daily yield" value={`${LIVE.solarTodayKwh} kWh`} />
-            <Row label="Grid charge" value={LIVE.gridCharge ? "On" : "Off"} />
+            <Row label="Grid charge" value={LIVE.gridCharge ? "Allowed" : "Off"} />
           </Surface>
         </section>
       </div>
@@ -115,7 +115,10 @@ export function EnergyView() {
           <SectionLabel tone="umber">Octopus</SectionLabel>
           <Surface tone="umber" className="mb-3 px-5">
             <Row label="Tariff" value="Intelligent" />
-            <Row label="Window" value={LIVE.offPeak ? "Off-peak now" : "Peak"} />
+            <Row
+              label="Cheap window"
+              value={LIVE.offPeak ? "On (cheap energy available)" : "Off (peak rate)"}
+            />
             <Row label="Cheap rate" value={`£${tariffs.cheap.toFixed(3)}/kWh`} />
             <Row label="Peak rate" value={`£${tariffs.peak.toFixed(3)}/kWh`} />
             <Row

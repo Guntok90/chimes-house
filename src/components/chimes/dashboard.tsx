@@ -241,7 +241,7 @@ function StatusChips() {
                 : "Demo"}
         </span>
         <span className="rounded-full bg-sidebar-fg/12 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg/80">
-          {live.offPeak ? "Off-peak" : "Peak"}
+          {live.offPeak ? "Cheap window" : "Peak rate"}
         </span>
         <span className="rounded-full bg-sidebar-fg/12 px-2 py-1 text-xs uppercase tracking-wide text-sidebar-fg/80">
           Zappi {live.zappiMode}
@@ -359,6 +359,7 @@ function HomeView() {
                 <ChartKey color={legend.house} label="House" />
                 <ChartKey color={legend.battery} label="Battery" />
                 <ChartKey color={legend.grid} label="Grid" />
+                <ChartKey color={legend.cars} label="Cars (+ into vehicle)" />
                 <ChartKey color={legend.soc} label="SOC" dashed />
               </div>
             </div>
