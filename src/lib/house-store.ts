@@ -17,7 +17,10 @@ import {
   chargeLimitMetaMap,
   credsForBoot,
   demoAreaSwitches,
+  demoFanControl,
   evReadyByOptions,
+  fanControlFromStates,
+  fanLevelToPercentage,
   haWriteFailureMessage,
   isHaTimeoutError,
   readCreds,
@@ -27,6 +30,7 @@ import {
   zappiModeOptions,
   type AreaSwitch,
   type ChargeLimitKey,
+  type FanControl,
   type HaArea,
   type HaBootstrapResponse,
   type HaCreds,
@@ -141,6 +145,8 @@ type Store = {
   switches: Record<string, boolean>;
   /** All controllable switches/lights by HA area (Home). */
   areaSwitches: AreaSwitch[];
+  /** Curated Home Fan tile (on/off + speed). Unmapped when live ids missing. */
+  fanControl: FanControl;
   status: Status;
   error?: string;
   map: HaMap;
@@ -190,6 +196,12 @@ type Store = {
   applyEvReadyBy: (time: string) => Promise<boolean>;
   /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
   toggleEntity: (entityId: string) => void;
+  /** Home Fan on/off (fan.turn_on / turn_off, or demo). */
+  toggleFan: () => void;
+  /** Home Fan discrete speed level (1–N). */
+  setFanSpeedLevel: (level: number) => void;
+  /** Optional Tuya fan light toggle when mapped. */
+  toggleFanLight: () => void;
   /** Save custom cheap/peak £/kWh — HA helpers when mapped, else localStorage. */
   setTariffs: (patch: Partial<TariffRates>) => Promise<boolean>;
   refreshHistory: () => Promise<void>;
@@ -418,6 +430,7 @@ export const useHouse = create<Store>((set, get) => {
     live: { ...SNAPSHOT },
     switches: {},
     areaSwitches: demoAreaSwitches({}),
+    fanControl: demoFanControl(),
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
@@ -460,6 +473,7 @@ export const useHouse = create<Store>((set, get) => {
               status: "demo",
               live: { ...SNAPSHOT },
               areaSwitches: demoAreaSwitches({}),
+              fanControl: demoFanControl(),
               tariffs: resolveTariffs(null, readLocalTariffs()),
               error: undefined,
               ...emptyHistory(),
@@ -577,6 +591,7 @@ export const useHouse = create<Store>((set, get) => {
         if (tariffs.source === "ha") writeLocalTariffs(tariffs);
         set({
           areaSwitches: rebuildAreaSwitches(list),
+          fanControl: fanControlFromStates(list, mapped),
           chargeLimitMeta: chargeLimitMetaMap(list, mapped),
           zappiModeOptions: zappiModeOptions(list, mapped),
           evReadyByOptions: evReadyByOptions(list, mapped),
@@ -734,6 +749,7 @@ export const useHouse = create<Store>((set, get) => {
         status: "demo",
         live: { ...SNAPSHOT },
         areaSwitches: demoAreaSwitches({}),
+        fanControl: demoFanControl(),
         error: undefined,
         writeError: undefined,
         writePending: undefined,
@@ -1086,6 +1102,75 @@ export const useHouse = create<Store>((set, get) => {
         void socket.call(entityId, nextOn);
       }
     },
+
+    toggleFan() {
+      const { fanControl, status } = get();
+      if (!fanControl.available || !fanControl.entityId) return;
+      const nextOn = !fanControl.on;
+      const level = fanControl.speedLevel && fanControl.speedLevel > 0 ? fanControl.speedLevel : 2;
+      const nextPct = nextOn ? fanLevelToPercentage(level, fanControl.speedCount) : 0;
+      set({
+        fanControl: {
+          ...fanControl,
+          on: nextOn,
+          percentage: nextPct,
+          speedLevel: nextOn ? level : null,
+        },
+      });
+      if (fanControl.entityId.startsWith("demo.")) return;
+      if (status === "live" && readCreds()) {
+        void socket.call(fanControl.entityId, nextOn);
+      }
+    },
+
+    setFanSpeedLevel(level) {
+      const { fanControl, status } = get();
+      if (!fanControl.available || !fanControl.entityId) return;
+      if (fanControl.speedMode === "none") return;
+      const count = Math.max(2, fanControl.speedCount);
+      const clamped = Math.min(count, Math.max(1, Math.round(level)));
+      const pct = fanLevelToPercentage(clamped, count);
+      set({
+        fanControl: {
+          ...fanControl,
+          on: true,
+          percentage: pct,
+          speedLevel: clamped,
+        },
+      });
+      if (fanControl.entityId.startsWith("demo.")) return;
+      if (status !== "live" || !readCreds()) return;
+
+      if (fanControl.speedEntityId && fanControl.speedMode === "select") {
+        const option =
+          fanControl.speedOptions[clamped - 1] ??
+          fanControl.speedOptions.find((o) => o.includes(String(clamped))) ??
+          String(clamped);
+        void socket.setSelect(fanControl.speedEntityId, option);
+        if (!fanControl.on) void socket.call(fanControl.entityId, true);
+        return;
+      }
+      if (fanControl.speedEntityId && fanControl.speedMode === "number") {
+        // Prefer writing the discrete level (Tuya 1–N) when the helper max looks small.
+        void socket.setNumber(fanControl.speedEntityId, clamped);
+        if (!fanControl.on) void socket.call(fanControl.entityId, true);
+        return;
+      }
+      if (fanControl.entityId.startsWith("fan.")) {
+        void socket.setFanPercentage(fanControl.entityId, pct);
+      }
+    },
+
+    toggleFanLight() {
+      const { fanControl, status } = get();
+      if (!fanControl.available || !fanControl.lightEntityId) return;
+      const nextOn = !fanControl.lightOn;
+      set({ fanControl: { ...fanControl, lightOn: nextOn } });
+      if (fanControl.lightEntityId.startsWith("demo.")) return;
+      if (status === "live" && readCreds()) {
+        void socket.call(fanControl.lightEntityId, nextOn);
+      }
+    },
   };
 });
 
@@ -1117,6 +1202,7 @@ async function refreshRegistries() {
   if (useHouse.getState().status !== "live") return;
   useHouse.setState({
     areaSwitches: rebuildAreaSwitches(lastStates),
+    fanControl: fanControlFromStates(lastStates, useHouse.getState().map),
   });
 }
 

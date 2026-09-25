@@ -3,6 +3,7 @@ import {
   BatteryMedium,
   Box,
   Car,
+  Fan,
   Fish,
   History,
   Home,
@@ -20,7 +21,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HOURS, usesDemoCharts } from "@/lib/house";
-import { groupSwitchesByArea, SPARES_AREA, type AreaSwitch } from "@/lib/ha";
+import { groupSwitchesByArea, SPARES_AREA, type AreaSwitch, type FanControl } from "@/lib/ha";
 import { useHouse, useLive } from "@/lib/house-store";
 import { BatteryView } from "./battery-view";
 import { ChargeView } from "./charge-view";
@@ -328,7 +329,11 @@ function HomeView() {
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyHours = useHouse((s) => s.historyHours);
   const areaSwitches = useHouse((s) => s.areaSwitches);
+  const fanControl = useHouse((s) => s.fanControl);
   const toggleEntity = useHouse((s) => s.toggleEntity);
+  const toggleFan = useHouse((s) => s.toggleFan);
+  const setFanSpeedLevel = useHouse((s) => s.setFanSpeedLevel);
+  const toggleFanLight = useHouse((s) => s.toggleFanLight);
 
   const liveMode = !usesDemoCharts(status);
   const graphData = liveMode ? historyHours : HOURS;
@@ -369,6 +374,13 @@ function HomeView() {
         )}
       </section>
 
+      <FanHomeTile
+        fan={fanControl}
+        onToggle={toggleFan}
+        onSpeed={setFanSpeedLevel}
+        onLight={toggleFanLight}
+      />
+
       {groups.map(({ area, items }) => (
         <Room
           key={area}
@@ -406,6 +418,117 @@ function HomeView() {
   );
 }
 
+function FanHomeTile({
+  fan,
+  onToggle,
+  onSpeed,
+  onLight,
+}: {
+  fan: FanControl;
+  onToggle: () => void;
+  onSpeed: (level: number) => void;
+  onLight: () => void;
+}) {
+  const active = fan.available && fan.on;
+  const levels = Array.from({ length: Math.max(3, fan.speedCount) }, (_, i) => i + 1);
+  const hasSpeed = fan.available && fan.speedMode !== "none";
+  const hasLight = fan.available && Boolean(fan.lightEntityId);
+
+  return (
+    <section>
+      <SectionLabel>Fan</SectionLabel>
+      <Surface className="max-w-lg p-4">
+        <div className="flex items-start gap-3">
+          <span
+            className={cn(
+              "grid size-9 shrink-0 place-items-center rounded-sm",
+              !fan.available
+                ? "bg-paper-deep text-ink-soft"
+                : active
+                  ? "bg-terra/15 text-terra"
+                  : "bg-teal/10 text-teal",
+            )}
+          >
+            <Fan className="size-4" strokeWidth={1.7} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">{fan.label}</div>
+            {!fan.available ? (
+              <p className="mt-1 text-sm text-ink-soft">
+                Not mapped — Smart Life / Tuya Fan needs a <code className="text-xs">fan.*</code>{" "}
+                entity on the Pi (see README). Speed 1–3 follows once HA exposes percentage or a
+                speed helper.
+              </p>
+            ) : (
+              <p className="mt-1 text-sm tabular-nums text-ink-soft">
+                {active
+                  ? hasSpeed && fan.speedLevel != null
+                    ? `On · Speed ${fan.speedLevel}`
+                    : "On"
+                  : "Off"}
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            disabled={!fan.available}
+            onClick={onToggle}
+            className={cn(
+              "min-h-10 shrink-0 rounded-sm px-3 text-sm font-medium transition-colors",
+              !fan.available
+                ? "cursor-not-allowed bg-paper-deep text-ink-soft opacity-70"
+                : active
+                  ? "bg-terra/15 text-terra"
+                  : "bg-teal/10 text-teal",
+            )}
+          >
+            {fan.available ? (active ? "On" : "Off") : "—"}
+          </button>
+        </div>
+        {hasSpeed ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {levels.map((level) => {
+              const selected = active && fan.speedLevel === level;
+              return (
+                <button
+                  key={level}
+                  type="button"
+                  onClick={() => onSpeed(level)}
+                  className={cn(
+                    "min-h-9 rounded-sm px-3 text-sm font-medium transition-colors",
+                    selected
+                      ? "bg-paper-raised text-ink shadow-sm"
+                      : "bg-paper-deep text-ink-soft hover:text-ink",
+                  )}
+                >
+                  Speed {level}
+                </button>
+              );
+            })}
+          </div>
+        ) : fan.available ? (
+          <p className="mt-3 text-xs text-ink-soft">
+            Speed not mapped — enable the Tuya fan device class or add{" "}
+            <code>number.*_speed</code> / <code>select.*_speed</code> (README).
+          </p>
+        ) : null}
+        {hasLight ? (
+          <button
+            type="button"
+            onClick={onLight}
+            className={cn(
+              "mt-3 min-h-9 rounded-sm px-3 text-sm font-medium transition-colors",
+              fan.lightOn ? "bg-terra/15 text-terra" : "bg-paper-deep text-ink-soft",
+            )}
+          >
+            Fan light {fan.lightOn ? "On" : "Off"}
+          </button>
+        ) : null}
+      </Surface>
+    </section>
+  );
+}
+
 function ChartKey({
   color,
   label,
@@ -433,8 +556,12 @@ function iconForSwitch(sw: AreaSwitch): LucideIcon {
   if (blob.includes("fish") || blob.includes("aquarium")) return Fish;
   if (blob.includes("telly") || blob.includes("tv") || blob.includes("television")) return Tv;
   if (blob.includes("lamp")) return Lamp;
-  if (blob.includes("kitchen") || blob.includes("light")) return Lightbulb;
-  if (sw.area === SPARES_AREA || blob.includes("spare") || blob.includes("plug")) return Plug;
+  if (blob.includes("kitchen") || blob.includes("light") || blob.includes("bedroom")) {
+    return Lightbulb;
+  }
+  if (sw.area === SPARES_AREA || blob.includes("spare") || blob.includes("plug") || blob.includes("fly")) {
+    return Plug;
+  }
   if (sw.entityId.startsWith("light.")) return Lightbulb;
   return Plug;
 }
