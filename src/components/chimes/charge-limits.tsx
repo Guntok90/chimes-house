@@ -12,7 +12,7 @@ type BusyKey = "grid" | "solar" | "min" | "allow" | null;
 
 /**
  * Huawei LUNA charge-from-grid + SOC cutoff controls (incl. minimum discharge SOC).
- * Writes only after Apply. Intelligent Go / Dispatch stay elsewhere (read-only).
+ * Writes only after Apply. Intelligent Go / Cheap Energy Available stay elsewhere.
  */
 export function ChargeLimitsSection({
   title = "Charge limits",
@@ -127,6 +127,7 @@ export function ChargeLimitsSection({
 
         <GridChargeAllowRow
           current={live.gridCharge}
+          batteryW={live.batteryW}
           draft={gridAllowDraft}
           onDraft={setGridAllowDraft}
           onApply={() => {
@@ -223,6 +224,7 @@ export function ChargeLimitsSection({
 
 function GridChargeAllowRow({
   current,
+  batteryW,
   draft,
   onDraft,
   onApply,
@@ -232,6 +234,7 @@ function GridChargeAllowRow({
   missingNote,
 }: {
   current: boolean;
+  batteryW: number;
   draft: boolean;
   onDraft: (v: boolean) => void;
   onApply: () => void;
@@ -241,16 +244,29 @@ function GridChargeAllowRow({
   missingNote: string | null;
 }) {
   const dirty = draft !== current;
+  const activelyCharging = current && batteryW > 30;
+  const allowLabel = current ? "Allowed" : "Off";
+  const activityLabel = !current
+    ? "Not allowed — pack will not take grid power"
+    : activelyCharging
+      ? "Actively charging from grid"
+      : "Allowed — waiting (not charging from grid yet)";
+
   return (
     <div className="space-y-3 border-b border-line pb-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
           <div className="font-medium">Charge from grid</div>
-          <div className="text-sm text-ink-soft">Allow the pack to take power from AC / grid</div>
+          <div className="text-sm text-ink-soft">
+            Allow the pack to take power from AC / grid (not the same as charging now)
+          </div>
         </div>
-        <div className="text-sm tabular-nums text-ink-soft">
-          Now: {current ? "Allowed" : "Off"}
-          {busy ? " · confirming…" : ""}
+        <div className="text-right text-sm tabular-nums text-ink-soft">
+          <div>
+            Allow: {allowLabel}
+            {busy ? " · confirming…" : ""}
+          </div>
+          <div className="text-xs">{activityLabel}</div>
         </div>
       </div>
       {missingNote ? <p className="text-sm text-ink-soft">{missingNote}</p> : null}

@@ -196,7 +196,17 @@ function monthLabel(isoMonth: string) {
   return d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
 }
 
-/** Signed energy-ish value for one period key (day YYYY-MM-DD or month YYYY-MM). */
+/**
+ * Signed energy (kWh) for one period key (day YYYY-MM-DD or month YYYY-MM).
+ *
+ * Prefer energy `change` (kWh delta). For power sensors (myenergi grid W), HA
+ * often returns `change: 0` with `mean` in watts — use mean W × hours → kWh.
+ *
+ * Never treat `state` or cumulative `sum` as period kWh: on power sensors
+ * `state` is watts; on energy sensors `sum` is lifetime. Trusting either as
+ * daily import kWh, then falling back to a 75% peak blend, produces Peak £ in
+ * the hundreds for a normal UK domestic day.
+ */
 function periodValue(
   rows: HaStatRow[] | undefined,
   key: string,
@@ -208,18 +218,11 @@ function periodValue(
   if (!row) return 0;
   const change = num(row.change);
   const mean = num(row.mean);
-  // Energy sensors: non-zero change is the period delta (kWh).
-  // Power sensors often report change: 0 with mean in W — prefer mean then.
   if (change != null && change !== 0) return Number(change.toFixed(2));
   if (mean != null && mean !== 0) {
     return Number(((mean * hoursInPeriod) / 1000).toFixed(2));
   }
-  const state = num(row.state);
-  if (state != null && state !== 0) return Number(state.toFixed(2));
-  // Genuine zero-energy period (or flat zero power).
-  if (change === 0 || mean === 0 || state === 0) return 0;
-  const sum = num(row.sum);
-  if (sum != null) return Number(sum.toFixed(2));
+  // Genuine zero-energy period (or flat zero power) — or unusable state/sum.
   return 0;
 }
 
@@ -354,6 +357,13 @@ export function splitGridImportForDay(
 }
 
 /**
+ * Plausible UK domestic daily import ceiling (kWh). Above this, a daily
+ * `gridIn` with unusable hourly TOU is almost certainly watts (or lifetime
+ * sum) misread as kWh — refuse to price it. Not applied to monthly totals.
+ */
+const MAX_PLAUSIBLE_DAILY_IMPORT_KWH = 200;
+
+/**
  * Daily spend parts from low+high grid import × tariff rates.
  * Prefers hourly Intelligent Go window split; never prices all kWh at peak.
  */
@@ -371,7 +381,15 @@ export function daySpendPartsGbp(
     return gridSpendPartsGbp(split.lowKwh, split.highKwh, rates);
   }
   // Gap: no usable hourly import series — best available is window-hour weighting.
-  const approx = splitDailyImportByWindow(gridIn);
+  // If hourly rows existed but measured nothing, an absurd daily total is
+  // watts-as-kWh — refuse so Peak £ cannot explode to hundreds. Monthly path
+  // passes no hourRows, so real multi-hundred kWh months still price.
+  const hourlyWasUnusable = Boolean(hourRows?.length) && splitTotal <= 0.0001;
+  const safeGridIn =
+    hourlyWasUnusable && gridIn > MAX_PLAUSIBLE_DAILY_IMPORT_KWH
+      ? 0
+      : Math.max(0, gridIn);
+  const approx = splitDailyImportByWindow(safeGridIn);
   return gridSpendPartsGbp(approx.lowKwh, approx.highKwh, rates);
 }
 
@@ -407,10 +425,20 @@ export function daysFromStatistics(
     const key = localDayKey(d);
     const meters = metersForPeriod(stats, map, key, dayValue);
     const spend = daySpendPartsGbp(meters.gridIn, key, hourRows, rates);
+    // When daily stats only had watts-as-state (now 0) but hourly mean W worked,
+    // show the TOU-measured import so Import kWh matches Costs.
+    const hourImport = spend.lowKwh + spend.highKwh;
+    const gridIn =
+      meters.gridIn > 0.0001
+        ? meters.gridIn
+        : hourImport > 0.0001
+          ? Number(hourImport.toFixed(2))
+          : 0;
     out.push({
       key,
       label: dayLabel(key),
       ...meters,
+      gridIn,
       importOffPeakKwh: Number(spend.lowKwh.toFixed(4)),
       importPeakKwh: Number(spend.highKwh.toFixed(4)),
       costOffPeak: spend.offPeak,

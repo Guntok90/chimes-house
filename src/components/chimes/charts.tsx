@@ -330,7 +330,7 @@ export function DayAllChart({
             yAxisId="w"
             type="monotone"
             dataKey="carW"
-            name="Cars"
+            name="Cars (+ into vehicle)"
             stroke={colors.cars}
             dot={false}
             strokeWidth={1.5}
@@ -443,7 +443,7 @@ export function EnergyMetersChart({
           <Line
             type="monotone"
             dataKey="cars"
-            name="Cars"
+            name="Cars (+ into vehicle)"
             stroke={METER_COLORS.cars}
             dot={false}
             strokeWidth={1.5}

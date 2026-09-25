@@ -64,7 +64,10 @@ export function HistoryView() {
           </div>
 
           <section>
-            <SectionLabel>Solar and house</SectionLabel>
+            <ChartHeading
+              title="Solar generation vs house consumption"
+              subtitle="Daily totals in kWh"
+            />
             <Surface className="h-72 p-3">
               <PowerArea
                 data={chart}
@@ -77,7 +80,10 @@ export function HistoryView() {
           </section>
 
           <section>
-            <SectionLabel>Grid</SectionLabel>
+            <ChartHeading
+              title="Grid import / export"
+              subtitle="Import = bought from grid; Export = sold to grid (kWh)"
+            />
             <Surface className="h-64 p-3">
               <PowerArea
                 data={chart}
@@ -90,7 +96,10 @@ export function HistoryView() {
           </section>
 
           <section>
-            <SectionLabel>Spend</SectionLabel>
+            <ChartHeading
+              title="Costs"
+              subtitle="Off-peak (cheap window) + peak spend — total is the sum (£)"
+            />
             <Surface className="h-56 p-3">
               <CostBars
                 data={rows.map((d) => ({
@@ -142,6 +151,15 @@ export function HistoryView() {
           </section>
         </>
       )}
+    </div>
+  );
+}
+
+function ChartHeading({ title, subtitle }: { title: string; subtitle: string }) {
+  return (
+    <div className="mb-3">
+      <h2 className="text-xs font-semibold uppercase tracking-widest text-ink-soft">{title}</h2>
+      <p className="mt-1 text-sm text-ink-soft">{subtitle}</p>
     </div>
   );
 }

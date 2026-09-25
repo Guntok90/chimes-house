@@ -141,19 +141,22 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_internal_load_ct1",
     "sensor.myenergi_zappi_25435526_ct_internal",
   ],
-  // Range Rover — no preferred ids (do not invent brand integrations). Fuzzy map only.
-  rangeRoverW: [],
+  // Range Rover / Meross Hybrid outdoor socket (Front garden) — no invented JLR brand ids.
+  rangeRoverW: ["sensor.range_rover_hybrid_current_consumption"],
   rangeRoverSoc: [],
+  // Plug mapping uses custom priority (cable → Hybrid switch → ambiguous); not PREFERRED alone.
   rangeRoverPlugged: [],
   // myenergi daily energy used by the Zappi (resets at local midnight).
   zappiTodayKwh: [
     "sensor.myenergi_zappi_25435526_energy_used_today",
     "sensor.myenergi_zappi_25435526_green_energy_today",
   ],
-  // Optional — many JLR installs lack a daily charged-kWh entity.
-  rangeRoverTodayKwh: [],
+  // Meross Hybrid “Today's consumption” (same pattern as Zappi energy_used_today).
+  rangeRoverTodayKwh: ["sensor.range_rover_hybrid_today_s_consumption"],
   offPeak: [],
   intelligent: [],
+  // Octopus Intelligent Go “EV ready by” — BottlecapDave select (preferred) or time entity.
+  evReadyBy: [],
   // Huawei Solar (wlcrs) — ESS device is usually named "Batteries" on Chimes-Pi.
   gridCharge: ["switch.batteries_charge_from_grid", "switch.inverter_charge_from_grid"],
   gridChargeCutoffSoc: [
@@ -256,6 +259,48 @@ function isPlugCableBlob(b: string) {
     b.includes("ev_plugged")
   );
 }
+
+/**
+ * True cable / connector sensors — prefer these over Meross switch and over
+ * ambiguous `*_plug_status` binaries that stay off during AC charge.
+ */
+function isDedicatedCablePlugBlob(b: string) {
+  return (
+    b.includes("charging_cable") ||
+    b.includes("charge_cable") ||
+    b.includes("cable_connected") ||
+    b.includes("plug_connected") ||
+    b.includes("plugged_in") ||
+    b.includes("ev_plugged") ||
+    b.includes("car_connected") ||
+    b.includes("external_power") ||
+    b.includes("external power") ||
+    (b.includes("cable") && (b.includes("connect") || b.includes("status") || b.includes("lock")))
+  );
+}
+
+/** Typical Intelligent Go ready-by half-hour slots (Octopus app / HA select). */
+export const DEFAULT_EV_READY_BY_OPTIONS = [
+  "04:00",
+  "04:30",
+  "05:00",
+  "05:30",
+  "06:00",
+  "06:30",
+  "07:00",
+  "07:30",
+  "08:00",
+  "08:30",
+  "09:00",
+  "09:30",
+  "10:00",
+  "10:30",
+  "11:00",
+] as const;
+
+/** Placeholder entity id shown when the Pi has no Intelligent target-time select yet. */
+export const EV_READY_BY_ENTITY_PLACEHOLDER =
+  "select.octopus_energy_<DEVICE_ID>_intelligent_target_time";
 
 /**
  * Parse charger/vehicle plug text into boolean.
@@ -690,38 +735,49 @@ export function autoMap(states: HaState[]): HaMap {
       !b.includes("vag"),
   );
 
-  // Prefer a dedicated plug/cable sensor; fall back to the Hybrid outdoor socket switch.
-  const rangeRoverPlug =
-    resolve(
-      states,
-      "rangeRoverPlugged",
-      (s, b) =>
-        isRangeRoverBlob(b) &&
-        !b.includes("power") &&
-        !b.includes("watt") &&
-        !b.includes("current_consumption") &&
-        !b.includes("soc") &&
-        !b.includes("charge_level") &&
-        !b.includes("battery") &&
-        !b.includes("cupra") &&
-        !b.includes("vag") &&
-        !b.includes("zappi") &&
-        (isPlugCableBlob(b) ||
-          (b.includes("status") &&
-            !b.includes("mode") &&
-            !b.includes("device") &&
-            (b.includes("charg") || b.includes("ev") || b.includes("plug")))) &&
-        (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
-    ) ??
-    find(
-      states,
-      (s, b) =>
-        s.entity_id.startsWith("switch.") &&
-        isRangeRoverHybridBlob(b) &&
-        !b.includes("child_lock") &&
-        !b.includes("child lock") &&
-        !b.includes("enable"),
-    );
+  // Prefer a dedicated cable sensor; then Meross Hybrid outdoor switch; only then
+  // ambiguous plug_status binaries (those often stay off during AC charge).
+  const rangeRoverHybridSwitch = find(
+    states,
+    (s, b) =>
+      s.entity_id.startsWith("switch.") &&
+      isRangeRoverHybridBlob(b) &&
+      !b.includes("child_lock") &&
+      !b.includes("child lock") &&
+      !b.includes("enable"),
+  );
+  const rangeRoverCablePlug = find(
+    states,
+    (s, b) =>
+      isRangeRoverBlob(b) &&
+      !b.includes("cupra") &&
+      !b.includes("vag") &&
+      !b.includes("zappi") &&
+      isDedicatedCablePlugBlob(b) &&
+      (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
+  );
+  const rangeRoverAmbiguousPlug = find(
+    states,
+    (s, b) =>
+      isRangeRoverBlob(b) &&
+      !b.includes("power") &&
+      !b.includes("watt") &&
+      !b.includes("current_consumption") &&
+      !b.includes("soc") &&
+      !b.includes("charge_level") &&
+      !b.includes("battery") &&
+      !b.includes("cupra") &&
+      !b.includes("vag") &&
+      !b.includes("zappi") &&
+      !isDedicatedCablePlugBlob(b) &&
+      (isPlugCableBlob(b) ||
+        (b.includes("status") &&
+          !b.includes("mode") &&
+          !b.includes("device") &&
+          (b.includes("charg") || b.includes("ev") || b.includes("plug")))) &&
+      (s.entity_id.startsWith("binary_sensor.") || s.entity_id.startsWith("sensor.")),
+  );
+  const rangeRoverPlug = rangeRoverCablePlug ?? rangeRoverHybridSwitch ?? rangeRoverAmbiguousPlug;
 
   const zappiToday = resolve(
     states,
@@ -779,8 +835,26 @@ export function autoMap(states: HaState[]): HaMap {
   const intelligent = find(
     states,
     (_s, b) =>
-      b.includes("intelligent") ||
+      b.includes("intelligent_dispatch") ||
+      b.includes("intelligent_ready") ||
+      (b.includes("intelligent") &&
+        (b.includes("dispatch") || b.includes("ready") || b.includes("slot"))) ||
       (b.includes("octopus") && (b.includes("ready") || b.includes("dispatch"))),
+  );
+
+  // Octopus Intelligent “EV ready by” target — select preferred, then time entity.
+  const evReadyBy = resolve(
+    states,
+    "evReadyBy",
+    (s, b) =>
+      (b.includes("intelligent_target_time") ||
+        b.includes("intelligent_ready_time") ||
+        (b.includes("intelligent") &&
+          (b.includes("target_time") || b.includes("ready_by") || b.includes("ready_time")))) &&
+      (s.entity_id.startsWith("select.") ||
+        s.entity_id.startsWith("time.") ||
+        s.entity_id.startsWith("input_select.") ||
+        s.entity_id.startsWith("input_datetime.")),
   );
 
   // Charge-from-grid allow — switch only (never number / forcible services).
@@ -869,6 +943,7 @@ export function autoMap(states: HaState[]): HaMap {
   if (rangeRoverToday) map.rangeRoverTodayKwh = rangeRoverToday.entity_id;
   if (offPeak) map.offPeak = offPeak.entity_id;
   if (intelligent) map.intelligent = intelligent.entity_id;
+  if (evReadyBy) map.evReadyBy = evReadyBy.entity_id;
   if (gridCharge) map.gridCharge = gridCharge.entity_id;
   if (gridChargeCutoffSoc) map.gridChargeCutoffSoc = gridChargeCutoffSoc.entity_id;
   if (solarChargeCutoffSoc) map.solarChargeCutoffSoc = solarChargeCutoffSoc.entity_id;
@@ -948,6 +1023,7 @@ export function sameLive(a: HouseLive, b: HouseLive): boolean {
     a.rangeRoverTodayKwh === b.rangeRoverTodayKwh &&
     a.intelligent === b.intelligent &&
     a.offPeak === b.offPeak &&
+    a.evReadyBy === b.evReadyBy &&
     a.gridCharge === b.gridCharge &&
     a.gridChargeCutoffSoc === b.gridChargeCutoffSoc &&
     a.solarChargeCutoffSoc === b.solarChargeCutoffSoc &&
@@ -1060,6 +1136,21 @@ export function liveFromStates(
   const rangeRoverSoc = Math.round(n("rangeRoverSoc", fallback.rangeRoverSoc));
   batteryW = Math.round(batteryW);
 
+  // Drawing charge power implies the Meross / AC path is live — treat as plugged
+  // even when a stale cable binary stays off.
+  if (rangeRoverW > 30) rangeRoverPlugged = true;
+
+  const readyByState = take("evReadyBy");
+  let evReadyBy = fallback.evReadyBy;
+  if (readyByState) {
+    const raw = readyByState.state.trim();
+    if (raw && raw.toLowerCase() !== "unknown" && raw.toLowerCase() !== "unavailable") {
+      // time entities may be HH:MM:SS — show HH:MM for the Charge UI.
+      const m = raw.match(/^(\d{1,2}):(\d{2})/);
+      evReadyBy = m ? `${m[1]!.padStart(2, "0")}:${m[2]}` : raw;
+    }
+  }
+
   const rateGbp = (key: "cheapRateGbp" | "peakRateGbp", current: number) => {
     const s = take(key);
     if (!s) return current;
@@ -1113,6 +1204,7 @@ export function liveFromStates(
     rangeRoverTodayKwh: todayKwh("rangeRoverTodayKwh"),
     intelligent: flag("intelligent", fallback.intelligent),
     offPeak: flag("offPeak", fallback.offPeak),
+    evReadyBy,
     gridCharge: flag("gridCharge", fallback.gridCharge),
     gridChargeCutoffSoc: optionalPct("gridChargeCutoffSoc"),
     solarChargeCutoffSoc: optionalPct("solarChargeCutoffSoc"),
@@ -1164,6 +1256,26 @@ export function zappiModeOptions(states: HaState[], map: HaMap): string[] {
     if (opts.length) return opts;
   }
   return [...DEFAULT_ZAPPI_MODES];
+}
+
+/**
+ * Options for Octopus Intelligent “EV ready by” (`select.*_intelligent_target_time`).
+ * Prefers HA `attributes.options`; else the standard 04:00–11:00 half-hour slots.
+ */
+export function evReadyByOptions(states: HaState[], map: HaMap): string[] {
+  const id = map.evReadyBy;
+  const s = id ? states.find((x) => x.entity_id === id) : undefined;
+  const raw = s?.attributes.options;
+  if (Array.isArray(raw)) {
+    const opts = raw
+      .filter((o): o is string => typeof o === "string" && o.trim().length > 0)
+      .map((o) => {
+        const m = o.trim().match(/^(\d{1,2}):(\d{2})/);
+        return m ? `${m[1]!.padStart(2, "0")}:${m[2]}` : o.trim();
+      });
+    if (opts.length) return opts;
+  }
+  return [...DEFAULT_EV_READY_BY_OPTIONS];
 }
 
 export function switchOn(
@@ -2010,6 +2122,33 @@ export class HaSocket {
         domain,
         service: "select_option",
         service_data: { option },
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
+  }
+
+  /**
+   * Set a `time.*` / `input_datetime.*` ready-by target via `*.set_value`.
+   * Accepts HH:MM or HH:MM:SS — HA time entities expect HH:MM:SS.
+   */
+  async setTime(entityId: string, value: string, timeoutMs = 45_000) {
+    const [domain] = entityId.split(".");
+    if (domain !== "time" && domain !== "input_datetime") {
+      throw new Error("Only time / input_datetime entities can be written with setTime.");
+    }
+    const m = value.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!m) throw new Error("Ready-by time must look like HH:MM.");
+    const hh = m[1]!.padStart(2, "0");
+    const mm = m[2]!;
+    const ss = m[3] ?? "00";
+    const time = `${hh}:${mm}:${ss}`;
+    await this.send(
+      "call_service",
+      {
+        domain,
+        service: "set_value",
+        service_data: domain === "input_datetime" ? { datetime: time, time } : { time },
         target: { entity_id: entityId },
       },
       timeoutMs,

@@ -9,6 +9,7 @@ import {
 } from "./ha-history";
 import {
   CHARGE_LIMIT_DEFAULTS,
+  DEFAULT_EV_READY_BY_OPTIONS,
   DEFAULT_HA_URL,
   DEFAULT_ZAPPI_MODES,
   HaSocket,
@@ -17,6 +18,7 @@ import {
   credsForBoot,
   demoAreaSwitches,
   demoFanControl,
+  evReadyByOptions,
   fanControlFromStates,
   fanLevelToPercentage,
   haWriteFailureMessage,
@@ -132,9 +134,9 @@ const DEMO_CHARGE_META: Record<ChargeLimitKey, NumberControlMeta> = {
   minDischargeSoc: { ...CHARGE_LIMIT_DEFAULTS.minDischargeSoc },
 };
 
-/** In-flight Battery / Zappi Apply — holds optimistic UI until HA state confirms. */
+/** In-flight Battery / Zappi / Octopus Apply — holds optimistic UI until HA state confirms. */
 export type WritePending = {
-  key: "gridCharge" | "zappiMode" | ChargeLimitKey;
+  key: "gridCharge" | "zappiMode" | "evReadyBy" | ChargeLimitKey;
   expected: boolean | number | string;
 };
 
@@ -164,7 +166,9 @@ type Store = {
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
   /** Options for mapped Zappi charge-mode select (HA attributes or defaults). */
   zappiModeOptions: string[];
-  /** Last write error from Battery / Zappi Apply (cleared on success). */
+  /** Options for Octopus Intelligent EV ready-by select (HA attributes or defaults). */
+  evReadyByOptions: string[];
+  /** Last write error from Battery / Zappi / Octopus Apply (cleared on success). */
   writeError?: string;
   /**
    * Optimistic write in flight. While set, live updates must not silently
@@ -184,6 +188,12 @@ type Store = {
   applyGridCharge: (allow: boolean) => Promise<boolean>;
   /** Explicit Apply: set Zappi charge mode via select.select_option. */
   applyZappiMode: (mode: string) => Promise<boolean>;
+  /**
+   * Explicit Apply: set Octopus Intelligent “EV ready by” via select.select_option
+   * or time.set_value. Does not touch charge automations
+   * (including automation.charge_cars_at_off_peak).
+   */
+  applyEvReadyBy: (time: string) => Promise<boolean>;
   /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
   toggleEntity: (entityId: string) => void;
   /** Home Fan on/off (fan.turn_on / turn_off, or demo). */
@@ -288,6 +298,14 @@ function holdPendingLive(get: () => Store, set: (partial: Partial<Store>) => voi
       return;
     }
     set({ live: { ...live, zappiMode: String(pending.expected) } });
+    return;
+  }
+  if (pending.key === "evReadyBy") {
+    if (live.evReadyBy === pending.expected) {
+      set({ writePending: undefined });
+      return;
+    }
+    set({ live: { ...live, evReadyBy: String(pending.expected) } });
     return;
   }
   const key = pending.key;
@@ -420,6 +438,7 @@ export const useHouse = create<Store>((set, get) => {
     historyStatus: "idle",
     chargeLimitMeta: DEMO_CHARGE_META,
     zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
+    evReadyByOptions: [...DEFAULT_EV_READY_BY_OPTIONS],
     tariffs: bootTariffs(),
 
     boot(opts) {
@@ -575,6 +594,7 @@ export const useHouse = create<Store>((set, get) => {
           fanControl: fanControlFromStates(list, mapped),
           chargeLimitMeta: chargeLimitMetaMap(list, mapped),
           zappiModeOptions: zappiModeOptions(list, mapped),
+          evReadyByOptions: evReadyByOptions(list, mapped),
           tariffs,
         });
         if (!wasLive && get().status === "live") {
@@ -735,6 +755,7 @@ export const useHouse = create<Store>((set, get) => {
         writePending: undefined,
         chargeLimitMeta: DEMO_CHARGE_META,
         zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
+        evReadyByOptions: [...DEFAULT_EV_READY_BY_OPTIONS],
         ...emptyHistory(),
         historyStatus: "idle",
       });
@@ -922,6 +943,81 @@ export const useHouse = create<Store>((set, get) => {
         writeError: timedOut
           ? "Home Assistant timed out and Zappi mode did not change on the Pi. Check Tailscale, then Apply again."
           : "Zappi mode did not update on the Pi.",
+        writePending: undefined,
+      });
+      return false;
+    },
+
+    async applyEvReadyBy(time) {
+      const { map, status, live, evReadyByOptions: options } = get();
+      const entity = map.evReadyBy;
+      const trimmed = time.trim();
+      if (!entity || status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — EV ready-by stays read-only." });
+        return false;
+      }
+      if (!trimmed || (options.length > 0 && !options.includes(trimmed))) {
+        set({ writeError: "Pick a ready-by time Octopus accepts, then Apply." });
+        return false;
+      }
+      const previous = live.evReadyBy;
+      set({
+        live: { ...live, evReadyBy: trimmed },
+        writeError: undefined,
+        writePending: { key: "evReadyBy", expected: trimmed },
+      });
+
+      const domain = entity.split(".")[0] ?? "";
+      let timedOut = false;
+      try {
+        if (domain === "select" || domain === "input_select") {
+          await socket.setSelect(entity, trimmed);
+        } else if (domain === "time" || domain === "input_datetime") {
+          await socket.setTime(entity, trimmed);
+        } else {
+          set({
+            live: { ...get().live, evReadyBy: previous },
+            writeError: `Ready-by entity ${entity} is not a select/time helper — cannot write.`,
+            writePending: undefined,
+          });
+          return false;
+        }
+      } catch (err) {
+        timedOut = isHaTimeoutError(err);
+        if (!timedOut) {
+          set({
+            live: { ...get().live, evReadyBy: previous },
+            writeError: haWriteFailureMessage(err, "EV ready by"),
+            writePending: undefined,
+          });
+          return false;
+        }
+      }
+
+      const confirmed = await socket.waitForCachedState(
+        entity,
+        (s) => {
+          const raw = s.state.trim();
+          const m = raw.match(/^(\d{1,2}):(\d{2})/);
+          const normalized = m ? `${m[1]!.padStart(2, "0")}:${m[2]}` : raw;
+          return normalized === trimmed || raw === trimmed;
+        },
+        timedOut ? 45_000 : 12_000,
+      );
+      if (confirmed) {
+        set({
+          live: { ...get().live, evReadyBy: trimmed },
+          writeError: undefined,
+          writePending: undefined,
+        });
+        return true;
+      }
+
+      set({
+        live: { ...get().live, evReadyBy: previous },
+        writeError: timedOut
+          ? "Home Assistant timed out and EV ready-by did not change on the Pi. Check Tailscale, then Apply again."
+          : "EV ready-by did not update on the Pi.",
         writePending: undefined,
       });
       return false;

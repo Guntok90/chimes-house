@@ -34,6 +34,11 @@ export type HouseLive = {
   rangeRoverTodayKwh: number | null;
   intelligent: boolean;
   offPeak: boolean;
+  /**
+   * Octopus Intelligent “EV ready by” target time (HH:MM).
+   * From `select.*_intelligent_target_time` / `time.*` when mapped; `"—"` when missing.
+   */
+  evReadyBy: string;
   /** Huawei `switch.*_charge_from_grid` — allow charging the pack from the grid. */
   gridCharge: boolean;
   /**
@@ -85,6 +90,7 @@ export const EMPTY_LIVE: HouseLive = {
   rangeRoverTodayKwh: null,
   intelligent: false,
   offPeak: false,
+  evReadyBy: "—",
   gridCharge: false,
   gridChargeCutoffSoc: null,
   solarChargeCutoffSoc: null,
@@ -114,6 +120,7 @@ export const SNAPSHOT: HouseLive = {
   rangeRoverTodayKwh: 12.1,
   intelligent: true,
   offPeak: true,
+  evReadyBy: "07:00",
   gridCharge: false,
   gridChargeCutoffSoc: 90,
   solarChargeCutoffSoc: 100,

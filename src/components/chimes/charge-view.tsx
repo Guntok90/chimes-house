@@ -26,16 +26,16 @@ export function ChargeView() {
           value={live.zappiMode === "—" ? "—" : live.zappiMode}
           hint={live.zappiPlugged ? "Plugged in" : "Waiting"}
         />
-        <Metric label="Intelligent" value={live.intelligent ? "Ready" : "Off"} hint="Octopus" />
+        <Metric label="Intelligent" value={live.intelligent ? "On" : "Off"} hint="Cheap energy" />
         <Metric
-          label="Window"
-          value={live.offPeak ? "Off-peak" : "Peak"}
-          hint="Cheap rate"
+          label="Cheap window"
+          value={live.offPeak ? "On" : "Off"}
+          hint="Off-peak active"
         />
         <Metric
           label="Charge power"
           value={`${live.zappiW} W`}
-          hint={live.zappiW > 30 ? "Charging" : "Idle"}
+          hint={live.zappiW > 30 ? "+ into vehicle" : "Idle"}
         />
       </div>
 
@@ -61,11 +61,14 @@ export function ChargeView() {
           <Surface className="p-5 text-sm leading-relaxed text-ink-soft">
             <p>
               Cars and the battery charge on cheap rate. That schedule is already running — this
-              page only shows Dispatch status (no write controls for Octopus).
+              page shows Cheap Energy Available (read-only) and lets you set EV Ready by when the
+              Octopus target-time entity is on the Pi.
             </p>
             <div className="mt-4 flex items-center gap-2 text-ink">
               <PlugZap className="size-4 text-teal" strokeWidth={1.7} />
-              <span className="font-medium">Off-peak charge is on</span>
+              <span className="font-medium">
+                {live.offPeak ? "Cheap window is on" : "Cheap window is off (peak rate)"}
+              </span>
             </div>
             <div className="mt-4 px-1">
               <Row label="Today import" value={today ? `${today.gridIn} kWh` : "—"} />

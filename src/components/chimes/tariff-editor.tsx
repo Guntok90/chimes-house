@@ -64,7 +64,7 @@ export function TariffEditor() {
       <Surface className="space-y-4 p-5">
         <p className="text-sm leading-relaxed text-ink-soft">
           These £/kWh figures drive History spend and Energy cost only. They do not change
-          Octopus Intelligent Go, Dispatch, or any charge automation.
+          Octopus Intelligent Go, Cheap Energy Available, or any charge automation.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
           <RateField
