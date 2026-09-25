@@ -4,14 +4,17 @@ import { deriveHouseW } from "./energy-balance.ts";
 import {
   HOUSE_W_BLOCKLIST,
   PREFERRED,
+  PREFERRED_FAN,
   PREFERRED_SWITCHES,
   PREFERRED_TARIFFS,
   SPARES_AREA,
+  applyHomeSwitchLabels,
   areaSwitchesFromStates,
   autoMap,
   chargeLimitMeta,
   credsForBoot,
   demoAreaSwitches,
+  fanControlFromStates,
   frontGardenSwitches,
   groupSwitchesByArea,
   hideHomeSwitch,
@@ -24,6 +27,7 @@ import {
   sameSwitches,
   rateToGbpPerKwh,
   parsePlugConnected,
+  unmappedFanControl,
   wsFailureMessage,
   zappiModeOptions,
   DEFAULT_ZAPPI_MODES,
@@ -633,7 +637,7 @@ describe("area-grouped switches (Home)", () => {
     assert.ok(front.some((s) => s.label === "Range Rover Hybrid"));
   });
 
-  it("hideHomeSwitch drops dnd / myenergi / child lock / enable (any device)", () => {
+  it("hideHomeSwitch drops dnd / myenergi / child lock / enable / grid-charge (any device)", () => {
     assert.equal(hideHomeSwitch("switch.lamp_dnd", "Lamp Dnd"), true);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1 DND"), true);
     assert.equal(
@@ -651,10 +655,22 @@ describe("area-grouped switches (Home)", () => {
     assert.equal(hideHomeSwitch("switch.myenergi_zappi_boost", "Boost"), true);
     assert.equal(hideHomeSwitch("switch.garage_plug", "My Energy boost"), true);
     assert.equal(hideHomeSwitch("switch.garage_plug", "Myenergi boost"), true);
+    assert.equal(
+      hideHomeSwitch("switch.batteries_charge_from_grid", "Charge from grid"),
+      true,
+    );
+    assert.equal(
+      hideHomeSwitch("switch.batteries_charge_from_grid", "Batteries charge from grid"),
+      true,
+    );
+    assert.equal(
+      hideHomeSwitch("switch.inverter_charge_from_grid", "Allow grid charge"),
+      true,
+    );
     // Real switches stay
     assert.equal(hideHomeSwitch("switch.smart_switch_4", "Lamp"), false);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1"), false);
-    assert.equal(hideHomeSwitch("switch.batteries_charge_from_grid", "Charge from grid"), false);
+    assert.equal(hideHomeSwitch("switch.smart_switch_7", "Spare Meross"), false);
   });
 
   it("hideHomeSwitch still catches junk when registry alias cleans the label", () => {
@@ -675,6 +691,7 @@ describe("area-grouped switches (Home)", () => {
       state("switch.smart_switch_4_dnd", "off", "Lamp Dnd"),
       state("switch.lamp_do_not_disturb", "off", "Lamp Do Not Disturb"),
       state("switch.batteries_enable_charge", "on", "Enable charge"),
+      state("switch.batteries_charge_from_grid", "on", "Batteries charge from grid"),
       state("switch.range_rover_child_lock", "off", "Range Rover child lock"),
       state("switch.cabinet_child_lock", "off", "Cabinet child lock"),
       state("switch.myenergi_zappi_boost", "off", "Boost"),
@@ -688,6 +705,81 @@ describe("area-grouped switches (Home)", () => {
     );
     assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
     assert.equal(list.find((s) => s.entityId === "switch.pergola_switch_1")?.on, false);
+    assert.equal(
+      list.find((s) => s.entityId === "switch.batteries_charge_from_grid"),
+      undefined,
+    );
+  });
+
+  it("areaSwitchesFromStates renames Fan and first Spares Spare for Home UI", () => {
+    const states: HaState[] = [
+      state("switch.bedroom_fan_switch", "on", "Fan"),
+      state("switch.smart_switch_7", "off", "Spare Meross"),
+      state("switch.smart_switch_8", "off", "Spare plug 2"),
+      state("switch.smart_switch_4", "on", "Lamp"),
+    ];
+    const areas = [
+      { area_id: "spares", name: "Spares" },
+      { area_id: "living", name: "Living room" },
+      { area_id: "bed", name: "Bedrooms" },
+    ];
+    const entities: HaEntityReg[] = [
+      { entity_id: "switch.bedroom_fan_switch", area_id: "bed", name: null },
+      { entity_id: "switch.smart_switch_7", area_id: "spares", name: null },
+      { entity_id: "switch.smart_switch_8", area_id: "spares", name: null },
+      { entity_id: "switch.smart_switch_4", area_id: "living", name: null },
+    ];
+    const list = areaSwitchesFromStates(states, areas, entities);
+    assert.equal(
+      list.find((s) => s.entityId === "switch.bedroom_fan_switch")?.label,
+      "Master Bedroom Light",
+    );
+    // Spares sorted by label: Spare Meross before Spare plug 2 → first becomes Fly Killer.
+    assert.equal(
+      list.find((s) => s.entityId === "switch.smart_switch_7")?.label,
+      "Fly Killer",
+    );
+    assert.equal(
+      list.find((s) => s.entityId === "switch.smart_switch_8")?.label,
+      "Spare plug 2",
+    );
+  });
+
+  it("applyHomeSwitchLabels only renames the first Spares spare", () => {
+    const out = applyHomeSwitchLabels([
+      {
+        entityId: "switch.a",
+        label: "Spare A",
+        area: SPARES_AREA,
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.b",
+        label: "Spare B",
+        area: SPARES_AREA,
+        on: false,
+        available: true,
+      },
+      {
+        entityId: "switch.fan",
+        label: "Fan",
+        area: "Bedrooms",
+        on: true,
+        available: true,
+      },
+    ]);
+    assert.equal(out[0]?.label, "Fly Killer");
+    assert.equal(out[1]?.label, "Spare B");
+    assert.equal(out[2]?.label, "Master Bedroom Light");
+  });
+
+  it("demo list renames first Spare plug to Fly Killer", () => {
+    const demo = demoAreaSwitches({});
+    const spares = demo.filter((s) => s.area === SPARES_AREA);
+    assert.ok(spares.length >= 2);
+    assert.equal(spares[0]?.label, "Fly Killer");
+    assert.equal(spares[1]?.label, "Spare plug 2");
   });
 
   it("areaSwitchesFromStates hides Dnd twin even when registry name is cleaned", () => {
@@ -705,6 +797,127 @@ describe("area-grouped switches (Home)", () => {
       list.map((s) => s.entityId),
       ["switch.smart_switch_4"],
     );
+  });
+});
+
+describe("Home Fan control mapping", () => {
+  it("documents preferred Tuya / Smart Life fan placeholder entity ids", () => {
+    assert.ok(PREFERRED_FAN.includes("fan.fan"));
+    assert.ok(PREFERRED_FAN.includes("fan.bedroom_fan"));
+    assert.ok(PREFERRED_FAN.includes("fan.tuya_fan"));
+  });
+
+  it("returns not-mapped when no fan entity exists", () => {
+    const map = autoMap(CHIMES_PI);
+    assert.equal(map.fan, undefined);
+    const fan = fanControlFromStates(CHIMES_PI, map);
+    assert.equal(fan.available, false);
+    assert.equal(fan.entityId, null);
+    assert.equal(fan.speedMode, "none");
+    assert.equal(unmappedFanControl().available, false);
+  });
+
+  it("maps preferred fan.* and reads on + discrete speed from percentage", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      {
+        entity_id: "fan.bedroom_fan",
+        state: "on",
+        attributes: {
+          friendly_name: "Bedroom fan",
+          percentage: 66,
+          percentage_step: 33,
+          speed_count: 3,
+        },
+      },
+    ];
+    const map = autoMap(states);
+    assert.equal(map.fan, "fan.bedroom_fan");
+    const fan = fanControlFromStates(states, map);
+    assert.equal(fan.available, true);
+    assert.equal(fan.on, true);
+    assert.equal(fan.speedMode, "percentage");
+    assert.equal(fan.speedCount, 3);
+    assert.equal(fan.speedLevel, 2);
+    assert.equal(interestFromMap(map).has("fan.bedroom_fan"), true);
+  });
+
+  it("maps optional number.*_speed helper when present", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      {
+        entity_id: "fan.ceiling_fan",
+        state: "on",
+        attributes: { friendly_name: "Ceiling fan", percentage: 30 },
+      },
+      state("number.fan_speed", "3", "Fan speed"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.fan, "fan.ceiling_fan");
+    assert.equal(map.fanSpeed, "number.fan_speed");
+    const fan = fanControlFromStates(states, map);
+    assert.equal(fan.speedMode, "number");
+    assert.equal(fan.speedLevel, 3);
+    assert.equal(fan.speedEntityId, "number.fan_speed");
+  });
+
+  it("maps select.* speed options for Tuya discrete levels", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      {
+        entity_id: "fan.fan",
+        state: "on",
+        attributes: { friendly_name: "Fan" },
+      },
+      {
+        entity_id: "select.fan_speed",
+        state: "1",
+        attributes: {
+          friendly_name: "Fan speed",
+          options: ["1", "2", "3"],
+        },
+      },
+    ];
+    const map = autoMap(states);
+    assert.equal(map.fan, "fan.fan");
+    assert.equal(map.fanSpeed, "select.fan_speed");
+    const fan = fanControlFromStates(states, map);
+    assert.equal(fan.speedMode, "select");
+    assert.equal(fan.speedLevel, 1);
+    assert.deepEqual(fan.speedOptions, ["1", "2", "3"]);
+  });
+
+  it("does not fake speed when fan has no percentage or speed helper", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      {
+        entity_id: "fan.fan",
+        state: "on",
+        attributes: { friendly_name: "Fan" },
+      },
+    ];
+    const map = autoMap(states);
+    const fan = fanControlFromStates(states, map);
+    assert.equal(fan.available, true);
+    assert.equal(fan.on, true);
+    assert.equal(fan.speedMode, "none");
+  });
+
+  it("maps optional fan light when clearly named", () => {
+    const states: HaState[] = [
+      ...CHIMES_PI,
+      {
+        entity_id: "fan.fan",
+        state: "off",
+        attributes: { friendly_name: "Fan", percentage: 0, percentage_step: 33 },
+      },
+      state("light.fan_light", "on", "Fan light"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.fanLight, "light.fan_light");
+    const fan = fanControlFromStates(states, map);
+    assert.equal(fan.lightEntityId, "light.fan_light");
+    assert.equal(fan.lightOn, true);
   });
 });
 

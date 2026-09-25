@@ -10,7 +10,11 @@ export type HaState = {
 
 export type TariffEntityId = "tariffCheap" | "tariffPeak";
 
-export type HaMap = Partial<Record<keyof HouseLive | SwitchId | TariffEntityId, string>>;
+export type HaExtraMapKey = "fan" | "fanSpeed" | "fanLight";
+
+export type HaMap = Partial<
+  Record<keyof HouseLive | SwitchId | TariffEntityId | HaExtraMapKey, string>
+>;
 
 export type SwitchId =
   | "lamp"
@@ -910,6 +914,8 @@ export function autoMap(states: HaState[]): HaMap {
     });
     if (hit) map[sw.id] = hit.entity_id;
   }
+
+  mapFanEntities(states, map);
   return map;
 }
 
@@ -1227,13 +1233,14 @@ function isControllableSwitch(s: HaState) {
 }
 
 /**
- * Home switch list filters (dad follow-up after PR #22): drop junk so Home
- * shows one real switch tile each. Match case-insensitively against entity_id,
- * display label, registry name, and friendly_name:
+ * Home switch list filters (dad follow-ups after PR #22 / #30): drop junk so
+ * Home shows one real switch tile each. Match case-insensitively against
+ * entity_id, display label, registry name, and friendly_name:
  * - dnd / do not disturb (twins)
  * - myenergi / my energy
  * - child lock (any device)
  * - enable
+ * - battery / inverter charge-from-grid (lives on Battery / Energy only)
  */
 export function hideHomeSwitch(
   entityId: string,
@@ -1257,13 +1264,329 @@ export function hideHomeSwitch(
   }
   if (hay.includes("child_lock") || hay.includes("child lock")) return true;
   if (hay.includes("enable")) return true;
+  // Huawei grid-charge allow — controlled on Battery / Energy, not Home.
+  if (
+    hay.includes("charge_from_grid") ||
+    hay.includes("charge from grid") ||
+    (hay.includes("batteries") && hay.includes("charge") && hay.includes("grid"))
+  ) {
+    return true;
+  }
   return false;
+}
+
+/**
+ * UI-only friendly names for Home tiles (do not require renaming in HA).
+ * Prefer entity_id keys when known; heuristics in `applyHomeSwitchLabels` cover
+ * Fan → Master Bedroom Light and the first Spares “Spare” → Fly Killer.
+ */
+export const HOME_SWITCH_LABEL_BY_ENTITY: Record<string, string> = {
+  // Fill when Guy confirms entity ids, e.g.:
+  // "switch.smart_switch_7": "Fly Killer",
+};
+
+const MASTER_BEDROOM_LIGHT_LABEL = "Master Bedroom Light";
+const FLY_KILLER_LABEL = "Fly Killer";
+
+function isSpareLikeLabel(sw: Pick<AreaSwitch, "label" | "entityId">): boolean {
+  const b = `${sw.label} ${sw.entityId}`.toLowerCase();
+  return b.includes("spare");
+}
+
+/**
+ * Apply Home-only label overrides after the area list is built.
+ * - Exact entity_id map (`HOME_SWITCH_LABEL_BY_ENTITY`)
+ * - Label “Fan” → Master Bedroom Light (misnamed light switch)
+ * - First spare/outlet in Spares area order → Fly Killer
+ */
+export function applyHomeSwitchLabels(switches: AreaSwitch[]): AreaSwitch[] {
+  const renamed = switches.map((sw) => {
+    const byEntity = HOME_SWITCH_LABEL_BY_ENTITY[sw.entityId];
+    if (byEntity) return { ...sw, label: byEntity };
+    if (sw.label.trim().toLowerCase() === "fan") {
+      return { ...sw, label: MASTER_BEDROOM_LIGHT_LABEL };
+    }
+    return sw;
+  });
+
+  let renamedFirstSpare = false;
+  return renamed.map((sw) => {
+    if (renamedFirstSpare) return sw;
+    if (sw.area === SPARES_AREA && isSpareLikeLabel(sw)) {
+      renamedFirstSpare = true;
+      return { ...sw, label: FLY_KILLER_LABEL };
+    }
+    return sw;
+  });
+}
+
+/**
+ * Preferred fan.* entity ids for the Home Fan tile (Smart Life / Tuya).
+ * Placeholders until Guy plugs the real Pi ids — only map when present in states.
+ * Do not use the mislabelled switch named “Fan” (that becomes Master Bedroom Light).
+ */
+export const PREFERRED_FAN: string[] = [
+  "fan.fan",
+  "fan.bedroom_fan",
+  "fan.master_bedroom_fan",
+  "fan.ceiling_fan",
+  "fan.tuya_fan",
+  "fan.smart_life_fan",
+];
+
+/**
+ * Optional separate speed helpers for Tuya fans that expose Speed 1–N as
+ * number / input_number / select (not only fan.percentage).
+ */
+export const PREFERRED_FAN_SPEED: string[] = [
+  "number.fan_speed",
+  "number.bedroom_fan_speed",
+  "number.master_bedroom_fan_speed",
+  "number.ceiling_fan_speed",
+  "input_number.fan_speed",
+  "input_number.bedroom_fan_speed",
+  "select.fan_speed",
+  "select.bedroom_fan_speed",
+  "select.fan_fan_speed",
+];
+
+/** Optional fan light (Tuya Fan often has a built-in light). */
+export const PREFERRED_FAN_LIGHT: string[] = [
+  "light.fan_light",
+  "light.bedroom_fan_light",
+  "light.fan_fan_light",
+  "switch.fan_light",
+];
+
+export type FanSpeedMode = "none" | "percentage" | "number" | "select";
+
+/** Curated Home Fan control (on/off + discrete speed). */
+export type FanControl = {
+  entityId: string | null;
+  speedEntityId: string | null;
+  lightEntityId: string | null;
+  label: string;
+  on: boolean;
+  lightOn: boolean;
+  /** 0–100 when percentage-based; null when unknown / off. */
+  percentage: number | null;
+  /** 1-based Smart Life speed level when known. */
+  speedLevel: number | null;
+  /** Max discrete levels (Tuya screens show at least 1–3). */
+  speedCount: number;
+  speedMode: FanSpeedMode;
+  /** select.* option strings when speedMode === "select". */
+  speedOptions: string[];
+  available: boolean;
+};
+
+export function unmappedFanControl(): FanControl {
+  return {
+    entityId: null,
+    speedEntityId: null,
+    lightEntityId: null,
+    label: "Fan",
+    on: false,
+    lightOn: false,
+    percentage: null,
+    speedLevel: null,
+    speedCount: 3,
+    speedMode: "none",
+    speedOptions: [],
+    available: false,
+  };
+}
+
+/** Demo Fan tile when not live — interactive Tuya-style 1–3 speeds. */
+export function demoFanControl(on = true, speedLevel = 2): FanControl {
+  const count = 3;
+  const level = Math.min(count, Math.max(1, speedLevel));
+  return {
+    entityId: "demo.fan",
+    speedEntityId: null,
+    lightEntityId: null,
+    label: "Fan",
+    on,
+    lightOn: false,
+    percentage: on ? Math.round((level / count) * 100) : 0,
+    speedLevel: on ? level : null,
+    speedCount: count,
+    speedMode: "percentage",
+    speedOptions: [],
+    available: true,
+  };
+}
+
+function fanPercentageFromState(s: HaState | undefined): number | null {
+  if (!s) return null;
+  const raw = s.attributes.percentage;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return Math.min(100, Math.max(0, Math.round(raw)));
+  }
+  if (typeof raw === "string" && raw.trim()) {
+    const n = Number.parseFloat(raw);
+    if (Number.isFinite(n)) return Math.min(100, Math.max(0, Math.round(n)));
+  }
+  return null;
+}
+
+function fanSpeedCountFromState(s: HaState | undefined): number {
+  const count = s?.attributes.speed_count;
+  if (typeof count === "number" && count >= 2 && count <= 10) return Math.round(count);
+  const step = s?.attributes.percentage_step;
+  if (typeof step === "number" && step > 0 && step <= 50) {
+    const derived = Math.round(100 / step);
+    if (derived >= 2 && derived <= 10) return derived;
+  }
+  return 3;
+}
+
+export function percentageToFanLevel(percentage: number, speedCount: number): number {
+  const count = Math.max(2, speedCount);
+  return Math.min(count, Math.max(1, Math.round((percentage / 100) * count) || 1));
+}
+
+export function fanLevelToPercentage(level: number, speedCount: number): number {
+  const count = Math.max(2, speedCount);
+  const clamped = Math.min(count, Math.max(1, Math.round(level)));
+  return Math.round((clamped / count) * 100);
+}
+
+function parseSelectSpeedLevel(state: string, options: string[]): number | null {
+  const trimmed = state.trim();
+  const asNum = Number.parseInt(trimmed.replace(/[^\d]/g, ""), 10);
+  if (Number.isFinite(asNum) && asNum >= 1) return asNum;
+  const idx = options.findIndex((o) => o === trimmed);
+  if (idx >= 0) return idx + 1;
+  return null;
+}
+
+function isFanSpeedHelper(s: HaState): boolean {
+  if (!available(s)) return false;
+  const id = s.entity_id;
+  const domain = id.split(".")[0] ?? "";
+  if (domain !== "number" && domain !== "input_number" && domain !== "select") return false;
+  const b = blob(s);
+  return b.includes("fan") && (b.includes("speed") || b.includes("percentage"));
+}
+
+function isFanLightHelper(s: HaState): boolean {
+  if (!available(s)) return false;
+  if (!s.entity_id.startsWith("light.") && !s.entity_id.startsWith("switch.")) return false;
+  const b = blob(s);
+  return b.includes("fan") && b.includes("light");
+}
+
+/**
+ * Resolve fan + optional speed / light helpers into the HaMap.
+ * Prefers curated placeholders when present; else first `fan.*`.
+ * Never maps the mislabelled Home switch named “Fan” (Master Bedroom Light).
+ */
+export function mapFanEntities(states: HaState[], map: HaMap): void {
+  const fan =
+    prefer(states, PREFERRED_FAN) ??
+    states.find((s) => s.entity_id.startsWith("fan.") && available(s));
+  if (fan) map.fan = fan.entity_id;
+
+  const speed =
+    prefer(states, PREFERRED_FAN_SPEED) ?? states.find((s) => isFanSpeedHelper(s));
+  if (speed) map.fanSpeed = speed.entity_id;
+
+  const light =
+    prefer(states, PREFERRED_FAN_LIGHT) ?? states.find((s) => isFanLightHelper(s));
+  if (light) map.fanLight = light.entity_id;
+}
+
+/** Build Fan tile state from live HA (or unmapped empty when ids missing). */
+export function fanControlFromStates(
+  states: HaState[] | Map<string, HaState>,
+  map: HaMap,
+): FanControl {
+  const byId = statesById(states);
+  const fanId = map.fan;
+  if (!fanId) return unmappedFanControl();
+
+  const fan = byId.get(fanId);
+  const lightId = map.fanLight ?? null;
+  const lightState = lightId ? byId.get(lightId) : undefined;
+  const lightOn = Boolean(lightState && available(lightState) && lightState.state === "on");
+
+  if (!fan || !available(fan)) {
+    return {
+      ...unmappedFanControl(),
+      entityId: fanId,
+      speedEntityId: map.fanSpeed ?? null,
+      lightEntityId: lightId,
+      lightOn,
+    };
+  }
+
+  const speedId = map.fanSpeed ?? null;
+  const speedState = speedId ? byId.get(speedId) : undefined;
+  const speedCount = fanSpeedCountFromState(fan);
+  const on = fan.state === "on";
+
+  let speedMode: FanSpeedMode = "none";
+  let speedOptions: string[] = [];
+  let percentage: number | null = fanPercentageFromState(fan);
+  let speedLevel: number | null = null;
+
+  if (speedState && available(speedState)) {
+    const domain = speedState.entity_id.split(".")[0] ?? "";
+    if (domain === "select" || domain === "input_select") {
+      speedMode = "select";
+      const raw = speedState.attributes.options;
+      speedOptions = Array.isArray(raw)
+        ? raw.filter((o): o is string => typeof o === "string" && o.trim().length > 0)
+        : [];
+      speedLevel = parseSelectSpeedLevel(speedState.state, speedOptions);
+      if (speedLevel != null) {
+        percentage = fanLevelToPercentage(speedLevel, Math.max(speedCount, speedOptions.length || 3));
+      }
+    } else {
+      speedMode = "number";
+      const n = num(speedState.state);
+      if (n != null) {
+        // Tuya helpers are often 1–3 levels, sometimes 0–100 %.
+        if (n >= 1 && n <= 10 && (!percentage || n <= speedCount)) {
+          speedLevel = Math.round(n);
+          percentage = fanLevelToPercentage(speedLevel, speedCount);
+        } else {
+          percentage = Math.min(100, Math.max(0, Math.round(n)));
+          speedLevel = percentageToFanLevel(percentage, speedCount);
+        }
+      }
+    }
+  } else if (percentage != null || fan.attributes.percentage != null || fan.attributes.percentage_step != null) {
+    // Native fan percentage support — do not invent speed when HA has no speed surface.
+    speedMode = "percentage";
+    if (percentage == null && on) percentage = fanLevelToPercentage(2, speedCount);
+    if (percentage != null && percentage > 0) {
+      speedLevel = percentageToFanLevel(percentage, speedCount);
+    }
+  }
+
+  return {
+    entityId: fanId,
+    speedEntityId: speedId,
+    lightEntityId: lightId,
+    label: "Fan",
+    on,
+    lightOn,
+    percentage: on ? percentage : percentage ?? 0,
+    speedLevel: on ? speedLevel : null,
+    speedCount: Math.max(speedCount, speedOptions.length || 0, 3),
+    speedMode,
+    speedOptions,
+    available: true,
+  };
 }
 
 /**
  * All switch/light entities from live states, grouped by HA area.
  * Unassigned entities land in Spares (shown without a labelled heading).
- * Filters out Dnd / myenergi / child-lock / enable junk (see hideHomeSwitch).
+ * Filters out Dnd / myenergi / child-lock / enable / grid-charge junk
+ * (see hideHomeSwitch). Applies Home-only friendly name overrides.
  */
 export function areaSwitchesFromStates(
   states: HaState[],
@@ -1302,7 +1625,7 @@ export function areaSwitchesFromStates(
     if (areaCmp !== 0) return areaCmp;
     return a.label.localeCompare(b.label, undefined, { sensitivity: "base" });
   });
-  return out;
+  return applyHomeSwitchLabels(out);
 }
 
 /** Demo tiles when not live — curated switches plus an unlabelled Spares group. */
@@ -1343,7 +1666,7 @@ export function demoAreaSwitches(on: Record<string, boolean> = {}): AreaSwitch[]
       available: true,
     },
   ];
-  return [...curated, ...spares];
+  return applyHomeSwitchLabels([...curated, ...spares]);
 }
 
 /** Group area switches; Spares last (Home hides that heading). */
@@ -1650,6 +1973,25 @@ export class HaSocket {
         domain,
         service: "set_value",
         service_data: { value },
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
+  }
+
+  /** Set fan speed via `fan.set_percentage` (0–100). */
+  async setFanPercentage(entityId: string, percentage: number, timeoutMs = 45_000) {
+    const [domain] = entityId.split(".");
+    if (domain !== "fan") {
+      throw new Error("Only fan.* entities support set_percentage.");
+    }
+    const clamped = Math.min(100, Math.max(0, Math.round(percentage)));
+    await this.send(
+      "call_service",
+      {
+        domain: "fan",
+        service: "set_percentage",
+        service_data: { percentage: clamped },
         target: { entity_id: entityId },
       },
       timeoutMs,

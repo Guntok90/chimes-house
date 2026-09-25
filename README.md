@@ -41,7 +41,7 @@ Mapped when present (preferred ids first):
 | Inverter status | `sensor.inverter_device_status`                                                  |
 | Battery SOC     | `sensor.battery_1_state_of_capacity`                                             |
 | Battery W       | `sensor.batteries_charge_discharge_power` (signed; negative = discharging)       |
-| Grid charge     | `switch.batteries_charge_from_grid` (`switch.turn_on` / `turn_off`)              |
+| Grid charge     | `switch.batteries_charge_from_grid` (`switch.turn_on` / `turn_off`) — Battery / Energy only; **hidden on Home** |
 | Grid cutoff SOC | `number.batteries_grid_charge_cutoff_soc` (`number.set_value`)                   |
 | Solar cutoff SOC| `number.batteries_charging_cutoff_capacity` — End-of-charge (`number.set_value`) |
 | Grid W          | `sensor.power_meter_active_power` (also `sensor.myenergi_chimes_power_grid`)     |
@@ -50,6 +50,7 @@ Mapped when present (preferred ids first):
 | Zappi plug      | `sensor.myenergi_zappi_25435526_plug_status`                                     |
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
 | Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
+| Fan (Home)      | Smart Life / Tuya Fan. Preferred `fan.fan` / `fan.bedroom_fan` / `fan.tuya_fan` / `fan.ceiling_fan` (`fan.turn_on` / `turn_off` + `fan.set_percentage` for Speed 1–N). Optional speed helper: `number.fan_speed` / `select.fan_speed` (or `input_number.*`). Optional light: `light.fan_light`. When no `fan.*` exists, Home shows **Not mapped** (does not fake speed). Plug real ids into `PREFERRED_FAN` / `PREFERRED_FAN_SPEED` / `PREFERRED_FAN_LIGHT` in `src/lib/ha.ts`. The mislabelled switch named “Fan” is renamed in the UI to **Master Bedroom Light** and is not used as the Fan tile. |
 | Range Rover     | Fuzzy when id/name contains `range_rover` / `land_rover` / `jlr` (W, SOC, plug). Plug also falls back to Front garden **Range Rover Hybrid** `switch.*` (on = charging path). No invented Cupra/VAG ids on this node. |
 | Range Rover kWh | Daily energy / Hybrid “today’s consumption” when present; otherwise “—” on Charge  |
 | Cupra / VAG     | Driveway Cupra stays on the **Zappi** path (`zappiPlugged` / `zappiW` / today). Do not remap VAG `*_plug_connected` onto Range Rover. |
@@ -128,7 +129,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
-| Home     | 24h energy graph, area-grouped switches (no Spares heading; hides dnd / myenergi / child lock / enable), Stevie |
+| Home     | 24h energy graph, Fan on/off+speed, area-grouped switches (no Spares heading; hides dnd / myenergi / child lock / enable / grid-charge; UI renames Fan→Master Bedroom Light, first Spare→Fly Killer), Stevie |
 | Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover status; Dispatch read-only) + **Battery** charge limits (grid/solar cutoffs + min SOC) + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge + Grid / Solar cutoffs + min SOC |
