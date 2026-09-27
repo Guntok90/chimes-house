@@ -28,11 +28,15 @@ import {
   rateToGbpPerKwh,
   parsePlugConnected,
   unmappedFanControl,
+  workingModeLabel,
+  workingModeOptions,
   wsFailureMessage,
   zappiModeOptions,
   evReadyByOptions,
+  DEFAULT_WORKING_MODES,
   DEFAULT_ZAPPI_MODES,
   DEFAULT_EV_READY_BY_OPTIONS,
+  HUAWEI_BATTERIES_DEVICE_ID,
   type HaEntityReg,
   type HaState,
 } from "./ha.ts";
@@ -108,6 +112,20 @@ const CHIMES_PI: HaState[] = [
   state("number.batteries_grid_charge_cutoff_soc", "85", "Grid charge cutoff SOC", "%"),
   state("number.batteries_charging_cutoff_capacity", "100", "End-of-charge SOC", "%"),
   state("number.batteries_discharging_cutoff_capacity", "5", "End-of-discharge SOC", "%"),
+  state("select.batteries_working_mode", "maximise_self_consumption", "Working mode"),
+  state("number.inverter_maximum_discharging_power", "5000", "Maximum discharging power", "W"),
+  state("number.inverter_grid_charge_maximum_power", "0", "Grid charge maximum power", "W"),
+  state("sensor.batteries_forcible_charge", "Stopped", "Forcible charge"),
+  state("button.batteries_stop_forcible_charge", "unknown", "Stop forcible charge"),
+  state("automation.luna_grid_charge_on_octopus_cheap", "on", "LUNA grid charge on Octopus cheap"),
+  state(
+    "automation.range_rover_hybrid_cheap_charge_force_override",
+    "on",
+    "Range Rover cheap charge",
+  ),
+  state("automation.charge_cars_at_off_peak", "on", "Charge cars at off peak"),
+  state("input_boolean.off_peak_charge_luna", "off", "Off peak charge LUNA"),
+  state("input_boolean.off_peak_stop_luna_on_clear", "off", "Off peak stop LUNA on clear"),
 ];
 
 describe("ha autoMap preferences", () => {
@@ -139,6 +157,19 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.gridChargeCutoffSoc, "number.batteries_grid_charge_cutoff_soc");
     assert.equal(map.solarChargeCutoffSoc, "number.batteries_charging_cutoff_capacity");
     assert.equal(map.minDischargeSoc, "number.batteries_discharging_cutoff_capacity");
+    assert.equal(map.workingMode, "select.batteries_working_mode");
+    assert.equal(map.maxDischargePowerW, "number.inverter_maximum_discharging_power");
+    assert.equal(map.gridChargeMaxPowerW, "number.inverter_grid_charge_maximum_power");
+    assert.equal(map.forcibleCharge, "sensor.batteries_forcible_charge");
+    assert.equal(map.stopForcibleCharge, "button.batteries_stop_forcible_charge");
+    assert.equal(map.automationLunaCheap, "automation.luna_grid_charge_on_octopus_cheap");
+    assert.equal(
+      map.automationRrCheap,
+      "automation.range_rover_hybrid_cheap_charge_force_override",
+    );
+    assert.equal(map.automationChargeCars, "automation.charge_cars_at_off_peak");
+    assert.equal(map.offPeakChargeLuna, "input_boolean.off_peak_charge_luna");
+    assert.equal(map.offPeakStopLunaOnClear, "input_boolean.off_peak_stop_luna_on_clear");
     // No true house-load W → leave unmapped (derive later); never lifetime kWh or myenergi home.
     assert.equal(map.houseW, undefined);
     assert.notEqual(map.houseW, "sensor.power_meter_consumption");
@@ -174,6 +205,15 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.gridChargeCutoffSoc, 85);
     assert.equal(live.solarChargeCutoffSoc, 100);
     assert.equal(live.minDischargeSoc, 5);
+    assert.equal(live.workingMode, "maximise_self_consumption");
+    assert.equal(live.maxDischargePowerW, 5000);
+    assert.equal(live.gridChargeMaxPowerW, 0);
+    assert.equal(live.forcibleCharge, "Stopped");
+    assert.equal(live.automationLunaCheap, true);
+    assert.equal(live.automationRrCheap, true);
+    assert.equal(live.automationChargeCars, true);
+    assert.equal(live.offPeakChargeLuna, false);
+    assert.equal(live.offPeakStopLunaOnClear, false);
     assert.equal(live.sunAboveHorizon, true);
     // No rate sensors on Pi inventory → fallback Intelligent Go constants.
     assert.equal(live.cheapRateGbp, DEFAULT_TARIFF.lowGbpPerKwh);
@@ -519,6 +559,26 @@ describe("live update helpers", () => {
     assert.equal(sameLive(a, { ...a, batteryW: a.batteryW - 10 }), false);
     assert.equal(sameLive(a, { ...a, gridCharge: !a.gridCharge }), false);
     assert.equal(sameLive(a, { ...a, minDischargeSoc: (a.minDischargeSoc ?? 5) + 1 }), false);
+    assert.equal(sameLive(a, { ...a, workingMode: "time_of_use_luna2000" }), false);
+    assert.equal(sameLive(a, { ...a, offPeakChargeLuna: true }), false);
+  });
+
+  it("maps Settings entities and labels working modes for Dad UI", () => {
+    const map = autoMap(CHIMES_PI);
+    assert.equal(workingModeLabel("maximise_self_consumption"), "Maximise self consumption");
+    assert.equal(workingModeLabel("time_of_use_luna2000"), "Time of use (LUNA2000)");
+    assert.deepEqual(workingModeOptions(CHIMES_PI, map), [...DEFAULT_WORKING_MODES]);
+    assert.equal(HUAWEI_BATTERIES_DEVICE_ID, "3bebe112d849a7d2abfda89b1e0792dc");
+    assert.equal(PREFERRED.workingMode?.[0], "select.batteries_working_mode");
+    assert.equal(PREFERRED.automationChargeCars?.[0], "automation.charge_cars_at_off_peak");
+  });
+
+  it("falls back to smart_plug_socket_1 for Range Rover when Hybrid switch missing", () => {
+    const states = CHIMES_PI.filter((s) => s.entity_id !== "switch.range_rover_hybrid").concat([
+      state("switch.smart_plug_socket_1", "on", "Smart Plug Socket 1"),
+    ]);
+    const map = autoMap(states);
+    assert.equal(map["range-rover-hybrid"], "switch.smart_plug_socket_1");
   });
 
   it("liveFromStates accepts a Map (socket path) with the same result", () => {

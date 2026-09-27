@@ -3,6 +3,7 @@ import { useHouse, useLive, useTariffs } from "@/lib/house-store";
 import { estimateImportCostParts } from "@/lib/tariffs";
 import { ChargeSection } from "./charge-section";
 import { ChargeLimitsSection } from "./charge-limits";
+import { EnergySettingsSection } from "./energy-settings";
 import { CostBars, PowerArea } from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
@@ -56,6 +57,8 @@ export function EnergyView() {
       <ChargeSection tone="umber" />
 
       <ChargeLimitsSection title="Battery" tone="sand" />
+
+      <EnergySettingsSection title="Settings" tone="teal" />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section>

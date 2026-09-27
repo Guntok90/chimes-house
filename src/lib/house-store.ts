@@ -11,7 +11,13 @@ import {
   CHARGE_LIMIT_DEFAULTS,
   DEFAULT_EV_READY_BY_OPTIONS,
   DEFAULT_HA_URL,
+  DEFAULT_WORKING_MODES,
   DEFAULT_ZAPPI_MODES,
+  HUAWEI_BATTERIES_DEVICE_ID,
+  POWER_LIMIT_DEFAULTS,
+  SOLAR_SELF_USE_DISCHARGE_W,
+  SOLAR_SELF_USE_GRID_CHARGE_MAX_W,
+  SOLAR_SELF_USE_WORKING_MODE,
   HaSocket,
   areaSwitchesFromStates,
   chargeLimitMetaMap,
@@ -23,8 +29,10 @@ import {
   fanLevelToPercentage,
   haWriteFailureMessage,
   isHaTimeoutError,
+  powerLimitMetaMap,
   readCreds,
   tariffsFromStates,
+  workingModeOptions,
   writeCreds,
   wsFailureMessage,
   zappiModeOptions,
@@ -38,6 +46,7 @@ import {
   type HaMap,
   type HaState,
   type NumberControlMeta,
+  type PowerLimitKey,
   type SwitchId,
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
@@ -134,9 +143,28 @@ const DEMO_CHARGE_META: Record<ChargeLimitKey, NumberControlMeta> = {
   minDischargeSoc: { ...CHARGE_LIMIT_DEFAULTS.minDischargeSoc },
 };
 
+const DEMO_POWER_META: Record<PowerLimitKey, NumberControlMeta> = {
+  maxDischargePowerW: { ...POWER_LIMIT_DEFAULTS.maxDischargePowerW },
+  gridChargeMaxPowerW: { ...POWER_LIMIT_DEFAULTS.gridChargeMaxPowerW },
+};
+
+type SettingsBoolKey =
+  | "automationLunaCheap"
+  | "automationRrCheap"
+  | "automationChargeCars"
+  | "offPeakChargeLuna"
+  | "offPeakStopLunaOnClear";
+
 /** In-flight Battery / Zappi / Octopus Apply — holds optimistic UI until HA state confirms. */
 export type WritePending = {
-  key: "gridCharge" | "zappiMode" | "evReadyBy" | ChargeLimitKey;
+  key:
+    | "gridCharge"
+    | "zappiMode"
+    | "evReadyBy"
+    | "workingMode"
+    | PowerLimitKey
+    | SettingsBoolKey
+    | ChargeLimitKey;
   expected: boolean | number | string;
 };
 
@@ -164,10 +192,14 @@ type Store = {
   historyStatus: HistoryStatus;
   /** Min/max/step for mapped Huawei charge-limit number entities. */
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
+  /** Min/max/step for mapped inverter power number entities (Settings). */
+  powerLimitMeta: Record<PowerLimitKey, NumberControlMeta>;
   /** Options for mapped Zappi charge-mode select (HA attributes or defaults). */
   zappiModeOptions: string[];
   /** Options for Octopus Intelligent EV ready-by select (HA attributes or defaults). */
   evReadyByOptions: string[];
+  /** Options for Huawei batteries working-mode select (Settings). */
+  workingModeOptions: string[];
   /** Last write error from Battery / Zappi / Octopus Apply (cleared on success). */
   writeError?: string;
   /**
@@ -194,6 +226,19 @@ type Store = {
    * (including automation.charge_cars_at_off_peak).
    */
   applyEvReadyBy: (time: string) => Promise<boolean>;
+  /** Explicit Apply: Huawei working mode via select.select_option. */
+  applyWorkingMode: (mode: string) => Promise<boolean>;
+  /** Explicit Apply: inverter max discharge / grid-charge max power (W). */
+  applyPowerLimit: (key: PowerLimitKey, value: number) => Promise<boolean>;
+  /** Enable/disable a mapped automation or input_boolean helper. */
+  applySettingsBool: (key: SettingsBoolKey, on: boolean) => Promise<boolean>;
+  /** Stop Huawei forcible charge (button.press or huawei_solar service). */
+  stopForcibleCharge: () => Promise<boolean>;
+  /**
+   * One-tap solar self-use: stop forcible + grid charge off + grid max 0 W +
+   * discharge 5000 W + working mode maximise_self_consumption.
+   */
+  applySolarSelfUseNow: () => Promise<boolean>;
   /** Toggle by HA entity_id (or demo.* id) — Home area tiles. */
   toggleEntity: (entityId: string) => void;
   /** Home Fan on/off (fan.turn_on / turn_off, or demo). */
@@ -306,6 +351,30 @@ function holdPendingLive(get: () => Store, set: (partial: Partial<Store>) => voi
       return;
     }
     set({ live: { ...live, evReadyBy: String(pending.expected) } });
+    return;
+  }
+  if (pending.key === "workingMode") {
+    if (live.workingMode === pending.expected) {
+      set({ writePending: undefined });
+      return;
+    }
+    set({ live: { ...live, workingMode: String(pending.expected) } });
+    return;
+  }
+  const boolKeys: SettingsBoolKey[] = [
+    "automationLunaCheap",
+    "automationRrCheap",
+    "automationChargeCars",
+    "offPeakChargeLuna",
+    "offPeakStopLunaOnClear",
+  ];
+  if ((boolKeys as string[]).includes(pending.key)) {
+    const key = pending.key as SettingsBoolKey;
+    if (live[key] === pending.expected) {
+      set({ writePending: undefined });
+      return;
+    }
+    set({ live: { ...live, [key]: pending.expected as boolean } });
     return;
   }
   const key = pending.key;
@@ -437,8 +506,10 @@ export const useHouse = create<Store>((set, get) => {
     ...emptyHistory(),
     historyStatus: "idle",
     chargeLimitMeta: DEMO_CHARGE_META,
+    powerLimitMeta: DEMO_POWER_META,
     zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
     evReadyByOptions: [...DEFAULT_EV_READY_BY_OPTIONS],
+    workingModeOptions: [...DEFAULT_WORKING_MODES],
     tariffs: bootTariffs(),
 
     boot(opts) {
@@ -593,8 +664,10 @@ export const useHouse = create<Store>((set, get) => {
           areaSwitches: rebuildAreaSwitches(list),
           fanControl: fanControlFromStates(list, mapped),
           chargeLimitMeta: chargeLimitMetaMap(list, mapped),
+          powerLimitMeta: powerLimitMetaMap(list, mapped),
           zappiModeOptions: zappiModeOptions(list, mapped),
           evReadyByOptions: evReadyByOptions(list, mapped),
+          workingModeOptions: workingModeOptions(list, mapped),
           tariffs,
         });
         if (!wasLive && get().status === "live") {
@@ -754,8 +827,10 @@ export const useHouse = create<Store>((set, get) => {
         writeError: undefined,
         writePending: undefined,
         chargeLimitMeta: DEMO_CHARGE_META,
+        powerLimitMeta: DEMO_POWER_META,
         zappiModeOptions: [...DEFAULT_ZAPPI_MODES],
         evReadyByOptions: [...DEFAULT_EV_READY_BY_OPTIONS],
+        workingModeOptions: [...DEFAULT_WORKING_MODES],
         ...emptyHistory(),
         historyStatus: "idle",
       });
@@ -1021,6 +1096,265 @@ export const useHouse = create<Store>((set, get) => {
         writePending: undefined,
       });
       return false;
+    },
+
+    async applyWorkingMode(mode) {
+      const { map, status, live, workingModeOptions: options } = get();
+      const entity = map.workingMode;
+      const trimmed = mode.trim();
+      if (!entity || status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — working mode stays read-only." });
+        return false;
+      }
+      if (!trimmed || (options.length > 0 && !options.includes(trimmed))) {
+        set({ writeError: "Pick a working mode the battery supports, then Apply." });
+        return false;
+      }
+      const previous = live.workingMode;
+      set({
+        live: { ...live, workingMode: trimmed },
+        writeError: undefined,
+        writePending: { key: "workingMode", expected: trimmed },
+      });
+
+      let timedOut = false;
+      try {
+        await socket.setSelect(entity, trimmed);
+      } catch (err) {
+        timedOut = isHaTimeoutError(err);
+        if (!timedOut) {
+          set({
+            live: { ...get().live, workingMode: previous },
+            writeError: haWriteFailureMessage(err, "working mode"),
+            writePending: undefined,
+          });
+          return false;
+        }
+      }
+
+      const confirmed = await socket.waitForCachedState(
+        entity,
+        (s) => s.state.trim() === trimmed,
+        timedOut ? 45_000 : 12_000,
+      );
+      if (confirmed) {
+        set({
+          live: { ...get().live, workingMode: trimmed },
+          writeError: undefined,
+          writePending: undefined,
+        });
+        return true;
+      }
+
+      set({
+        live: { ...get().live, workingMode: previous },
+        writeError: timedOut
+          ? "Home Assistant timed out and working mode did not change on the Pi. Check Tailscale, then Apply again."
+          : "Working mode did not update on the Pi.",
+        writePending: undefined,
+      });
+      return false;
+    },
+
+    async applyPowerLimit(key, value) {
+      const { map, status, live, powerLimitMeta } = get();
+      const entity = map[key];
+      if (!entity || status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — power limits stay read-only." });
+        return false;
+      }
+      const meta = powerLimitMeta[key];
+      const clamped = Math.min(meta.max, Math.max(meta.min, Math.round(value)));
+      const previous = live[key];
+      const labels: Record<PowerLimitKey, string> = {
+        maxDischargePowerW: "max discharge power",
+        gridChargeMaxPowerW: "grid charge max power",
+      };
+      set({
+        live: { ...live, [key]: clamped },
+        writeError: undefined,
+        writePending: { key, expected: clamped },
+      });
+
+      let timedOut = false;
+      try {
+        await socket.setNumber(entity, clamped);
+      } catch (err) {
+        timedOut = isHaTimeoutError(err);
+        if (!timedOut) {
+          set({
+            live: { ...get().live, [key]: previous },
+            writeError: haWriteFailureMessage(err, labels[key]),
+            writePending: undefined,
+          });
+          return false;
+        }
+      }
+
+      const confirmed = await socket.waitForCachedState(
+        entity,
+        (s) => numberStateMatches(s.state, clamped),
+        timedOut ? 45_000 : 12_000,
+      );
+      if (confirmed) {
+        set({
+          live: { ...get().live, [key]: clamped },
+          writeError: undefined,
+          writePending: undefined,
+        });
+        return true;
+      }
+
+      set({
+        live: { ...get().live, [key]: previous },
+        writeError: timedOut
+          ? `Home Assistant timed out and ${labels[key]} did not change on the Pi. Check Tailscale, then Apply again.`
+          : `${labels[key]} did not update on the Pi.`,
+        writePending: undefined,
+      });
+      return false;
+    },
+
+    async applySettingsBool(key, on) {
+      const { map, status, live } = get();
+      const entity = map[key];
+      if (!entity || status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — Settings stay read-only." });
+        return false;
+      }
+      const previous = live[key];
+      const labels: Record<SettingsBoolKey, string> = {
+        automationLunaCheap: "LUNA cheap-window automation",
+        automationRrCheap: "Range Rover overnight automation",
+        automationChargeCars: "Charge Cars + Battery at Off Peak",
+        offPeakChargeLuna: "off-peak LUNA forcible helper",
+        offPeakStopLunaOnClear: "stop LUNA on clear helper",
+      };
+      set({
+        live: { ...live, [key]: on },
+        writeError: undefined,
+        writePending: { key, expected: on },
+      });
+
+      let timedOut = false;
+      try {
+        await socket.call(entity, on);
+      } catch (err) {
+        timedOut = isHaTimeoutError(err);
+        if (!timedOut) {
+          set({
+            live: { ...get().live, [key]: previous },
+            writeError: haWriteFailureMessage(err, labels[key]),
+            writePending: undefined,
+          });
+          return false;
+        }
+      }
+
+      const confirmed = await socket.waitForCachedState(
+        entity,
+        (s) => switchStateMatches(s.state, on),
+        timedOut ? 45_000 : 12_000,
+      );
+      if (confirmed) {
+        set({
+          live: { ...get().live, [key]: on },
+          writeError: undefined,
+          writePending: undefined,
+        });
+        return true;
+      }
+
+      set({
+        live: { ...get().live, [key]: previous },
+        writeError: timedOut
+          ? `Home Assistant timed out and ${labels[key]} did not change on the Pi. Check Tailscale, then Apply again.`
+          : `${labels[key]} did not update on the Pi.`,
+        writePending: undefined,
+      });
+      return false;
+    },
+
+    async stopForcibleCharge() {
+      const { map, status, live } = get();
+      if (status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — cannot stop forcible charge." });
+        return false;
+      }
+      const button = map.stopForcibleCharge;
+      set({ writeError: undefined });
+      try {
+        if (button) {
+          await socket.pressButton(button);
+        } else {
+          await socket.stopHuaweiForcibleCharge(HUAWEI_BATTERIES_DEVICE_ID);
+        }
+      } catch (err) {
+        set({ writeError: haWriteFailureMessage(err, "stop forcible charge") });
+        return false;
+      }
+
+      const sensor = map.forcibleCharge;
+      if (sensor) {
+        const confirmed = await socket.waitForCachedState(
+          sensor,
+          (s) => /stop/i.test(s.state),
+          20_000,
+        );
+        if (confirmed) {
+          set({
+            live: { ...get().live, forcibleCharge: "Stopped" },
+            writeError: undefined,
+          });
+          return true;
+        }
+        // Service accepted but sensor not yet Stopped — still treat as sent.
+        set({
+          live: { ...live, forcibleCharge: live.forcibleCharge },
+          writeError: undefined,
+        });
+        return true;
+      }
+      return true;
+    },
+
+    async applySolarSelfUseNow() {
+      const { status } = get();
+      if (status !== "live" || !readCreds()) {
+        set({ writeError: "Not connected to the Pi — Solar self-use stays demo-only." });
+        return false;
+      }
+      set({ writeError: undefined });
+
+      const stopOk = await get().stopForcibleCharge();
+      if (!stopOk && get().writeError) return false;
+
+      const gridOffOk = await get().applyGridCharge(false);
+      if (!gridOffOk) return false;
+
+      const { map } = get();
+      if (map.gridChargeMaxPowerW) {
+        const gridMaxOk = await get().applyPowerLimit(
+          "gridChargeMaxPowerW",
+          SOLAR_SELF_USE_GRID_CHARGE_MAX_W,
+        );
+        if (!gridMaxOk) return false;
+      }
+
+      if (map.maxDischargePowerW) {
+        const dischargeOk = await get().applyPowerLimit(
+          "maxDischargePowerW",
+          SOLAR_SELF_USE_DISCHARGE_W,
+        );
+        if (!dischargeOk) return false;
+      }
+
+      if (map.workingMode) {
+        const modeOk = await get().applyWorkingMode(SOLAR_SELF_USE_WORKING_MODE);
+        if (!modeOk) return false;
+      }
+
+      return true;
     },
 
     async setTariffs(patch) {

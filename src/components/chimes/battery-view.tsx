@@ -1,6 +1,7 @@
 import { HOURS, WEEK, usesDemoCharts } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import { ChargeLimitsSection } from "./charge-limits";
+import { EnergySettingsSection } from "./energy-settings";
 import { LineArea } from "./charts";
 import { NoHistoryYet } from "./no-history";
 import { Metric, PageTitle, Row, SectionLabel, Surface } from "./ui";
@@ -54,6 +55,8 @@ export function BatteryView() {
       </div>
 
       <ChargeLimitsSection />
+
+      <EnergySettingsSection />
 
       <div className="grid gap-6 lg:grid-cols-2">
         <section>

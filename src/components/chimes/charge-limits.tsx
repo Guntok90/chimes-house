@@ -122,7 +122,8 @@ export function ChargeLimitsSection({
       <Surface tone={tone} className="space-y-5 p-5">
         <p className="text-sm leading-relaxed text-ink-soft">
           Grid, solar, and minimum SOC are Huawei LUNA settings on the Pi. Change the value, then
-          press Apply — nothing is sent while you type or drag.
+          press Apply — nothing is sent while you type or drag. Working mode, power limits, and
+          overnight automations are in Settings just below.
         </p>
 
         <GridChargeAllowRow
