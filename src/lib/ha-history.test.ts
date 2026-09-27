@@ -7,6 +7,7 @@ import {
   daysFromStatistics,
   hourKwh,
   hoursFromHistory,
+  lastHoursWindow,
   localDayKey,
   localMonthKey,
   monthKeyFromStart,
@@ -16,6 +17,7 @@ import {
   type HaStatisticsBag,
 } from "./ha-history.ts";
 import type { HaMap } from "./ha.ts";
+import type { HourPoint } from "./house.ts";
 import { DEFAULT_TARIFF } from "./octopus.ts";
 
 describe("ha history helpers", () => {
@@ -55,6 +57,27 @@ describe("ha history helpers", () => {
     const hours = hoursFromHistory(bag, { solarNowW: map.solarNowW }, now, 48);
     assert.equal(hours.length, 48);
     assert.match(hours[0].hour, / /); // weekday label when multi-day
+  });
+
+  it("lastHoursWindow keeps Home/Battery on a true 24h series with HH:00 labels", () => {
+    const week: HourPoint[] = Array.from({ length: 48 }, (_, i) => ({
+      hour: `Mon ${10 + Math.floor(i / 24)} ${String(i % 24).padStart(2, "0")}:00`,
+      soc: i,
+      battW: i,
+      solarW: i,
+      houseW: i,
+      gridW: i,
+      carW: 0,
+    }));
+    const day = lastHoursWindow(week);
+    assert.equal(day.length, 24);
+    assert.equal(day[0].hour, "00:00");
+    assert.equal(day[day.length - 1].hour, "23:00");
+    assert.equal(day[0].soc, 24); // newest 24 of 48
+    assert.deepEqual(
+      lastHoursWindow(day).map((h) => h.hour),
+      day.map((h) => h.hour),
+    );
   });
 
   it("returns empty days when statistics are all zero", () => {

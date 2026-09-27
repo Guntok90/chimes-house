@@ -1,4 +1,5 @@
 import { HOURS, WEEK, usesDemoCharts } from "@/lib/house";
+import { lastHoursWindow } from "@/lib/ha-history";
 import { useHouse, useLive } from "@/lib/house-store";
 import { ChargeLimitsSection } from "./charge-limits";
 import { EnergySettingsSection } from "./energy-settings";
@@ -18,9 +19,8 @@ export function BatteryView() {
   const chartsReady = !liveMode || (historyStatus === "ready" && hoursSrc.length > 0);
   const today = week[week.length - 1];
   const discharging = live.batteryW < 0;
-  const lastDay = hoursSrc.slice(-24);
-  const hours = lastDay.map((h) => ({
-    hour: h.hour.includes(" ") ? h.hour.split(" ").pop()! : h.hour,
+  const hours = lastHoursWindow(hoursSrc).map((h) => ({
+    hour: h.hour,
     SOC: h.soc,
     Power: h.battW,
   }));
