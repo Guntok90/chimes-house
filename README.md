@@ -54,7 +54,7 @@ Mapped when present (preferred ids first):
 | Range Rover     | Meross Hybrid preferred: plug = cable sensor → `switch.range_rover_hybrid` (on = charging path) → ambiguous plug binary last. Power = `sensor.range_rover_hybrid_current_consumption`. No Cupra/VAG ids. |
 | Range Rover kWh | `sensor.range_rover_hybrid_today_s_consumption` (Meross today) when present — same idea as Zappi `energy_used_today`; else “—” |
 | Cupra / VAG     | Driveway Cupra stays on the **Zappi** path (`zappiPlugged` / `zappiW` / today). Do not remap VAG `*_plug_connected` onto Range Rover. |
-| Cheap window    | `binary_sensor.octopus_off_peak` (and Intelligent dispatch/ready binaries) — UI: Cheap Energy Available / Cheap window |
+| Cheap window    | Import Octopus off-peak binary only: preferred `binary_sensor.octopus_off_peak`, else `binary_sensor.octopus_energy_electricity_*_off_peak` (never automations / `input_*` / `export_off_peak`) — UI: Cheap/Peak badge, Cheap Energy Available |
 | EV Ready by     | `select.octopus_energy_<DEVICE_ID>_intelligent_target_time` (or `time.*_intelligent_target_time`) via `select.select_option` / `time.set_value` |
 | Stevie          | `person.stevie_w`                                                                |
 

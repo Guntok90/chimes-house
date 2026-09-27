@@ -153,7 +153,9 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   ],
   // Meross Hybrid “Today's consumption” (same pattern as Zappi energy_used_today).
   rangeRoverTodayKwh: ["sensor.range_rover_hybrid_today_s_consumption"],
-  offPeak: [],
+  // Import electricity Octopus off-peak window only — never automations / helpers / export.
+  // Fuzzy discovery also matches binary_sensor.octopus_energy_electricity_*_off_peak.
+  offPeak: ["binary_sensor.octopus_off_peak"],
   intelligent: [],
   // Octopus Intelligent Go “EV ready by” — BottlecapDave select (preferred) or time entity.
   evReadyBy: [],
@@ -879,13 +881,17 @@ export function autoMap(states: HaState[]): HaMap {
     isEnergyUnit,
   );
 
-  const offPeak = find(
+  // Cheap/Peak badge — only the import Octopus off-peak binary_sensor.
+  // Never automation.*/input_* (enabled automations stay "on") or export_off_peak.
+  const offPeak = resolve(
     states,
-    (_s, b) =>
-      b.includes("off_peak") ||
-      b.includes("off-peak") ||
-      b.includes("offpeak") ||
-      (b.includes("octopus") && (b.includes("slot") || b.includes("cheap") || b.includes("off"))),
+    "offPeak",
+    (s, b) =>
+      s.entity_id.startsWith("binary_sensor.") &&
+      !s.entity_id.startsWith("automation.") &&
+      !s.entity_id.startsWith("input_") &&
+      !b.includes("export") &&
+      (b.includes("off_peak") || b.includes("off-peak") || b.includes("offpeak")),
   );
 
   const intelligent = find(
