@@ -21,6 +21,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { HOURS, usesDemoCharts } from "@/lib/house";
+import { lastHoursWindow } from "@/lib/ha-history";
 import { groupSwitchesByArea, SPARES_AREA, type AreaSwitch, type FanControl } from "@/lib/ha";
 import { useHouse, useLive } from "@/lib/house-store";
 import { BatteryView } from "./battery-view";
@@ -336,7 +337,11 @@ function HomeView() {
   const toggleFanLight = useHouse((s) => s.toggleFanLight);
 
   const liveMode = !usesDemoCharts(status);
-  const graphData = liveMode ? historyHours : HOURS;
+  // Store keeps 7×24h for Overview day-scroll; Home label is "Last 24 hours".
+  const graphData = useMemo(
+    () => lastHoursWindow(liveMode ? historyHours : HOURS),
+    [liveMode, historyHours],
+  );
   const graphReady = !liveMode || (historyStatus === "ready" && graphData.length > 0);
   const legend = dayChartLegendColors("paper");
 

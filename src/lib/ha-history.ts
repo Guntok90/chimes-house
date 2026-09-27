@@ -137,6 +137,20 @@ function hourLabel(t: Date, multiDay: boolean): string {
 }
 
 /**
+ * Newest `count` hourly points for a single-day (24h) chart.
+ * Store history keeps 7×24 for Overview day-scroll; Home / Battery need the
+ * trailing day with HH:00 labels (not "Mon 14 09:00").
+ */
+export function lastHoursWindow(hours: HourPoint[], count = 24): HourPoint[] {
+  if (hours.length === 0) return [];
+  const slice = hours.length > count ? hours.slice(-count) : hours;
+  return slice.map((p) => {
+    const time = p.hour.includes(" ") ? (p.hour.split(" ").pop() ?? p.hour) : p.hour;
+    return time === p.hour ? p : { ...p, hour: time };
+  });
+}
+
+/**
  * Build hourly points from live HA history.
  * `count` defaults to 24; Overview day-scroll uses 7×24 over the past week.
  * Empty → [] (never invent demo curves).
