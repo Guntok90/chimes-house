@@ -4,13 +4,43 @@ import {
   GLASS_OPACITY_DEFAULT,
   GLASS_OPACITY_MAX,
   GLASS_OPACITY_MIN,
+  OVERVIEW_FLOW_BOX_KEY,
+  OVERVIEW_GRAPH_BOX_KEY,
   clampGlassOpacity,
   clampOverviewBox,
   glassBackdropBlurPx,
   glassFill,
   nudgeOverviewBoxPosition,
+  parseOverviewBox,
   prefersManualOnlyBoxResize,
+  readOverviewBox,
+  resolveOverviewBox,
+  writeOverviewBox,
 } from "./overview-glass.ts";
+
+function memoryStorage(seed: Record<string, string> = {}): Storage {
+  const map = new Map<string, string>(Object.entries(seed));
+  return {
+    get length() {
+      return map.size;
+    },
+    clear() {
+      map.clear();
+    },
+    getItem(key: string) {
+      return map.has(key) ? map.get(key)! : null;
+    },
+    key(index: number) {
+      return [...map.keys()][index] ?? null;
+    },
+    removeItem(key: string) {
+      map.delete(key);
+    },
+    setItem(key: string, value: string) {
+      map.set(key, value);
+    },
+  };
+}
 
 describe("overview glass opacity", () => {
   it("allows the full 0–100% range with no 25% floor", () => {
@@ -89,5 +119,62 @@ describe("overview box resize policy", () => {
       }),
       false,
     );
+  });
+});
+
+describe("overview box persistence", () => {
+  const viewport = { width: 1024, height: 768 };
+  const fallback = { x: 28, y: 96, w: 560, h: 340 };
+  const saved = { x: 120, y: 180, w: 400, h: 280 };
+
+  it("keeps stable localStorage key names for graph and flow tiles", () => {
+    assert.equal(OVERVIEW_GRAPH_BOX_KEY, "chimes.overview.graph");
+    assert.equal(OVERVIEW_FLOW_BOX_KEY, "chimes.overview.flow");
+  });
+
+  it("parseOverviewBox accepts finite geometry and rejects garbage", () => {
+    assert.deepEqual(parseOverviewBox(saved), saved);
+    assert.equal(parseOverviewBox(null), null);
+    assert.equal(parseOverviewBox({ x: 1, y: 2, w: 3 }), null);
+    assert.equal(parseOverviewBox({ x: 1, y: 2, w: Number.NaN, h: 4 }), null);
+    assert.equal(parseOverviewBox("nope"), null);
+  });
+
+  it("round-trips through storage and prefers saved over defaults on resolve", () => {
+    const store = memoryStorage();
+    assert.equal(readOverviewBox(OVERVIEW_GRAPH_BOX_KEY, store), null);
+    assert.equal(writeOverviewBox(OVERVIEW_GRAPH_BOX_KEY, saved, store), true);
+    assert.deepEqual(readOverviewBox(OVERVIEW_GRAPH_BOX_KEY, store), saved);
+
+    const restored = resolveOverviewBox(saved, fallback, viewport, { manualOnly: true });
+    assert.equal(restored.w, saved.w);
+    assert.equal(restored.h, saved.h);
+    assert.notEqual(restored.w, fallback.w);
+
+    const fresh = resolveOverviewBox(null, fallback, viewport, { manualOnly: false });
+    assert.equal(fresh.w, fallback.w);
+    assert.equal(fresh.h, fallback.h);
+  });
+
+  it("does not replace a smaller saved flow box with the large default", () => {
+    // Regression: old w<560 "stale" migration ignored every custom flow size.
+    const smallFlow = { x: 40, y: 200, w: 420, h: 300 };
+    const largeDefault = { x: 300, y: 200, w: 680, h: 480 };
+    const resolved = resolveOverviewBox(smallFlow, largeDefault, viewport, {
+      manualOnly: true,
+    });
+    assert.equal(resolved.w, 420);
+    assert.equal(resolved.h, 300);
+    assert.equal(resolved.x, smallFlow.x);
+    assert.equal(resolved.y, smallFlow.y);
+  });
+
+  it("rejects invalid writes so defaults cannot be stored as NaN garbage", () => {
+    const store = memoryStorage();
+    assert.equal(
+      writeOverviewBox(OVERVIEW_FLOW_BOX_KEY, { x: 1, y: 2, w: Number.NaN, h: 4 }, store),
+      false,
+    );
+    assert.equal(readOverviewBox(OVERVIEW_FLOW_BOX_KEY, store), null);
   });
 });
