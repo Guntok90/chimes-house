@@ -10,7 +10,7 @@ export type HaState = {
 
 export type TariffEntityId = "tariffCheap" | "tariffPeak";
 
-export type HaExtraMapKey = "fan" | "fanSpeed" | "fanLight";
+export type HaExtraMapKey = "fan" | "fanSpeed" | "fanLight" | "stopForcibleCharge";
 
 export type HaMap = Partial<
   Record<keyof HouseLive | SwitchId | TariffEntityId | HaExtraMapKey, string>
@@ -67,7 +67,7 @@ export const PREFERRED_SWITCHES: Partial<Record<SwitchId, string[]>> = {
   "pond-1": ["switch.pond_1_switch_1"],
   "pond-2": ["switch.pond_2_switch_1"],
   "willow-tree": ["switch.willow_tree"],
-  "range-rover-hybrid": ["switch.range_rover_hybrid"],
+  "range-rover-hybrid": ["switch.range_rover_hybrid", "switch.smart_plug_socket_1"],
 };
 
 /** Curated Front garden slots — always shown (Willow + Range Rover Hybrid only). */
@@ -173,11 +173,46 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "number.batteries_discharging_cutoff_capacity",
     "number.inverter_discharging_cutoff_capacity",
   ],
+  workingMode: ["select.batteries_working_mode"],
+  maxDischargePowerW: [
+    "number.inverter_maximum_discharging_power",
+    "number.batteries_maximum_discharging_power",
+  ],
+  gridChargeMaxPowerW: [
+    "number.inverter_grid_charge_maximum_power",
+    "number.batteries_grid_charge_maximum_power",
+  ],
+  forcibleCharge: ["sensor.batteries_forcible_charge"],
+  automationLunaCheap: ["automation.luna_grid_charge_on_octopus_cheap"],
+  automationRrCheap: ["automation.range_rover_hybrid_cheap_charge_force_override"],
+  automationChargeCars: ["automation.charge_cars_at_off_peak"],
+  offPeakChargeLuna: ["input_boolean.off_peak_charge_luna"],
+  offPeakStopLunaOnClear: ["input_boolean.off_peak_stop_luna_on_clear"],
   stevieHome: ["person.stevie_w"],
   // Read-only tariff sensors (£/kWh or p/kWh) — never written back to HA.
   cheapRateGbp: [],
   peakRateGbp: [],
 };
+
+/** Preferred button to stop Huawei forcible charge (Settings). */
+export const PREFERRED_STOP_FORCIBLE_CHARGE = ["button.batteries_stop_forcible_charge"] as const;
+
+/**
+ * Huawei ESS device_id on Chimes-Pi for `huawei_solar.stop_forcible_charge`
+ * when the stop button entity is missing.
+ */
+export const HUAWEI_BATTERIES_DEVICE_ID = "3bebe112d849a7d2abfda89b1e0792dc";
+
+/** Typical Huawei working-mode options when HA omits attributes.options. */
+export const DEFAULT_WORKING_MODES = [
+  "maximise_self_consumption",
+  "time_of_use_luna2000",
+] as const;
+
+/** Solar self-use now preset targets (Settings one-tap). */
+export const SOLAR_SELF_USE_WORKING_MODE = "maximise_self_consumption";
+export const SOLAR_SELF_USE_DISCHARGE_W = 5000;
+export const SOLAR_SELF_USE_GRID_CHARGE_MAX_W = 0;
 
 /** Preferred input_number / number helpers for custom £/kWh display rates. */
 export const PREFERRED_TARIFFS: Record<TariffEntityId, readonly string[]> = {
@@ -192,8 +227,29 @@ export const CHARGE_LIMIT_DEFAULTS = {
   minDischargeSoc: { min: 0, max: 100, step: 1 },
 } as const;
 
+/** Defaults for inverter power number entities (W). */
+export const POWER_LIMIT_DEFAULTS = {
+  maxDischargePowerW: { min: 0, max: 5000, step: 100 },
+  gridChargeMaxPowerW: { min: 0, max: 5000, step: 100 },
+} as const;
+
 /** Default minimum SOC (%) when the Pi has no value yet (demo + first Apply hint). */
 export const DEFAULT_MIN_DISCHARGE_SOC = 5;
+
+export type PowerLimitKey = keyof typeof POWER_LIMIT_DEFAULTS;
+
+/** Dad-facing label for a Huawei working-mode option id. */
+export function workingModeLabel(option: string): string {
+  const known: Record<string, string> = {
+    maximise_self_consumption: "Maximise self consumption",
+    time_of_use_luna2000: "Time of use (LUNA2000)",
+  };
+  if (known[option]) return known[option];
+  return option
+    .replace(/_/g, " ")
+    .replace(/\bluna2000\b/gi, "LUNA2000")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
 
 /** True when an HA write failed because the websocket request timed out. */
 export function isHaTimeoutError(err: unknown): boolean {
@@ -902,6 +958,101 @@ export function autoMap(states: HaState[]): HaMap {
           (b.includes("soc") || b.includes("capacity") || b.includes("state_of_charge")))),
   );
 
+  const workingMode = resolve(
+    states,
+    "workingMode",
+    (s, b) =>
+      s.entity_id.startsWith("select.") &&
+      (b.includes("working_mode") ||
+        (b.includes("batteries") && b.includes("mode") && !b.includes("charge_mode"))),
+  );
+
+  const maxDischargePowerW = resolve(
+    states,
+    "maxDischargePowerW",
+    (s, b) =>
+      s.entity_id.startsWith("number.") &&
+      (b.includes("maximum_discharging_power") ||
+        (b.includes("max") && b.includes("discharg") && b.includes("power"))),
+  );
+
+  const gridChargeMaxPowerW = resolve(
+    states,
+    "gridChargeMaxPowerW",
+    (s, b) =>
+      s.entity_id.startsWith("number.") &&
+      (b.includes("grid_charge_maximum_power") ||
+        (b.includes("grid") && b.includes("charge") && b.includes("maximum") && b.includes("power"))),
+  );
+
+  const forcibleCharge = resolve(
+    states,
+    "forcibleCharge",
+    (s, b) =>
+      s.entity_id.startsWith("sensor.") &&
+      (b.includes("forcible_charge") || b.includes("forcible charge")),
+  );
+
+  const automationLunaCheap = resolve(
+    states,
+    "automationLunaCheap",
+    (s, b) =>
+      s.entity_id.startsWith("automation.") &&
+      (b.includes("luna_grid_charge_on_octopus_cheap") ||
+        (b.includes("luna") && b.includes("grid") && b.includes("cheap"))),
+  );
+
+  const automationRrCheap = resolve(
+    states,
+    "automationRrCheap",
+    (s, b) =>
+      s.entity_id.startsWith("automation.") &&
+      (b.includes("range_rover_hybrid_cheap_charge_force_override") ||
+        b.includes("range_rover_cheap_charge") ||
+        (isRangeRoverBlob(b) && b.includes("cheap") && b.includes("charge"))),
+  );
+
+  const automationChargeCars = resolve(
+    states,
+    "automationChargeCars",
+    (s, b) =>
+      s.entity_id.startsWith("automation.") &&
+      (b.includes("charge_cars_at_off_peak") ||
+        (b.includes("charge_cars") && b.includes("off_peak"))),
+  );
+
+  const offPeakChargeLuna = resolve(
+    states,
+    "offPeakChargeLuna",
+    (s, b) =>
+      s.entity_id.startsWith("input_boolean.") &&
+      (b.includes("off_peak_charge_luna") ||
+        (b.includes("off_peak") && b.includes("luna") && b.includes("charge"))),
+  );
+
+  const offPeakStopLunaOnClear = resolve(
+    states,
+    "offPeakStopLunaOnClear",
+    (s, b) =>
+      s.entity_id.startsWith("input_boolean.") &&
+      (b.includes("off_peak_stop_luna_on_clear") ||
+        (b.includes("stop_luna") && b.includes("clear"))),
+  );
+
+  // button.* often stays "unknown" until pressed — map by id without available().
+  const stopForcibleCharge =
+    states.find((s) =>
+      (PREFERRED_STOP_FORCIBLE_CHARGE as readonly string[]).includes(s.entity_id),
+    ) ??
+    states.find((s) => {
+      if (!s.entity_id.startsWith("button.")) return false;
+      const b = blob(s);
+      return (
+        b.includes("stop_forcible_charge") ||
+        (b.includes("forcible") && b.includes("stop"))
+      );
+    });
+
   const stevie = resolve(
     states,
     "stevieHome",
@@ -948,6 +1099,16 @@ export function autoMap(states: HaState[]): HaMap {
   if (gridChargeCutoffSoc) map.gridChargeCutoffSoc = gridChargeCutoffSoc.entity_id;
   if (solarChargeCutoffSoc) map.solarChargeCutoffSoc = solarChargeCutoffSoc.entity_id;
   if (minDischargeSoc) map.minDischargeSoc = minDischargeSoc.entity_id;
+  if (workingMode) map.workingMode = workingMode.entity_id;
+  if (maxDischargePowerW) map.maxDischargePowerW = maxDischargePowerW.entity_id;
+  if (gridChargeMaxPowerW) map.gridChargeMaxPowerW = gridChargeMaxPowerW.entity_id;
+  if (forcibleCharge) map.forcibleCharge = forcibleCharge.entity_id;
+  if (automationLunaCheap) map.automationLunaCheap = automationLunaCheap.entity_id;
+  if (automationRrCheap) map.automationRrCheap = automationRrCheap.entity_id;
+  if (automationChargeCars) map.automationChargeCars = automationChargeCars.entity_id;
+  if (offPeakChargeLuna) map.offPeakChargeLuna = offPeakChargeLuna.entity_id;
+  if (offPeakStopLunaOnClear) map.offPeakStopLunaOnClear = offPeakStopLunaOnClear.entity_id;
+  if (stopForcibleCharge) map.stopForcibleCharge = stopForcibleCharge.entity_id;
   if (stevie) map.stevieHome = stevie.entity_id;
   if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
   if (peakRate) map.peakRateGbp = peakRate.entity_id;
@@ -1028,6 +1189,15 @@ export function sameLive(a: HouseLive, b: HouseLive): boolean {
     a.gridChargeCutoffSoc === b.gridChargeCutoffSoc &&
     a.solarChargeCutoffSoc === b.solarChargeCutoffSoc &&
     a.minDischargeSoc === b.minDischargeSoc &&
+    a.workingMode === b.workingMode &&
+    a.maxDischargePowerW === b.maxDischargePowerW &&
+    a.gridChargeMaxPowerW === b.gridChargeMaxPowerW &&
+    a.forcibleCharge === b.forcibleCharge &&
+    a.automationLunaCheap === b.automationLunaCheap &&
+    a.automationRrCheap === b.automationRrCheap &&
+    a.automationChargeCars === b.automationChargeCars &&
+    a.offPeakChargeLuna === b.offPeakChargeLuna &&
+    a.offPeakStopLunaOnClear === b.offPeakStopLunaOnClear &&
     a.stevieHome === b.stevieHome &&
     a.sunAboveHorizon === b.sunAboveHorizon &&
     a.cheapRateGbp === b.cheapRateGbp &&
@@ -1185,6 +1355,21 @@ export function liveFromStates(
     return Number(kwh.toFixed(2));
   };
 
+  const optionalWatts = (key: keyof HouseLive): number | null => {
+    const s = take(key);
+    if (!s || !available(s)) return null;
+    const v = num(s.state);
+    return v === null ? null : Math.round(v);
+  };
+
+  const workingModeState = take("workingMode")?.state;
+  const forcibleState = take("forcibleCharge");
+  let forcibleCharge = fallback.forcibleCharge;
+  if (forcibleState && available(forcibleState)) {
+    const raw = forcibleState.state.trim();
+    if (raw) forcibleCharge = raw;
+  }
+
   return {
     soc: Math.round(n("soc", fallback.soc)),
     batteryW,
@@ -1209,6 +1394,17 @@ export function liveFromStates(
     gridChargeCutoffSoc: optionalPct("gridChargeCutoffSoc"),
     solarChargeCutoffSoc: optionalPct("solarChargeCutoffSoc"),
     minDischargeSoc: optionalPct("minDischargeSoc"),
+    workingMode: workingModeState && workingModeState !== "unavailable" && workingModeState !== "unknown"
+      ? workingModeState
+      : fallback.workingMode,
+    maxDischargePowerW: optionalWatts("maxDischargePowerW"),
+    gridChargeMaxPowerW: optionalWatts("gridChargeMaxPowerW"),
+    forcibleCharge,
+    automationLunaCheap: flag("automationLunaCheap", fallback.automationLunaCheap),
+    automationRrCheap: flag("automationRrCheap", fallback.automationRrCheap),
+    automationChargeCars: flag("automationChargeCars", fallback.automationChargeCars),
+    offPeakChargeLuna: flag("offPeakChargeLuna", fallback.offPeakChargeLuna),
+    offPeakStopLunaOnClear: flag("offPeakStopLunaOnClear", fallback.offPeakStopLunaOnClear),
     stevieHome: flag("stevieHome", fallback.stevieHome),
     sunAboveHorizon,
     cheapRateGbp: rateGbp("cheapRateGbp", fallback.cheapRateGbp),
@@ -1241,6 +1437,47 @@ export function chargeLimitMetaMap(
     solarChargeCutoffSoc: chargeLimitMeta(states, map, "solarChargeCutoffSoc"),
     minDischargeSoc: chargeLimitMeta(states, map, "minDischargeSoc"),
   };
+}
+
+/** Read min/max/step from a mapped inverter power number entity. */
+export function powerLimitMeta(
+  states: HaState[],
+  map: HaMap,
+  key: PowerLimitKey,
+): NumberControlMeta {
+  const defaults = POWER_LIMIT_DEFAULTS[key];
+  const id = map[key];
+  const s = id ? states.find((x) => x.entity_id === id) : undefined;
+  if (!s) return { ...defaults };
+  const min = num(String(s.attributes.min ?? "")) ?? defaults.min;
+  const max = num(String(s.attributes.max ?? "")) ?? defaults.max;
+  const step = num(String(s.attributes.step ?? "")) ?? defaults.step;
+  return { min, max, step: step > 0 ? step : defaults.step };
+}
+
+export function powerLimitMetaMap(
+  states: HaState[],
+  map: HaMap,
+): Record<PowerLimitKey, NumberControlMeta> {
+  return {
+    maxDischargePowerW: powerLimitMeta(states, map, "maxDischargePowerW"),
+    gridChargeMaxPowerW: powerLimitMeta(states, map, "gridChargeMaxPowerW"),
+  };
+}
+
+/**
+ * Options for mapped `select.batteries_working_mode`.
+ * Prefers HA `attributes.options`; falls back to known Huawei modes.
+ */
+export function workingModeOptions(states: HaState[], map: HaMap): string[] {
+  const id = map.workingMode;
+  const s = id ? states.find((x) => x.entity_id === id) : undefined;
+  const raw = s?.attributes.options;
+  if (Array.isArray(raw)) {
+    const opts = raw.filter((o): o is string => typeof o === "string" && o.trim().length > 0);
+    if (opts.length) return opts;
+  }
+  return [...DEFAULT_WORKING_MODES];
 }
 
 /**
@@ -2123,6 +2360,39 @@ export class HaSocket {
         service: "select_option",
         service_data: { option },
         target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
+  }
+
+  /** Press a `button.*` entity (e.g. stop forcible charge). */
+  async pressButton(entityId: string, timeoutMs = 45_000) {
+    const [domain] = entityId.split(".");
+    if (domain !== "button") {
+      throw new Error("Only button.* entities support press.");
+    }
+    await this.send(
+      "call_service",
+      {
+        domain: "button",
+        service: "press",
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
+  }
+
+  /**
+   * Huawei Solar custom service — stop forcible charge by device_id
+   * when `button.*_stop_forcible_charge` is not available.
+   */
+  async stopHuaweiForcibleCharge(deviceId: string, timeoutMs = 45_000) {
+    await this.send(
+      "call_service",
+      {
+        domain: "huawei_solar",
+        service: "stop_forcible_charge",
+        service_data: { device_id: deviceId },
       },
       timeoutMs,
     );

@@ -56,6 +56,33 @@ export type HouseLive = {
    * Minimum SOC — how empty the pack may go before discharge stops.
    */
   minDischargeSoc: number | null;
+  /**
+   * Huawei ESS working mode (`select.batteries_working_mode`).
+   * e.g. maximise_self_consumption / time_of_use_luna2000.
+   */
+  workingMode: string;
+  /** Max pack discharge power (W). Null when the number entity is missing. */
+  maxDischargePowerW: number | null;
+  /** Max AC / grid charge power (W). Null when missing. */
+  gridChargeMaxPowerW: number | null;
+  /**
+   * Huawei forcible-charge sensor text (e.g. "Stopped", "Charge").
+   * "—" when unmapped.
+   */
+  forcibleCharge: string;
+  /** Overnight Octopus cheap soft AC fill automation enabled. */
+  automationLunaCheap: boolean;
+  /** Range Rover overnight cheap-charge force-override automation enabled. */
+  automationRrCheap: boolean;
+  /** Charge cars (+ optional LUNA forcible) at off-peak automation enabled. */
+  automationChargeCars: boolean;
+  /**
+   * Helper that re-enables the old car+battery forcible path inside
+   * `automation.charge_cars_at_off_peak`. Default off on the Pi.
+   */
+  offPeakChargeLuna: boolean;
+  /** Optional helper: stop LUNA forcible when cheap window clears. */
+  offPeakStopLunaOnClear: boolean;
   stevieHome: boolean;
   /** From `sun.sun` when available; demo evening snapshot is below horizon. */
   sunAboveHorizon: boolean;
@@ -95,6 +122,15 @@ export const EMPTY_LIVE: HouseLive = {
   gridChargeCutoffSoc: null,
   solarChargeCutoffSoc: null,
   minDischargeSoc: null,
+  workingMode: "—",
+  maxDischargePowerW: null,
+  gridChargeMaxPowerW: null,
+  forcibleCharge: "—",
+  automationLunaCheap: false,
+  automationRrCheap: false,
+  automationChargeCars: false,
+  offPeakChargeLuna: false,
+  offPeakStopLunaOnClear: false,
   stevieHome: false,
   sunAboveHorizon: true,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
@@ -125,6 +161,15 @@ export const SNAPSHOT: HouseLive = {
   gridChargeCutoffSoc: 90,
   solarChargeCutoffSoc: 100,
   minDischargeSoc: 5,
+  workingMode: "maximise_self_consumption",
+  maxDischargePowerW: 5000,
+  gridChargeMaxPowerW: 0,
+  forcibleCharge: "Stopped",
+  automationLunaCheap: true,
+  automationRrCheap: true,
+  automationChargeCars: true,
+  offPeakChargeLuna: false,
+  offPeakStopLunaOnClear: false,
   stevieHome: true,
   sunAboveHorizon: false,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
