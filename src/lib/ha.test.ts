@@ -240,6 +240,56 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.peakRateGbp, 0.226);
   });
 
+  it("live.offPeak follows import Octopus binary, not enabled cheap/off_peak automations", () => {
+    const importOffPeak =
+      "binary_sensor.octopus_energy_electricity_12ab_3400000123456_off_peak";
+    const exportOffPeak =
+      "binary_sensor.octopus_energy_electricity_12ab_3400000123456_export_off_peak";
+    // Automations / helpers listed first — previously stole map.offPeak because find()
+    // matched entity ids containing off_peak/cheap and "on" meant enabled forever.
+    const distractors: HaState[] = [
+      state("automation.charge_cars_at_off_peak", "on", "Charge cars at off-peak"),
+      state("automation.luna_grid_charge_on_octopus_cheap", "on", "LUNA grid charge on Octopus cheap"),
+      state("input_boolean.off_peak_charge_luna", "on", "Off-peak charge LUNA"),
+      state(exportOffPeak, "on", "Octopus export off peak"),
+    ];
+
+    const peakStates: HaState[] = [
+      ...distractors,
+      state(importOffPeak, "off", "Octopus Energy Off Peak"),
+    ];
+    const peakMap = autoMap(peakStates);
+    assert.equal(peakMap.offPeak, importOffPeak);
+    assert.notEqual(peakMap.offPeak, "automation.charge_cars_at_off_peak");
+    assert.notEqual(peakMap.offPeak, "automation.luna_grid_charge_on_octopus_cheap");
+    assert.notEqual(peakMap.offPeak, "input_boolean.off_peak_charge_luna");
+    assert.notEqual(peakMap.offPeak, exportOffPeak);
+    assert.equal(PREFERRED.offPeak?.[0], "binary_sensor.octopus_off_peak");
+    assert.equal(liveFromStates(peakStates, peakMap, EMPTY_LIVE).offPeak, false);
+
+    const cheapStates: HaState[] = [
+      ...distractors,
+      state(importOffPeak, "on", "Octopus Energy Off Peak"),
+    ];
+    const cheapMap = autoMap(cheapStates);
+    assert.equal(cheapMap.offPeak, importOffPeak);
+    assert.equal(liveFromStates(cheapStates, cheapMap, EMPTY_LIVE).offPeak, true);
+  });
+
+  it("prefers PREFERRED.offPeak binary over fuzzy electricity_*_off_peak", () => {
+    const states: HaState[] = [
+      state("automation.charge_cars_at_off_peak", "on"),
+      state(
+        "binary_sensor.octopus_energy_electricity_12ab_3400000123456_off_peak",
+        "off",
+      ),
+      state("binary_sensor.octopus_off_peak", "on"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.offPeak, "binary_sensor.octopus_off_peak");
+    assert.equal(liveFromStates(states, map, EMPTY_LIVE).offPeak, true);
+  });
+
   it("maps preferred switch entity ids (kitchen stays unmapped)", () => {
     const map = autoMap(CHIMES_PI);
     assert.equal(map.lamp, PREFERRED_SWITCHES.lamp![0]);
