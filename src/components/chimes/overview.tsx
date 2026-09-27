@@ -24,12 +24,17 @@ import {
   GLASS_OPACITY_KEY,
   GLASS_OPACITY_MAX,
   GLASS_OPACITY_MIN,
+  OVERVIEW_FLOW_BOX_KEY,
+  OVERVIEW_GRAPH_BOX_KEY,
   clampGlassOpacity,
   clampOverviewBox,
   glassBackdropBlurPx,
   glassFill,
   nudgeOverviewBoxPosition,
   prefersManualOnlyBoxResize,
+  readOverviewBox,
+  resolveOverviewBox,
+  writeOverviewBox,
   type OverviewBox,
 } from "@/lib/overview-glass";
 import { cn } from "@/lib/utils";
@@ -235,7 +240,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
       ) : (
         <>
           <GlassTile
-            storageKey="chimes.overview.graph"
+            storageKey={OVERVIEW_GRAPH_BOX_KEY}
             title={graphTitle}
             badge={graphBadge}
             handleOnly
@@ -246,7 +251,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
           </GlassTile>
 
           <GlassTile
-            storageKey="chimes.overview.flow"
+            storageKey={OVERVIEW_FLOW_BOX_KEY}
             title="Energy flow"
             badge={flowBadge}
             fallback={defaultFlow}
@@ -371,36 +376,74 @@ function GlassTile({
   const mode = useRef<"drag" | "resize" | null>(null);
   const origin = useRef({ px: 0, py: 0, x: 0, y: 0, w: 0, h: 0 });
   const manualOnly = useRef(false);
-  const [box, setBox] = useState<Box>({ x: 40, y: 110, w: 420, h: 300 });
+  /** Sync geometry for persist — React state can lag the last pointermove. */
+  const boxRef = useRef<Box | null>(null);
+  /** True after the user starts a drag/resize — avoids open/close rewriting saves. */
+  const dirty = useRef(false);
+  const [box, setBox] = useState<Box>(() => {
+    // First paint must use saved layout when present — hardcoded defaults here
+    // previously raced pointerup and could overwrite localStorage on open.
+    manualOnly.current = detectManualOnlyResize();
+    const vp = typeof window !== "undefined" ? viewportNow() : { width: 1024, height: 768 };
+    const saved = readOverviewBox(storageKey);
+    const fb =
+      typeof window !== "undefined" ? fallback() : { x: 40, y: 110, w: 420, h: 300 };
+    const initial = resolveOverviewBox(saved, fb, vp, { manualOnly: manualOnly.current });
+    boxRef.current = initial;
+    return initial;
+  });
   const [grab, setGrab] = useState(false);
   const [z, setZ] = useState(10);
 
   useEffect(() => {
-    // Restore the user's last size/position. Do not discard smaller Energy Flow
-    // boxes — an old w<560 "stale" migration ignored saved sizes on every open.
+    // Re-resolve after mount in case Safari chrome changed the viewport between
+    // first paint and effect. Never fall back to defaults when a save exists.
     manualOnly.current = detectManualOnlyResize();
-    const saved = readBox(storageKey);
+    const saved = readOverviewBox(storageKey);
     const vp = viewportNow();
-    const initial = saved ?? fallback();
-    // Touch/iPad: keep the exact saved size on reopen (no orientation clamp).
-    // Desktop: full clamp so oversize boxes still fit after a window shrink.
-    setBox(
-      manualOnly.current
-        ? nudgeOverviewBoxPosition(initial, vp)
-        : clampOverviewBox(initial, vp),
-    );
+    const initial = resolveOverviewBox(saved, fallback(), vp, {
+      manualOnly: manualOnly.current,
+    });
+    boxRef.current = initial;
+    setBox(initial);
+
     const onResize = () => {
-      setBox((current) => {
-        const nextVp = viewportNow();
-        // iPad / touch: never auto-mutate size (orientation, safe-area, keyboard).
-        // Desktop: full clamp so boxes stay usable after a window shrink.
-        return manualOnly.current
-          ? nudgeOverviewBoxPosition(current, nextVp)
-          : clampOverviewBox(current, nextVp);
-      });
+      const nextVp = viewportNow();
+      const current = boxRef.current;
+      if (!current) return;
+      // iPad / touch: never auto-mutate size (orientation, safe-area, keyboard).
+      // Desktop: full clamp so boxes stay usable after a window shrink.
+      // Do not write here — transient Safari chrome sizes must not overwrite
+      // a good save; pointerup / pagehide / unmount flush boxRef instead.
+      const next = manualOnly.current
+        ? nudgeOverviewBoxPosition(current, nextVp)
+        : clampOverviewBox(current, nextVp);
+      boxRef.current = next;
+      setBox(next);
     };
+
+    /** Only after user drag/resize (or mid-gesture) — never on plain open/close. */
+    const flush = () => {
+      const current = boxRef.current;
+      if (!current) return;
+      if (!dirty.current && !mode.current) return;
+      writeOverviewBox(storageKey, current);
+      dirty.current = false;
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      // Close Overview / stacked swap / missed pointerup — keep user geometry.
+      flush();
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [storageKey, fallback]);
 
   useEffect(() => {
@@ -409,32 +452,31 @@ function GlassTile({
       const dx = event.clientX - origin.current.px;
       const dy = event.clientY - origin.current.py;
       const vp = viewportNow();
+      let next: Box;
       if (mode.current === "drag") {
-        const next = {
+        const draft = {
           x: origin.current.x + dx,
           y: origin.current.y + dy,
           w: origin.current.w,
           h: origin.current.h,
         };
         // Touch/iPad: drag must not shrink the box via viewport clamp.
-        setBox(
-          manualOnly.current
-            ? nudgeOverviewBoxPosition(next, vp)
-            : clampOverviewBox(next, vp),
-        );
+        next = manualOnly.current
+          ? nudgeOverviewBoxPosition(draft, vp)
+          : clampOverviewBox(draft, vp);
       } else {
-        setBox(
-          clampOverviewBox(
-            {
-              x: origin.current.x,
-              y: origin.current.y,
-              w: origin.current.w + dx,
-              h: origin.current.h + dy,
-            },
-            vp,
-          ),
+        next = clampOverviewBox(
+          {
+            x: origin.current.x,
+            y: origin.current.y,
+            w: origin.current.w + dx,
+            h: origin.current.h + dy,
+          },
+          vp,
         );
       }
+      boxRef.current = next;
+      setBox(next);
     };
     const up = (event: PointerEvent) => {
       if (!mode.current) return;
@@ -445,10 +487,12 @@ function GlassTile({
       } catch {
         /* already released */
       }
-      setBox((current) => {
-        writeBox(storageKey, current);
-        return current;
-      });
+      // Prefer boxRef (updated synchronously in move) over a lagged setState.
+      const current = boxRef.current;
+      if (current) {
+        writeOverviewBox(storageKey, current);
+        dirty.current = false;
+      }
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -467,14 +511,16 @@ function GlassTile({
     zTop += 1;
     setZ(zTop);
     mode.current = next;
+    dirty.current = true;
     setGrab(true);
+    const current = boxRef.current ?? box;
     origin.current = {
       px: event.clientX,
       py: event.clientY,
-      x: box.x,
-      y: box.y,
-      w: box.w,
-      h: box.h,
+      x: current.x,
+      y: current.y,
+      w: current.w,
+      h: current.h,
     };
     tile.current?.setPointerCapture(event.pointerId);
   }
@@ -701,26 +747,6 @@ function defaultFlow(): Box {
     w,
     h,
   };
-}
-
-function readBox(key: string): Box | null {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Box;
-    if (![parsed.x, parsed.y, parsed.w, parsed.h].every(Number.isFinite)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function writeBox(key: string, box: Box) {
-  try {
-    localStorage.setItem(key, JSON.stringify(box));
-  } catch {
-    /* private mode */
-  }
 }
 
 function OverviewClock({ compact = false }: { compact?: boolean }) {

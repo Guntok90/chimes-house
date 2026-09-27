@@ -9,6 +9,10 @@ export const GLASS_OPACITY_MIN = 0;
 export const GLASS_OPACITY_MAX = 100;
 export const GLASS_OPACITY_DEFAULT = 50;
 
+/** Freeform Overview glass tiles — per-device localStorage (v1). */
+export const OVERVIEW_GRAPH_BOX_KEY = "chimes.overview.graph";
+export const OVERVIEW_FLOW_BOX_KEY = "chimes.overview.flow";
+
 export const BOX_MIN_W = 300;
 export const BOX_MIN_H = 220;
 
@@ -80,4 +84,71 @@ export function prefersManualOnlyBoxResize(opts: {
     // iPadOS 13+ desktop Safari UA still reports MacIntel with touch.
     (touchPoints > 1 && /Macintosh/i.test(ua));
   return iPadOs || touchPoints > 0 || Boolean(opts.pointerCoarse);
+}
+
+/** Accept only finite {x,y,w,h}; reject truncated / garbage JSON shapes. */
+export function parseOverviewBox(raw: unknown): OverviewBox | null {
+  if (!raw || typeof raw !== "object") return null;
+  const rec = raw as Record<string, unknown>;
+  const x = Number(rec.x);
+  const y = Number(rec.y);
+  const w = Number(rec.w);
+  const h = Number(rec.h);
+  if (![x, y, w, h].every(Number.isFinite)) return null;
+  return { x, y, w, h };
+}
+
+function storageOrNull(storage?: Storage | null): Storage | null {
+  if (storage !== undefined) return storage;
+  try {
+    return typeof localStorage !== "undefined" ? localStorage : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read a saved Overview box; null when missing / invalid / storage blocked. */
+export function readOverviewBox(key: string, storage?: Storage | null): OverviewBox | null {
+  try {
+    const store = storageOrNull(storage);
+    if (!store) return null;
+    const raw = store.getItem(key);
+    if (!raw) return null;
+    return parseOverviewBox(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+/** Persist a box. Returns false when storage is unavailable (private mode). */
+export function writeOverviewBox(
+  key: string,
+  box: OverviewBox,
+  storage?: Storage | null,
+): boolean {
+  try {
+    const store = storageOrNull(storage);
+    if (!store) return false;
+    if (![box.x, box.y, box.w, box.h].every(Number.isFinite)) return false;
+    store.setItem(key, JSON.stringify(box));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prefer saved geometry; fall back to defaults only when nothing valid is stored.
+ * Touch/iPad: nudge position only. Desktop: full viewport clamp.
+ */
+export function resolveOverviewBox(
+  saved: OverviewBox | null,
+  fallback: OverviewBox,
+  viewport: Viewport,
+  opts: { manualOnly: boolean },
+): OverviewBox {
+  const initial = saved ?? fallback;
+  return opts.manualOnly
+    ? nudgeOverviewBoxPosition(initial, viewport)
+    : clampOverviewBox(initial, viewport);
 }
