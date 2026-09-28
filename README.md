@@ -57,6 +57,7 @@ Mapped when present (preferred ids first):
 | Cheap window    | Import Octopus off-peak binary only: preferred `binary_sensor.octopus_off_peak`, else `binary_sensor.octopus_energy_electricity_*_off_peak` (never automations / `input_*` / `export_off_peak`) — UI: Cheap/Peak badge, Cheap Energy Available |
 | EV Ready by     | `select.octopus_energy_<DEVICE_ID>_intelligent_target_time` (or `time.*_intelligent_target_time`) via `select.select_option` / `time.set_value` |
 | Stevie          | `person.stevie_w`                                                                |
+| Pond water °C   | `sensor.t_h_sensor_with_external_probe_probe_temperature` (external probe — Overview week/month graphs; not ambient unit temp) |
 
 If Range Rover Plug/Today still show “—” live, add (or rename) HA entities so the id/friendly name includes `range_rover` / `land_rover` / `jlr`, for example:
 

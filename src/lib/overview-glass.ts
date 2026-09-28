@@ -12,6 +12,7 @@ export const GLASS_OPACITY_DEFAULT = 50;
 /** Freeform Overview glass tiles — per-device localStorage (v1). */
 export const OVERVIEW_GRAPH_BOX_KEY = "chimes.overview.graph";
 export const OVERVIEW_FLOW_BOX_KEY = "chimes.overview.flow";
+export const OVERVIEW_POND_BOX_KEY = "chimes.overview.pond";
 
 export const BOX_MIN_W = 300;
 export const BOX_MIN_H = 220;
