@@ -194,6 +194,11 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
   // Read-only tariff sensors (£/kWh or p/kWh) — never written back to HA.
   cheapRateGbp: [],
   peakRateGbp: [],
+  // Smart Life / Tuya T&H external probe — fish pond water (not the ambient unit temp).
+  pondWaterTempC: [
+    "sensor.t_h_sensor_with_external_probe_probe_temperature",
+    "sensor.th_sensor_with_external_probe_probe_temperature",
+  ],
 };
 
 /** Preferred button to stop Huawei forcible charge (Settings). */
@@ -1065,6 +1070,38 @@ export function autoMap(states: HaState[]): HaMap {
     (s, b) => s.entity_id.startsWith("person.") && (b.includes("stevie") || b.includes("steve")),
   );
 
+  // Fish pond water — prefer external probe_temperature over the ambient unit sensor.
+  // Tuya names: …_probe_probe_temperature (water) vs …_external_probe_temperature (ambient).
+  const pondWaterTemp = resolve(
+    states,
+    "pondWaterTempC",
+    (s, b) => {
+      if (!s.entity_id.startsWith("sensor.")) return false;
+      if (b.includes("humidity") || b.includes("battery") || b.includes("signal")) return false;
+      const id = s.entity_id.toLowerCase();
+      // Ambient unit sensor — never use for pond water.
+      if (id.endsWith("_external_probe_temperature")) return false;
+      // Tuya water probe id contains probe_probe_temperature.
+      if (id.includes("probe_probe_temperature")) return true;
+      if (b.includes("probe temperature") && b.includes("external")) return true;
+      // Explicit pond / water temperature naming.
+      if ((b.includes("pond") || b.includes("water")) && b.includes("temperature")) return true;
+      return false;
+    },
+    (s) => {
+      const u = unitOf(s);
+      if (!u) return true;
+      return (
+        u.includes("°c") ||
+        u.includes("°f") ||
+        u === "c" ||
+        u === "f" ||
+        u.includes("celsius") ||
+        u.includes("fahrenheit")
+      );
+    },
+  );
+
   // Cheap / peak £·kWh⁻¹ from Octopus (or similarly named) rate sensors — read only.
   const cheapRate = find(
     states,
@@ -1116,6 +1153,7 @@ export function autoMap(states: HaState[]): HaMap {
   if (offPeakStopLunaOnClear) map.offPeakStopLunaOnClear = offPeakStopLunaOnClear.entity_id;
   if (stopForcibleCharge) map.stopForcibleCharge = stopForcibleCharge.entity_id;
   if (stevie) map.stevieHome = stevie.entity_id;
+  if (pondWaterTemp) map.pondWaterTempC = pondWaterTemp.entity_id;
   if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
   if (peakRate) map.peakRateGbp = peakRate.entity_id;
 
@@ -1226,7 +1264,8 @@ export function sameLive(a: HouseLive, b: HouseLive): boolean {
     a.stevieHome === b.stevieHome &&
     a.sunAboveHorizon === b.sunAboveHorizon &&
     a.cheapRateGbp === b.cheapRateGbp &&
-    a.peakRateGbp === b.peakRateGbp
+    a.peakRateGbp === b.peakRateGbp &&
+    a.pondWaterTempC === b.pondWaterTempC
   );
 }
 
@@ -1380,6 +1419,14 @@ export function liveFromStates(
     return Number(kwh.toFixed(2));
   };
 
+  /** Optional °C — null when probe entity missing. */
+  const optionalTempC = (key: "pondWaterTempC"): number | null => {
+    const s = take(key);
+    if (!s || !available(s)) return null;
+    const v = num(s.state);
+    return v === null ? null : Number(v.toFixed(1));
+  };
+
   const optionalWatts = (key: keyof HouseLive): number | null => {
     const s = take(key);
     if (!s || !available(s)) return null;
@@ -1434,6 +1481,7 @@ export function liveFromStates(
     sunAboveHorizon,
     cheapRateGbp: rateGbp("cheapRateGbp", fallback.cheapRateGbp),
     peakRateGbp: rateGbp("peakRateGbp", fallback.peakRateGbp),
+    pondWaterTempC: optionalTempC("pondWaterTempC"),
   };
 }
 

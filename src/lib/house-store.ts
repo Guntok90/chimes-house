@@ -5,6 +5,7 @@ import {
   hoursFromHistory,
   monthsFromStatistics,
   normalizeHistoryResult,
+  tempsFromStatistics,
   type HaStatisticsBag,
 } from "./ha-history";
 import {
@@ -52,7 +53,13 @@ import {
   type SwitchId,
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
-import { SNAPSHOT, type DayPoint, type HourPoint, type HouseLive } from "./house";
+import {
+  SNAPSHOT,
+  type DayPoint,
+  type HourPoint,
+  type HouseLive,
+  type TempPoint,
+} from "./house";
 import { decideResume, FORCE_RECONNECT_HIDDEN_MS, STUCK_CONNECTING_MS } from "./ha-resume";
 import {
   clampRate,
@@ -197,6 +204,10 @@ type Store = {
   historyMonth: DayPoint[];
   /** Last 12 months from period:month statistics. */
   historyYear: DayPoint[];
+  /** Fish pond water temp — last 7 daily means (°C). */
+  historyPondTempWeek: TempPoint[];
+  /** Fish pond water temp — last 28 daily means (°C). */
+  historyPondTempMonth: TempPoint[];
   historyStatus: HistoryStatus;
   /** Min/max/step for mapped Huawei charge-limit number entities. */
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
@@ -314,6 +325,8 @@ function emptyHistory() {
     historyWeek: [] as DayPoint[],
     historyMonth: [] as DayPoint[],
     historyYear: [] as DayPoint[],
+    historyPondTempWeek: [] as TempPoint[],
+    historyPondTempMonth: [] as TempPoint[],
   };
 }
 
@@ -735,6 +748,8 @@ export const useHouse = create<Store>((set, get) => {
           let week: DayPoint[] = [];
           let month: DayPoint[] = [];
           let year: DayPoint[] = [];
+          let pondWeek: TempPoint[] = [];
+          let pondMonth: TempPoint[] = [];
 
           // Hourly and daily paths are independent — a stats parse throw must
           // not wipe an otherwise-valid series (and never invent demo data).
@@ -780,10 +795,16 @@ export const useHouse = create<Store>((set, get) => {
             month = days.length
               ? days.slice(-28)
               : daysFromStatistics(stats, map, 28, end, opts);
+            pondMonth = tempsFromStatistics(stats, map.pondWaterTempC, 28, end);
+            pondWeek = pondMonth.length
+              ? pondMonth.slice(-7)
+              : tempsFromStatistics(stats, map.pondWaterTempC, 7, end);
           } catch {
             days = [];
             week = [];
             month = [];
+            pondWeek = [];
+            pondMonth = [];
           }
 
           try {
@@ -801,13 +822,20 @@ export const useHouse = create<Store>((set, get) => {
           }
 
           const empty =
-            hours.length === 0 && days.length === 0 && week.length === 0 && year.length === 0;
+            hours.length === 0 &&
+            days.length === 0 &&
+            week.length === 0 &&
+            year.length === 0 &&
+            pondWeek.length === 0 &&
+            pondMonth.length === 0;
           set({
             historyHours: hours,
             historyDays: days,
             historyWeek: week,
             historyMonth: month,
             historyYear: year,
+            historyPondTempWeek: pondWeek,
+            historyPondTempMonth: pondMonth,
             historyStatus: empty ? "empty" : "ready",
           });
         } finally {

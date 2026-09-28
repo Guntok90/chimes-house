@@ -12,7 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { useEffect, useRef, type ReactNode } from "react";
-import type { DayPoint, HourPoint } from "@/lib/house";
+import type { DayPoint, HourPoint, TempPoint } from "@/lib/house";
 
 const axis = { fill: "var(--color-ink-soft)", fontSize: 11 };
 const grid = { stroke: "var(--color-line)", strokeDasharray: "3 3" };
@@ -156,6 +156,8 @@ export const METER_COLORS = {
   grid: "#c4a484",
   cars: "#d4a017",
   soc: "#f4efe8",
+  /** Cool teal-water accent for fish pond probe temp. */
+  pond: "#7eb8c0",
 } as const;
 
 type DayTipProps = {
@@ -381,6 +383,69 @@ function toEnergyRows(data: DayPoint[]): EnergyRow[] {
     battery: d.battCharge - d.battDischarge,
     cars: d.cars,
   }));
+}
+
+type TempTipProps = {
+  active?: boolean;
+  payload?: { name: string; value: number; color: string }[];
+  label?: string;
+};
+
+function TempTip({ active, payload, label }: TempTipProps) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-md border border-sidebar-fg/20 bg-teal-deep/85 px-3 py-2 text-xs text-sidebar-fg shadow-sm backdrop-blur-md">
+      <div className="mb-1 font-medium">{label}</div>
+      {payload.map((p) => (
+        <div
+          key={p.name}
+          className="flex justify-between gap-5 tabular-nums text-sidebar-fg/70"
+        >
+          <span>{p.name}</span>
+          <span className="text-sidebar-fg">
+            {typeof p.value === "number" ? p.value.toFixed(1) : p.value} °C
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** Daily mean pond water temperature — Overview week / month tabs. */
+export function PondTempChart({ data }: { data: TempPoint[] }) {
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <AreaChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid stroke="rgba(244,239,232,0.12)" strokeDasharray="3 3" vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={glassTick}
+          axisLine={false}
+          tickLine={false}
+          interval="preserveStartEnd"
+          minTickGap={20}
+        />
+        <YAxis
+          tick={glassTick}
+          axisLine={false}
+          tickLine={false}
+          width={40}
+          tickFormatter={(v: number) => `${v}°`}
+          domain={["auto", "auto"]}
+        />
+        <Tooltip content={<TempTip />} />
+        <Area
+          type="monotone"
+          dataKey="tempC"
+          name="Water temp"
+          stroke={METER_COLORS.pond}
+          fill={METER_COLORS.pond}
+          fillOpacity={0.22}
+          strokeWidth={1.8}
+        />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
 }
 
 /** Daily/monthly kWh meters for Overview week / month / year tabs. */

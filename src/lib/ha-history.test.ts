@@ -5,6 +5,7 @@ import {
   daySpendGbp,
   daySpendPartsGbp,
   daysFromStatistics,
+  historyEntityIds,
   hourKwh,
   hoursFromHistory,
   lastHoursWindow,
@@ -14,6 +15,8 @@ import {
   monthsFromStatistics,
   normalizeHistoryResult,
   splitGridImportForDay,
+  tempMeanC,
+  tempsFromStatistics,
   type HaStatisticsBag,
 } from "./ha-history.ts";
 import type { HaMap } from "./ha.ts";
@@ -472,5 +475,32 @@ describe("ha history helpers", () => {
     assert.equal(parts.total, 1.05);
     assert.equal(parts.total, Number((parts.offPeak + parts.peak).toFixed(2)));
     assert.ok(parts.total < 20);
+  });
+
+  it("tempMeanC prefers mean over state and never uses energy change", () => {
+    assert.equal(tempMeanC({ start: 0, mean: 12.34, state: 99, change: 5 }), 12.3);
+    assert.equal(tempMeanC({ start: 0, state: 11.87, change: 4 }), 11.9);
+    assert.equal(tempMeanC({ start: 0, change: 3 }), null);
+  });
+
+  it("tempsFromStatistics builds daily pond means and historyEntityIds includes probe", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const now = new Date(2026, 8, 23, 18, 0, 0, 0);
+    const rows = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(2026, 8, 23 - i, 0, 0, 0, 0);
+      rows.push({ start: d.getTime(), mean: 10 + i * 0.3, change: 0 });
+    }
+    const stats: HaStatisticsBag = { [probe]: rows };
+    const week = tempsFromStatistics(stats, probe, 7, now);
+    assert.equal(week.length, 7);
+    // Oldest day first (i=6 → mean 11.8), newest last (i=0 → mean 10).
+    assert.equal(week[0].tempC, 11.8);
+    assert.equal(week[6].tempC, 10);
+    assert.deepEqual(tempsFromStatistics(stats, undefined, 7, now), []);
+    assert.equal(
+      historyEntityIds({ ...map, pondWaterTempC: probe }).includes(probe),
+      true,
+    );
   });
 });

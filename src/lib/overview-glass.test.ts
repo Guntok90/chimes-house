@@ -6,6 +6,7 @@ import {
   GLASS_OPACITY_MIN,
   OVERVIEW_FLOW_BOX_KEY,
   OVERVIEW_GRAPH_BOX_KEY,
+  OVERVIEW_POND_BOX_KEY,
   clampGlassOpacity,
   clampOverviewBox,
   glassBackdropBlurPx,
@@ -127,8 +128,9 @@ describe("overview box persistence", () => {
   const fallback = { x: 28, y: 96, w: 560, h: 340 };
   const saved = { x: 120, y: 180, w: 400, h: 280 };
 
-  it("keeps stable localStorage key names for graph and flow tiles", () => {
+  it("keeps stable localStorage key names for graph, pond, and flow tiles", () => {
     assert.equal(OVERVIEW_GRAPH_BOX_KEY, "chimes.overview.graph");
+    assert.equal(OVERVIEW_POND_BOX_KEY, "chimes.overview.pond");
     assert.equal(OVERVIEW_FLOW_BOX_KEY, "chimes.overview.flow");
   });
 

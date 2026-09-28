@@ -11,12 +11,15 @@ import {
 import { Minimize2 } from "lucide-react";
 import {
   HOURS,
+  POND_TEMP_MONTH,
+  POND_TEMP_WEEK,
   SCROLL_DAYS,
   WEEK_HOURS,
   YEAR,
   usesDemoCharts,
   type DayPoint,
   type HourPoint,
+  type TempPoint,
 } from "@/lib/house";
 import { useHouse, useLive } from "@/lib/house-store";
 import {
@@ -26,6 +29,7 @@ import {
   GLASS_OPACITY_MIN,
   OVERVIEW_FLOW_BOX_KEY,
   OVERVIEW_GRAPH_BOX_KEY,
+  OVERVIEW_POND_BOX_KEY,
   clampGlassOpacity,
   clampOverviewBox,
   glassBackdropBlurPx,
@@ -43,12 +47,14 @@ import {
   DayAllChart,
   EnergyMetersChart,
   METER_COLORS,
+  PondTempChart,
 } from "./charts";
 import { EnergyFlow } from "./energy-flow";
 import { NoHistoryYet } from "./no-history";
 
 type Box = OverviewBox;
 type ChartRange = "day" | "week" | "month" | "year";
+type PondRange = "week" | "month";
 
 /** Match Tailwind `md` — freeform tiles above; stacked scroll below. */
 const STACK_MQ = "(max-width: 767px)";
@@ -60,6 +66,11 @@ const RANGE_OPTS: { id: ChartRange; label: string }[] = [
   { id: "week", label: "Week" },
   { id: "month", label: "Month" },
   { id: "year", label: "Year" },
+];
+
+const POND_RANGE_OPTS: { id: PondRange; label: string }[] = [
+  { id: "week", label: "Week" },
+  { id: "month", label: "Month" },
 ];
 
 function readGlassOpacity(): number {
@@ -133,6 +144,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
   const video = useRef<HTMLVideoElement>(null);
   const [ready, setReady] = useState(false);
   const [range, setRange] = useState<ChartRange>("day");
+  const [pondRange, setPondRange] = useState<PondRange>("week");
   const [glassOpacity, setGlassOpacity] = useGlassOpacity();
   const live = useLive();
   const stacked = useStackedOverview();
@@ -175,6 +187,12 @@ export function Overview({ onClose }: { onClose: () => void }) {
         : range === "month"
           ? "28 days"
           : "12 months";
+  const pondBadge =
+    live.pondWaterTempC != null
+      ? `${live.pondWaterTempC.toFixed(1)} °C now`
+      : pondRange === "week"
+        ? "7 days"
+        : "28 days";
   const tileStyle = {
     backgroundColor: glassFill(glassOpacity),
     backdropFilter: `blur(${glassBackdropBlurPx(glassOpacity)}px)`,
@@ -233,6 +251,14 @@ export function Overview({ onClose }: { onClose: () => void }) {
           <StackedTile title={graphTitle} badge={graphBadge} tall="chart" style={tileStyle}>
             <OverviewGraph range={range} onRangeChange={setRange} />
           </StackedTile>
+          <StackedTile
+            title="Fish pond water temp"
+            badge={pondBadge}
+            tall="chart"
+            style={tileStyle}
+          >
+            <OverviewPondGraph range={pondRange} onRangeChange={setPondRange} />
+          </StackedTile>
           <StackedTile title="Energy flow" badge={flowBadge} tall="flow" style={tileStyle}>
             <FitFlow />
           </StackedTile>
@@ -248,6 +274,17 @@ export function Overview({ onClose }: { onClose: () => void }) {
             style={tileStyle}
           >
             <OverviewGraph range={range} onRangeChange={setRange} />
+          </GlassTile>
+
+          <GlassTile
+            storageKey={OVERVIEW_POND_BOX_KEY}
+            title="Fish pond water temp"
+            badge={pondBadge}
+            handleOnly
+            fallback={defaultPond}
+            style={tileStyle}
+          >
+            <OverviewPondGraph range={pondRange} onRangeChange={setPondRange} />
           </GlassTile>
 
           <GlassTile
@@ -682,6 +719,99 @@ function GlassRangeTabs({
   );
 }
 
+function PondRangeTabs({
+  value,
+  onChange,
+}: {
+  value: PondRange;
+  onChange: (v: PondRange) => void;
+}) {
+  return (
+    <div
+      className="inline-flex rounded-md border border-sidebar-fg/20 bg-teal-deep/40 p-0.5"
+      role="tablist"
+      aria-label="Pond temperature range"
+    >
+      {POND_RANGE_OPTS.map((opt) => (
+        <button
+          key={opt.id}
+          type="button"
+          role="tab"
+          aria-selected={value === opt.id}
+          onClick={() => onChange(opt.id)}
+          className={cn(
+            "min-h-7 rounded-sm px-2.5 text-[0.7rem] font-medium uppercase tracking-wider transition-colors",
+            value === opt.id
+              ? "bg-sidebar-fg/15 text-sidebar-fg"
+              : "text-sidebar-fg/55 hover:text-sidebar-fg/80",
+          )}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function OverviewPondGraph({
+  range,
+  onRangeChange,
+}: {
+  range: PondRange;
+  onRangeChange: (r: PondRange) => void;
+}) {
+  const status = useHouse((s) => s.status);
+  const historyStatus = useHouse((s) => s.historyStatus);
+  const historyPondTempWeek = useHouse((s) => s.historyPondTempWeek);
+  const historyPondTempMonth = useHouse((s) => s.historyPondTempMonth);
+  const liveMode = !usesDemoCharts(status);
+
+  const weekRows: TempPoint[] = liveMode ? historyPondTempWeek : POND_TEMP_WEEK;
+  const monthRows: TempPoint[] = liveMode ? historyPondTempMonth : POND_TEMP_MONTH;
+  const data = range === "week" ? weekRows : monthRows;
+
+  const ready = useMemo(() => {
+    if (!liveMode) return true;
+    if (historyStatus === "loading" || historyStatus === "idle") return false;
+    return historyStatus === "ready" && data.length > 0;
+  }, [liveMode, historyStatus, data.length]);
+
+  const scrollWidth = useMemo(
+    () => Math.max(data.length * (range === "week" ? 48 : 28), 420),
+    [data.length, range],
+  );
+
+  return (
+    <div className="flex h-full flex-col gap-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 px-2">
+        <PondRangeTabs value={range} onChange={onRangeChange} />
+      </div>
+      {!ready ? (
+        <div className="flex min-h-0 flex-1 flex-col justify-center px-2">
+          <NoHistoryYet
+            label={historyStatus === "loading" ? "pond temp (loading)" : "pond temp"}
+          />
+        </div>
+      ) : data.length > 0 ? (
+        <>
+          <div className="min-h-0 flex-1">
+            <ChartScroll widthPx={scrollWidth}>
+              <PondTempChart data={data} />
+            </ChartScroll>
+          </div>
+          <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-xs text-sidebar-fg/70">
+            <Key color={METER_COLORS.pond} label="Fish pond water temp" />
+          </div>
+        </>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col justify-center px-2">
+          <NoHistoryYet label={`${range} pond temp`} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Key({ color, label, dashed = false }: { color: string; label: string; dashed?: boolean }) {
   return (
     <span className="inline-flex items-center gap-1.5">
@@ -736,6 +866,17 @@ function defaultGraph(): Box {
   const w = Math.min(560, window.innerWidth - 48);
   const h = Math.min(340, window.innerHeight - 160);
   return { x: 28, y: 96, w, h };
+}
+
+function defaultPond(): Box {
+  const w = Math.min(420, window.innerWidth - 48);
+  const h = Math.min(260, window.innerHeight - 160);
+  return {
+    x: 28,
+    y: Math.max(96, Math.min(window.innerHeight - h - 28, 96 + 340 + 16)),
+    w,
+    h,
+  };
 }
 
 function defaultFlow(): Box {

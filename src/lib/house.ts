@@ -92,6 +92,11 @@ export type HouseLive = {
    */
   cheapRateGbp: number;
   peakRateGbp: number;
+  /**
+   * Fish pond water temperature (°C) from the Smart Life external probe.
+   * `null` when the probe entity is not mapped.
+   */
+  pondWaterTempC: number | null;
 };
 
 /**
@@ -135,6 +140,7 @@ export const EMPTY_LIVE: HouseLive = {
   sunAboveHorizon: true,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
   peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
+  pondWaterTempC: null,
 };
 
 export const SNAPSHOT: HouseLive = {
@@ -174,6 +180,7 @@ export const SNAPSHOT: HouseLive = {
   sunAboveHorizon: false,
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
   peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
+  pondWaterTempC: 12.4,
 };
 
 /** Demo snapshot. Live values come from `useLive()`. */
@@ -238,6 +245,13 @@ export type HourPoint = {
   gridW: number;
   /** Zappi / driveway charge power (W) when mapped — second car only if entity exists. */
   carW: number;
+};
+
+/** Daily (or monthly) mean temperature for Overview pond graphs. */
+export type TempPoint = {
+  key: string;
+  label: string;
+  tempC: number;
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -380,3 +394,24 @@ export const YEAR = lastDays(12).map((d, i) => {
 export const HOURS = lastHours();
 export const WEEK_HOURS = lastWeekHours();
 export const SCROLL_DAYS = lastDays(56);
+
+/** Demo pond water temps (°C) — cool UK outdoor pond, mild day-to-day drift. */
+export function lastTempDays(count: number): TempPoint[] {
+  const out: TempPoint[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(NOW);
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const drift = Math.sin(i / 2.4) * 1.4 + Math.cos(i / 5.1) * 0.6;
+    out.push({
+      key,
+      label: d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }),
+      tempC: Number((12.2 + drift).toFixed(1)),
+    });
+  }
+  return out;
+}
+
+export const POND_TEMP_WEEK = lastTempDays(7);
+export const POND_TEMP_MONTH = lastTempDays(28);

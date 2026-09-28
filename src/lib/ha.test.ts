@@ -98,6 +98,18 @@ const CHIMES_PI: HaState[] = [
   state("switch.pergola_switch_1", "off", "Pergola"),
   state("switch.pond_1_switch_1", "on", "Pond 1"),
   state("switch.pond_2_switch_1", "off", "Pond 2"),
+  state(
+    "sensor.t_h_sensor_with_external_probe_probe_temperature",
+    "11.8",
+    "T&H Sensor with External Probe Probe Temperature",
+    "°C",
+  ),
+  state(
+    "sensor.t_h_sensor_with_external_probe_temperature",
+    "18.2",
+    "T&H Sensor with External Probe Temperature",
+    "°C",
+  ),
   state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
   state(
     "sensor.range_rover_hybrid_current_consumption",
@@ -150,6 +162,14 @@ describe("ha autoMap preferences", () => {
     assert.equal(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
     assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_hybrid_today_s_consumption");
     assert.equal(map.stevieHome, "person.stevie_w");
+    assert.equal(
+      map.pondWaterTempC,
+      "sensor.t_h_sensor_with_external_probe_probe_temperature",
+    );
+    assert.notEqual(
+      map.pondWaterTempC,
+      "sensor.t_h_sensor_with_external_probe_temperature",
+    );
     assert.equal(map.offPeak, "binary_sensor.octopus_off_peak");
     assert.equal(map.intelligent, "binary_sensor.octopus_intelligent_ready");
     assert.equal(
@@ -201,6 +221,7 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.zappiTodayKwh, 6.35);
     assert.equal(live.rangeRoverTodayKwh, 3.2);
     assert.equal(live.evReadyBy, "07:00");
+    assert.equal(live.pondWaterTempC, 11.8);
     assert.equal(live.stevieHome, true);
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
@@ -589,6 +610,26 @@ describe("tariff helper mapping", () => {
     const map = autoMap(CHIMES_PI);
     assert.equal(map.tariffCheap, undefined);
     assert.equal(map.tariffPeak, undefined);
+  });
+
+  it("maps fish pond probe temperature and ignores ambient unit temp", () => {
+    const map = autoMap(CHIMES_PI);
+    assert.equal(
+      map.pondWaterTempC,
+      "sensor.t_h_sensor_with_external_probe_probe_temperature",
+    );
+    const live = liveFromStates(CHIMES_PI, map, EMPTY_LIVE);
+    assert.equal(live.pondWaterTempC, 11.8);
+    // Ambient-only inventory must not steal the pond mapping.
+    const ambientOnly = [
+      state(
+        "sensor.t_h_sensor_with_external_probe_temperature",
+        "19.5",
+        "T&H Sensor with External Probe Temperature",
+        "°C",
+      ),
+    ];
+    assert.equal(autoMap(ambientOnly).pondWaterTempC, undefined);
   });
 });
 

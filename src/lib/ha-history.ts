@@ -1,6 +1,6 @@
 import { deriveHouseW } from "./energy-balance.ts";
 import type { HaMap } from "./ha.ts";
-import type { DayPoint, HourPoint } from "./house.ts";
+import type { DayPoint, HourPoint, TempPoint } from "./house.ts";
 import {
   DEFAULT_TARIFF,
   cheapFractionInLocalHour,
@@ -498,6 +498,51 @@ export function monthsFromStatistics(
   return out;
 }
 
+/**
+ * Mean temperature (°C) for one statistics row.
+ * Prefer `mean` (period average); fall back to `state`. Never use energy `change`.
+ */
+export function tempMeanC(row: HaStatRow | undefined): number | null {
+  if (!row) return null;
+  const mean = num(row.mean);
+  if (mean != null) return Number(mean.toFixed(1));
+  const state = num(row.state);
+  if (state != null) return Number(state.toFixed(1));
+  return null;
+}
+
+/**
+ * Daily mean temperatures from recorder statistics (period: day).
+ * Empty → [] (never invent demo curves while Live).
+ */
+export function tempsFromStatistics(
+  stats: HaStatisticsBag,
+  entityId: string | undefined,
+  count: number,
+  now = new Date(),
+): TempPoint[] {
+  if (!entityId) return [];
+  const rows = stats[entityId];
+  if (!rows?.length) return [];
+
+  const out: TempPoint[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const key = localDayKey(d);
+    const row = rows.find((r) => dayKeyFromStart(r.start) === key);
+    const tempC = tempMeanC(row);
+    if (tempC == null) continue;
+    out.push({
+      key,
+      label: dayLabel(key),
+      tempC,
+    });
+  }
+  return out;
+}
+
 export function historyEntityIds(map: HaMap): string[] {
   return [
     map.solarNowW,
@@ -507,6 +552,7 @@ export function historyEntityIds(map: HaMap): string[] {
     map.houseW,
     map.zappiW,
     map.solarTodayKwh,
+    map.pondWaterTempC,
   ].filter((id): id is string => Boolean(id));
 }
 
