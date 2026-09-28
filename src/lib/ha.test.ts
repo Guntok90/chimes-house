@@ -18,7 +18,9 @@ import {
   frontGardenSwitches,
   groupSwitchesByArea,
   hideHomeSwitch,
+  resolveEntityAreaId,
   resolveFrontGardenTiles,
+  interestForLiveUi,
   interestFromMap,
   isHaTimeoutError,
   haWriteFailureMessage,
@@ -37,6 +39,7 @@ import {
   DEFAULT_ZAPPI_MODES,
   DEFAULT_EV_READY_BY_OPTIONS,
   HUAWEI_BATTERIES_DEVICE_ID,
+  type HaDeviceReg,
   type HaEntityReg,
   type HaState,
 } from "./ha.ts";
@@ -709,25 +712,132 @@ describe("area-grouped switches (Home)", () => {
     assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
   });
 
-  it("skips disabled or hidden registry entities", () => {
+  it("skips disabled registry entities but keeps hidden_by (Meross on Home)", () => {
     const states = [
       state("switch.smart_switch_4", "on", "Lamp"),
-      state("switch.hidden_spare", "off", "Hidden"),
+      state("switch.disabled_spare", "off", "Disabled"),
+      state("switch.smart_switch", "on", "Telly"),
     ];
-    const entities = [
+    const entities: HaEntityReg[] = [
       { entity_id: "switch.smart_switch_4", area_id: null, name: null },
       {
-        entity_id: "switch.hidden_spare",
+        entity_id: "switch.disabled_spare",
         area_id: null,
         name: null,
         disabled_by: "user",
         hidden_by: null,
       },
+      {
+        entity_id: "switch.smart_switch",
+        area_id: null,
+        name: null,
+        disabled_by: null,
+        // Dad / Meross often hide plugs from the HA overview — Home must keep them.
+        hidden_by: "user",
+      },
     ];
     const list = areaSwitchesFromStates(states, [], entities);
-    assert.equal(list.length, 1);
-    assert.equal(list[0].entityId, "switch.smart_switch_4");
-    assert.equal(list[0].area, SPARES_AREA);
+    assert.deepEqual(
+      list.map((s) => s.entityId).sort(),
+      ["switch.smart_switch", "switch.smart_switch_4"],
+    );
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch")?.label, "Telly");
+  });
+
+  it("uses device area when entity.area_id is null (Meross room assignment)", () => {
+    const states: HaState[] = [
+      state("switch.smart_switch", "on", "Telly"),
+      state("switch.smart_switch_4", "off", "Lamp"),
+      state("switch.smart_switch_2", "off", "Stevie’s Blanket"),
+      state("switch.smart_switch_7", "on", "Spare"),
+    ];
+    const areas = [
+      { area_id: "living_room", name: "Living Room" },
+      { area_id: "bedroom", name: "Bedroom" },
+    ];
+    const devices: HaDeviceReg[] = [
+      { id: "dev_telly", area_id: "living_room", name: "Telly plug" },
+      { id: "dev_lamp", area_id: "living_room", name: "Lamp plug" },
+      { id: "dev_blanket", area_id: "bedroom", name: "Stevie blanket" },
+      { id: "dev_spare", area_id: "living_room", name: "Spare" },
+    ];
+    const entities: HaEntityReg[] = [
+      {
+        entity_id: "switch.smart_switch",
+        area_id: null,
+        device_id: "dev_telly",
+        name: null,
+        hidden_by: "integration",
+      },
+      {
+        entity_id: "switch.smart_switch_4",
+        area_id: null,
+        device_id: "dev_lamp",
+        name: null,
+        hidden_by: "user",
+      },
+      {
+        entity_id: "switch.smart_switch_2",
+        area_id: null,
+        device_id: "dev_blanket",
+        name: null,
+      },
+      {
+        entity_id: "switch.smart_switch_7",
+        area_id: null,
+        device_id: "dev_spare",
+        name: null,
+      },
+    ];
+    const list = areaSwitchesFromStates(states, areas, entities, devices);
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch")?.area, "Living Room");
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.area, "Living Room");
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_2")?.area, "Bedroom");
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_7")?.area, "Living Room");
+    // First spare-like in Spares would rename — this Spare is in Living Room so keeps label.
+    assert.equal(list.find((s) => s.entityId === "switch.smart_switch_7")?.label, "Spare");
+  });
+
+  it("resolveEntityAreaId prefers entity area then device area", () => {
+    const devices = new Map<string, HaDeviceReg>([
+      ["d1", { id: "d1", area_id: "device_area" }],
+    ]);
+    assert.equal(
+      resolveEntityAreaId({ entity_id: "switch.a", area_id: "entity_area", device_id: "d1" }, devices),
+      "entity_area",
+    );
+    assert.equal(
+      resolveEntityAreaId({ entity_id: "switch.a", area_id: null, device_id: "d1" }, devices),
+      "device_area",
+    );
+    assert.equal(
+      resolveEntityAreaId({ entity_id: "switch.a", area_id: null, device_id: null }, devices),
+      null,
+    );
+  });
+
+  it("interestForLiveUi includes area switch entity ids beyond curated map", () => {
+    const map = autoMap([
+      state("switch.smart_switch_4", "on", "Lamp"),
+      state("sensor.battery_1_state_of_capacity", "50", "", "%"),
+    ]);
+    const interest = interestForLiveUi(
+      map,
+      [
+        {
+          entityId: "switch.smart_switch_7",
+          label: "Spare",
+          area: "Living Room",
+          on: true,
+          available: true,
+        },
+      ],
+      { entityId: "fan.bedroom_fan", speedEntityId: null, lightEntityId: null },
+    );
+    assert.equal(interest.has("switch.smart_switch_4"), true);
+    assert.equal(interest.has("switch.smart_switch_7"), true);
+    assert.equal(interest.has("fan.bedroom_fan"), true);
+    assert.equal(interest.has("sun.sun"), true);
   });
 
   it("puts Spares last when grouping", () => {

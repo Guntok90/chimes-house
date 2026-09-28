@@ -28,6 +28,7 @@ import {
   fanControlFromStates,
   fanLevelToPercentage,
   haWriteFailureMessage,
+  interestForLiveUi,
   isHaTimeoutError,
   powerLimitMetaMap,
   readCreds,
@@ -42,6 +43,7 @@ import {
   type HaArea,
   type HaBootstrapResponse,
   type HaCreds,
+  type HaDeviceReg,
   type HaEntityReg,
   type HaMap,
   type HaState,
@@ -74,6 +76,7 @@ const socket = new HaSocket();
 
 let areasCache: HaArea[] = [];
 let entityRegCache: HaEntityReg[] = [];
+let deviceRegCache: HaDeviceReg[] = [];
 let lastStates: HaState[] = [];
 
 /** When the tab was backgrounded / frozen (iOS Safari suspend). */
@@ -82,7 +85,12 @@ let pageHiddenAt: number | null = null;
 let connectingStartedAt: number | null = null;
 
 function rebuildAreaSwitches(states: HaState[]) {
-  return areaSwitchesFromStates(states, areasCache, entityRegCache);
+  return areaSwitchesFromStates(states, areasCache, entityRegCache, deviceRegCache);
+}
+
+/** Keep WS interest covering Home tiles (incl. Spares / Fan helpers). */
+function syncSocketInterest(map: HaMap, areaSwitches: AreaSwitch[], fan: FanControl) {
+  socket.interest = interestForLiveUi(map, areaSwitches, fan);
 }
 
 function bootTariffs(): TariffState {
@@ -660,9 +668,12 @@ export const useHouse = create<Store>((set, get) => {
         const haRates = tariffsFromStates(list, mapped);
         const tariffs = resolveTariffs(haRates, readLocalTariffs());
         if (tariffs.source === "ha") writeLocalTariffs(tariffs);
+        const areaSwitches = rebuildAreaSwitches(list);
+        const fanControl = fanControlFromStates(list, mapped);
+        syncSocketInterest(mapped, areaSwitches, fanControl);
         set({
-          areaSwitches: rebuildAreaSwitches(list),
-          fanControl: fanControlFromStates(list, mapped),
+          areaSwitches,
+          fanControl,
           chargeLimitMeta: chargeLimitMetaMap(list, mapped),
           powerLimitMeta: powerLimitMetaMap(list, mapped),
           zappiModeOptions: zappiModeOptions(list, mapped),
@@ -1524,20 +1535,23 @@ const SWITCH_IDS = new Set<string>([
 
 async function refreshRegistries() {
   try {
-    const [areas, entities] = await Promise.all([
+    const [areas, entities, devices] = await Promise.all([
       socket.listAreas(),
       socket.listEntityRegistry(),
+      socket.listDeviceRegistry(),
     ]);
     areasCache = areas;
     entityRegCache = entities;
+    deviceRegCache = devices;
   } catch {
     // Keep empty caches — switches still list under Spares from states alone.
   }
   if (useHouse.getState().status !== "live") return;
-  useHouse.setState({
-    areaSwitches: rebuildAreaSwitches(lastStates),
-    fanControl: fanControlFromStates(lastStates, useHouse.getState().map),
-  });
+  const map = useHouse.getState().map;
+  const areaSwitches = rebuildAreaSwitches(lastStates);
+  const fanControl = fanControlFromStates(lastStates, map);
+  syncSocketInterest(map, areaSwitches, fanControl);
+  useHouse.setState({ areaSwitches, fanControl });
 }
 
 export function useLive() {

@@ -131,7 +131,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
-| Home     | 24h energy graph, Fan on/off+speed, area-grouped switches (no Spares heading; hides dnd / myenergi / child lock / enable / grid-charge; UI renames Fan→Master Bedroom Light, first Spare→Fly Killer), Stevie |
+| Home     | 24h energy graph, Fan on/off+speed, area-grouped switches (device areas when entity.area_id is null; keeps registry-hidden Meross/Smart Life plugs; no Spares heading; hides dnd / myenergi / child lock / enable / grid-charge; UI renames Fan→Master Bedroom Light, first Spare→Fly Killer), Stevie |
 | Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover + Cheap Energy Available + EV Ready by) + **Battery** charge limits (grid/solar cutoffs + min SOC) + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge + Grid / Solar cutoffs + min SOC (Allow vs actively charging clarified) |

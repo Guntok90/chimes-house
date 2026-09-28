@@ -1170,6 +1170,25 @@ export function interestFromMap(map: HaMap): Set<string> {
   return ids;
 }
 
+/**
+ * Interest set for live UI: curated HaMap ids plus every Home area-switch /
+ * Fan helper so Meross Spares and unmapped plugs still flush on/off changes.
+ */
+export function interestForLiveUi(
+  map: HaMap,
+  areaSwitches: AreaSwitch[] = [],
+  fan: Pick<FanControl, "entityId" | "speedEntityId" | "lightEntityId"> | null = null,
+): Set<string> {
+  const ids = interestFromMap(map);
+  for (const sw of areaSwitches) {
+    if (sw.entityId) ids.add(sw.entityId);
+  }
+  if (fan?.entityId) ids.add(fan.entityId);
+  if (fan?.speedEntityId) ids.add(fan.speedEntityId);
+  if (fan?.lightEntityId) ids.add(fan.lightEntityId);
+  return ids;
+}
+
 export function sameLive(a: HouseLive, b: HouseLive): boolean {
   return (
     a.soc === b.soc &&
@@ -1559,12 +1578,26 @@ export type HaArea = {
   name: string;
 };
 
+/** HA device registry row (config/device_registry/list). */
+export type HaDeviceReg = {
+  id: string;
+  area_id: string | null;
+  name?: string | null;
+  name_by_user?: string | null;
+};
+
 /** HA entity registry row (config/entity_registry/list). */
 export type HaEntityReg = {
   entity_id: string;
   area_id: string | null;
+  /** When set, area may live on the device (entity.area_id often null). */
+  device_id?: string | null;
   name?: string | null;
   disabled_by?: string | null;
+  /**
+   * Hidden from the HA UI — still controllable. Chimes Home must keep these
+   * (Meross/Smart Life plugs are often user/integration-hidden; see #34 Willow).
+   */
   hidden_by?: string | null;
 };
 
@@ -1938,25 +1971,48 @@ export function fanControlFromStates(
 }
 
 /**
+ * Resolve HA area for a switch: entity.area_id first, else the device’s area.
+ * Meross/Tuya plugs often have the room on the device only — entity.area_id
+ * stays null and used to dump everything into Spares.
+ */
+export function resolveEntityAreaId(
+  reg: HaEntityReg | undefined,
+  devicesById: Map<string, HaDeviceReg> = new Map(),
+): string | null {
+  if (!reg) return null;
+  if (reg.area_id) return reg.area_id;
+  const deviceId = reg.device_id;
+  if (!deviceId) return null;
+  return devicesById.get(deviceId)?.area_id ?? null;
+}
+
+/**
  * All switch/light entities from live states, grouped by HA area.
  * Unassigned entities land in Spares (shown without a labelled heading).
  * Filters out Dnd / myenergi / child-lock / enable / grid-charge junk
  * (see hideHomeSwitch). Applies Home-only friendly name overrides.
+ *
+ * Registry `hidden_by` does **not** drop tiles — Chimes is the control UI
+ * (Dad often hides Meross plugs from the HA overview). Only `disabled_by`
+ * skips. Device-level areas are resolved when entity.area_id is null.
  */
 export function areaSwitchesFromStates(
   states: HaState[],
   areas: HaArea[] = [],
   entities: HaEntityReg[] = [],
+  devices: HaDeviceReg[] = [],
 ): AreaSwitch[] {
   const areaName = new Map(areas.map((a) => [a.area_id, a.name]));
   const byEntity = new Map(entities.map((e) => [e.entity_id, e]));
+  const devicesById = new Map(devices.map((d) => [d.id, d]));
   const out: AreaSwitch[] = [];
 
   for (const s of states) {
     if (!isControllableSwitch(s)) continue;
     const reg = byEntity.get(s.entity_id);
-    if (reg?.disabled_by || reg?.hidden_by) continue;
-    const areaId = reg?.area_id ?? null;
+    // Disabled = gone from HA. Hidden = still live — keep on Home (#34 pattern).
+    if (reg?.disabled_by) continue;
+    const areaId = resolveEntityAreaId(reg, devicesById);
     const area = areaId ? (areaName.get(areaId) ?? SPARES_AREA) : SPARES_AREA;
     const friendly = String(s.attributes.friendly_name ?? "").trim();
     const regName = reg?.name ? String(reg.name).trim() : "";
@@ -1973,6 +2029,37 @@ export function areaSwitchesFromStates(
       on: s.state === "on",
       available: available(s),
     });
+  }
+
+  // Belt-and-suspenders: curated PREFERRED_SWITCHES that exist in states must
+  // appear even if a future filter would drop them (same idea as Garden Front).
+  const seen = new Set(out.map((s) => s.entityId));
+  const byId = new Map(states.map((s) => [s.entity_id, s]));
+  for (const sw of SWITCHES) {
+    const ids = PREFERRED_SWITCHES[sw.id];
+    if (!ids?.length) continue;
+    for (const entityId of ids) {
+      if (seen.has(entityId)) continue;
+      const s = byId.get(entityId);
+      if (!s || !isControllableSwitch(s)) continue;
+      const reg = byEntity.get(entityId);
+      if (reg?.disabled_by) continue;
+      if (hideHomeSwitch(entityId, sw.label, [String(s.attributes.friendly_name ?? "")])) {
+        continue;
+      }
+      const areaId = resolveEntityAreaId(reg, devicesById);
+      const area = areaId ? (areaName.get(areaId) ?? SPARES_AREA) : SPARES_AREA;
+      const friendly = String(s.attributes.friendly_name ?? "").trim();
+      out.push({
+        entityId,
+        label: friendly || sw.label,
+        area,
+        on: s.state === "on",
+        available: available(s),
+      });
+      seen.add(entityId);
+      break;
+    }
   }
 
   out.sort((a, b) => {
@@ -2533,7 +2620,7 @@ export class HaSocket {
     }
   }
 
-  /** Entity registry — maps entity_id → area_id for switch grouping. */
+  /** Entity registry — maps entity_id → area_id / device_id for switch grouping. */
   async listEntityRegistry(): Promise<HaEntityReg[]> {
     if (!this.ws) return [];
     try {
@@ -2544,9 +2631,29 @@ export class HaSocket {
         .map((e) => ({
           entity_id: e.entity_id,
           area_id: e.area_id ?? null,
+          device_id: e.device_id ?? null,
           name: e.name ?? null,
           disabled_by: e.disabled_by ?? null,
           hidden_by: e.hidden_by ?? null,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** Device registry — area often lives here when entity.area_id is null. */
+  async listDeviceRegistry(): Promise<HaDeviceReg[]> {
+    if (!this.ws) return [];
+    try {
+      const result = await this.send("config/device_registry/list");
+      if (!Array.isArray(result)) return [];
+      return (result as HaDeviceReg[])
+        .filter((d) => d && typeof d.id === "string")
+        .map((d) => ({
+          id: d.id,
+          area_id: d.area_id ?? null,
+          name: d.name ?? null,
+          name_by_user: d.name_by_user ?? null,
         }));
     } catch {
       return [];
