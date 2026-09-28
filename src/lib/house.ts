@@ -415,3 +415,23 @@ export function lastTempDays(count: number): TempPoint[] {
 
 export const POND_TEMP_WEEK = lastTempDays(7);
 export const POND_TEMP_MONTH = lastTempDays(28);
+
+/** Demo pond monthly means — seasonal UK outdoor pond drift over 12 months. */
+export function lastTempMonths(count: number): TempPoint[] {
+  const out: TempPoint[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(NOW.getFullYear(), NOW.getMonth() - i, 1, 12, 0, 0, 0);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    // Cooler in winter months, milder mid-year — rough outdoor pond shape.
+    const month = d.getMonth();
+    const seasonal = 8 + 6 * Math.sin(((month - 2) / 12) * Math.PI * 2);
+    out.push({
+      key,
+      label: d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
+      tempC: Number(seasonal.toFixed(1)),
+    });
+  }
+  return out;
+}
+
+export const POND_TEMP_YEAR = lastTempMonths(12);

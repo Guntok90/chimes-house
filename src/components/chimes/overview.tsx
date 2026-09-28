@@ -13,6 +13,7 @@ import {
   HOURS,
   POND_TEMP_MONTH,
   POND_TEMP_WEEK,
+  POND_TEMP_YEAR,
   SCROLL_DAYS,
   WEEK_HOURS,
   YEAR,
@@ -54,7 +55,7 @@ import { NoHistoryYet } from "./no-history";
 
 type Box = OverviewBox;
 type ChartRange = "day" | "week" | "month" | "year";
-type PondRange = "week" | "month";
+type PondRange = "week" | "month" | "year";
 
 /** Match Tailwind `md` — freeform tiles above; stacked scroll below. */
 const STACK_MQ = "(max-width: 767px)";
@@ -68,9 +69,11 @@ const RANGE_OPTS: { id: ChartRange; label: string }[] = [
   { id: "year", label: "Year" },
 ];
 
+/** Clear Dad-facing labels — Week = 7 days, Month = 28 days, Year = 12 months. */
 const POND_RANGE_OPTS: { id: PondRange; label: string }[] = [
   { id: "week", label: "Week" },
   { id: "month", label: "Month" },
+  { id: "year", label: "Year" },
 ];
 
 function readGlassOpacity(): number {
@@ -192,7 +195,9 @@ export function Overview({ onClose }: { onClose: () => void }) {
       ? `${live.pondWaterTempC.toFixed(1)} °C now`
       : pondRange === "week"
         ? "7 days"
-        : "28 days";
+        : pondRange === "month"
+          ? "28 days"
+          : "12 months";
   const tileStyle = {
     backgroundColor: glassFill(glassOpacity),
     backdropFilter: `blur(${glassBackdropBlurPx(glassOpacity)}px)`,
@@ -730,7 +735,7 @@ function PondRangeTabs({
     <div
       className="inline-flex rounded-md border border-sidebar-fg/20 bg-teal-deep/40 p-0.5"
       role="tablist"
-      aria-label="Pond temperature range"
+      aria-label="Fish pond water temperature range"
     >
       {POND_RANGE_OPTS.map((opt) => (
         <button
@@ -738,9 +743,16 @@ function PondRangeTabs({
           type="button"
           role="tab"
           aria-selected={value === opt.id}
+          aria-label={
+            opt.id === "week"
+              ? "Week — last 7 days"
+              : opt.id === "month"
+                ? "Month — last 28 days"
+                : "Year — last 12 months"
+          }
           onClick={() => onChange(opt.id)}
           className={cn(
-            "min-h-7 rounded-sm px-2.5 text-[0.7rem] font-medium uppercase tracking-wider transition-colors",
+            "min-h-9 min-w-[3.25rem] rounded-sm px-3 text-[0.75rem] font-medium uppercase tracking-wider transition-colors",
             value === opt.id
               ? "bg-sidebar-fg/15 text-sidebar-fg"
               : "text-sidebar-fg/55 hover:text-sidebar-fg/80",
@@ -764,11 +776,14 @@ function OverviewPondGraph({
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyPondTempWeek = useHouse((s) => s.historyPondTempWeek);
   const historyPondTempMonth = useHouse((s) => s.historyPondTempMonth);
+  const historyPondTempYear = useHouse((s) => s.historyPondTempYear);
   const liveMode = !usesDemoCharts(status);
 
   const weekRows: TempPoint[] = liveMode ? historyPondTempWeek : POND_TEMP_WEEK;
   const monthRows: TempPoint[] = liveMode ? historyPondTempMonth : POND_TEMP_MONTH;
-  const data = range === "week" ? weekRows : monthRows;
+  const yearRows: TempPoint[] = liveMode ? historyPondTempYear : POND_TEMP_YEAR;
+  const data =
+    range === "week" ? weekRows : range === "month" ? monthRows : yearRows;
 
   const ready = useMemo(() => {
     if (!liveMode) return true;
@@ -776,10 +791,11 @@ function OverviewPondGraph({
     return historyStatus === "ready" && data.length > 0;
   }, [liveMode, historyStatus, data.length]);
 
-  const scrollWidth = useMemo(
-    () => Math.max(data.length * (range === "week" ? 48 : 28), 420),
-    [data.length, range],
-  );
+  const scrollWidth = useMemo(() => {
+    if (range === "week") return Math.max(data.length * 48, 420);
+    if (range === "month") return Math.max(data.length * 28, 420);
+    return Math.max(data.length * 56, 420);
+  }, [data.length, range]);
 
   return (
     <div className="flex h-full flex-col gap-1.5">
@@ -800,7 +816,14 @@ function OverviewPondGraph({
             </ChartScroll>
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-xs text-sidebar-fg/70">
-            <Key color={METER_COLORS.pond} label="Fish pond water temp" />
+            <Key
+              color={METER_COLORS.pond}
+              label={
+                range === "year"
+                  ? "Fish pond water temp (monthly mean)"
+                  : "Fish pond water temp"
+              }
+            />
           </div>
         </>
       ) : (

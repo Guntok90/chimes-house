@@ -5,6 +5,7 @@ import {
   hoursFromHistory,
   monthsFromStatistics,
   normalizeHistoryResult,
+  tempsFromMonthStatistics,
   tempsFromStatistics,
   type HaStatisticsBag,
 } from "./ha-history";
@@ -208,6 +209,8 @@ type Store = {
   historyPondTempWeek: TempPoint[];
   /** Fish pond water temp — last 28 daily means (°C). */
   historyPondTempMonth: TempPoint[];
+  /** Fish pond water temp — last 12 monthly means (°C). */
+  historyPondTempYear: TempPoint[];
   historyStatus: HistoryStatus;
   /** Min/max/step for mapped Huawei charge-limit number entities. */
   chargeLimitMeta: Record<ChargeLimitKey, NumberControlMeta>;
@@ -327,6 +330,7 @@ function emptyHistory() {
     historyYear: [] as DayPoint[],
     historyPondTempWeek: [] as TempPoint[],
     historyPondTempMonth: [] as TempPoint[],
+    historyPondTempYear: [] as TempPoint[],
   };
 }
 
@@ -750,6 +754,7 @@ export const useHouse = create<Store>((set, get) => {
           let year: DayPoint[] = [];
           let pondWeek: TempPoint[] = [];
           let pondMonth: TempPoint[] = [];
+          let pondYear: TempPoint[] = [];
 
           // Hourly and daily paths are independent — a stats parse throw must
           // not wipe an otherwise-valid series (and never invent demo data).
@@ -817,8 +822,16 @@ export const useHouse = create<Store>((set, get) => {
             year = monthsFromStatistics(yearStats, map, HISTORY_YEAR_COUNT, end, {
               rates: ratesForHistory(get().tariffs),
             });
+            // Pond year = monthly mean °C (same compact period:month payload).
+            pondYear = tempsFromMonthStatistics(
+              yearStats,
+              map.pondWaterTempC,
+              HISTORY_YEAR_COUNT,
+              end,
+            );
           } catch {
             year = [];
+            pondYear = [];
           }
 
           const empty =
@@ -827,7 +840,8 @@ export const useHouse = create<Store>((set, get) => {
             week.length === 0 &&
             year.length === 0 &&
             pondWeek.length === 0 &&
-            pondMonth.length === 0;
+            pondMonth.length === 0 &&
+            pondYear.length === 0;
           set({
             historyHours: hours,
             historyDays: days,
@@ -836,6 +850,7 @@ export const useHouse = create<Store>((set, get) => {
             historyYear: year,
             historyPondTempWeek: pondWeek,
             historyPondTempMonth: pondMonth,
+            historyPondTempYear: pondYear,
             historyStatus: empty ? "empty" : "ready",
           });
         } finally {
