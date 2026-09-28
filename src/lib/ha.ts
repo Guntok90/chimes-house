@@ -1621,9 +1621,22 @@ function isControllableSwitch(s: HaState) {
 }
 
 /**
+ * Dangerous / non-garden HA switches that must never appear as Home On/Off
+ * tiles. Prefer exact entity_id here over name heuristics so we can grow the
+ * list without hiding legitimate plugs. Battery / Energy may still read these
+ * entities for status — this list only affects Home (and similar switch grids
+ * that call hideHomeSwitch).
+ */
+export const HOME_SWITCH_ENTITY_DENYLIST = new Set<string>([
+  // Huawei SUN2000 inverter standby / power — not a smart plug.
+  "switch.inverter",
+]);
+
+/**
  * Home switch list filters (dad follow-ups after PR #22 / #30): drop junk so
  * Home shows one real switch tile each. Match case-insensitively against
  * entity_id, display label, registry name, and friendly_name:
+ * - exact entity_id denylist (dangerous Huawei controls, etc.)
  * - dnd / do not disturb (twins)
  * - myenergi / my energy
  * - child lock (any device)
@@ -1635,6 +1648,7 @@ export function hideHomeSwitch(
   label: string,
   extraNames: string[] = [],
 ): boolean {
+  if (HOME_SWITCH_ENTITY_DENYLIST.has(entityId)) return true;
   const hay = `${entityId} ${label} ${extraNames.join(" ")}`.toLowerCase();
   if (
     hay.includes("dnd") ||
@@ -1989,8 +2003,8 @@ export function resolveEntityAreaId(
 /**
  * All switch/light entities from live states, grouped by HA area.
  * Unassigned entities land in Spares (shown without a labelled heading).
- * Filters out Dnd / myenergi / child-lock / enable / grid-charge junk
- * (see hideHomeSwitch). Applies Home-only friendly name overrides.
+ * Filters out denylisted / Dnd / myenergi / child-lock / enable / grid-charge
+ * junk (see hideHomeSwitch). Applies Home-only friendly name overrides.
  *
  * Registry `hidden_by` does **not** drop tiles — Chimes is the control UI
  * (Dad often hides Meross plugs from the HA overview). Only `disabled_by`
