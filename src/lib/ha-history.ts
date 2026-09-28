@@ -530,6 +530,81 @@ export function tempMeanC(row: HaStatRow | undefined): number | null {
   return null;
 }
 
+/** Local calendar YYYY-MM-DDTHH for hourly statistics buckets. */
+function localHourKey(d: Date): string {
+  return `${localDayKey(d)}T${pad2(d.getHours())}`;
+}
+
+function hourKeyFromStart(start: string | number | null | undefined): string | null {
+  const d = dateFromStatStart(start);
+  return d ? localHourKey(d) : null;
+}
+
+/**
+ * Hourly temperatures from live HA history (last `count` hours, default 24).
+ * Samples the newest state at each hour — useful Day fallback when hour stats
+ * are empty. Empty → [].
+ */
+export function tempsFromHistory(
+  bag: HaHistoryBag,
+  entityId: string | undefined,
+  now = new Date(),
+  count = 24,
+): TempPoint[] {
+  if (!entityId) return [];
+  const series = bag[entityId];
+  if (!series?.length) return [];
+
+  const out: TempPoint[] = [];
+  const end = new Date(now);
+  end.setMinutes(0, 0, 0);
+  for (let i = count - 1; i >= 0; i--) {
+    const t = new Date(end);
+    t.setHours(end.getHours() - i);
+    const tempC = sampleAt(series, t.getTime());
+    if (tempC == null) continue;
+    out.push({
+      key: localHourKey(t),
+      label: `${pad2(t.getHours())}:00`,
+      tempC: Number(tempC.toFixed(1)),
+    });
+  }
+  return out;
+}
+
+/**
+ * Hourly mean temperatures from recorder statistics (period: hour).
+ * Preferred Day view — ~24 points, not raw 5‑min history. Empty → [].
+ */
+export function tempsFromHourStatistics(
+  stats: HaStatisticsBag,
+  entityId: string | undefined,
+  count: number,
+  now = new Date(),
+): TempPoint[] {
+  if (!entityId) return [];
+  const rows = stats[entityId];
+  if (!rows?.length) return [];
+
+  const out: TempPoint[] = [];
+  const end = new Date(now);
+  end.setMinutes(0, 0, 0);
+  for (let i = count - 1; i >= 0; i--) {
+    const t = new Date(end);
+    t.setHours(end.getHours() - i);
+    const key = localHourKey(t);
+    const row = rows.find((r) => hourKeyFromStart(r.start) === key);
+    const tempC = tempMeanC(row);
+    if (tempC == null) continue;
+    out.push({
+      key,
+      label: `${pad2(t.getHours())}:00`,
+      tempC,
+    });
+  }
+  return out;
+}
+
 /**
  * Daily mean temperatures from recorder statistics (period: day).
  * Empty → [] (never invent demo curves while Live).

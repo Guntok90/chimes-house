@@ -16,6 +16,8 @@ import {
   normalizeHistoryResult,
   splitGridImportForDay,
   tempMeanC,
+  tempsFromHistory,
+  tempsFromHourStatistics,
   tempsFromMonthStatistics,
   tempsFromStatistics,
   type HaStatisticsBag,
@@ -552,5 +554,40 @@ describe("ha history helpers", () => {
     assert.equal(year[11].tempC, 6);
     assert.match(year[0].label, /[A-Z][a-z]{2}/); // short month
     assert.deepEqual(tempsFromMonthStatistics(stats, undefined, 12, now), []);
+  });
+
+  it("tempsFromHourStatistics builds last-24h pond means with HH:00 labels", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const now = new Date(2026, 8, 23, 18, 0, 0, 0);
+    const rows = [];
+    for (let i = 23; i >= 0; i--) {
+      const d = new Date(2026, 8, 23, 18 - i, 0, 0, 0);
+      rows.push({ start: d.getTime(), mean: 11 + (i % 5) * 0.2, change: 0 });
+    }
+    const stats: HaStatisticsBag = { [probe]: rows };
+    const day = tempsFromHourStatistics(stats, probe, 24, now);
+    assert.equal(day.length, 24);
+    assert.match(day[0].label, /^\d{2}:00$/);
+    assert.equal(day[day.length - 1].label, "18:00");
+    assert.deepEqual(tempsFromHourStatistics(stats, undefined, 24, now), []);
+  });
+
+  it("tempsFromHistory samples probe states into hourly Day points", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const now = new Date(2026, 8, 23, 12, 0, 0, 0);
+    // Reading from the start of the 24h window — sampleAt carries it forward.
+    const startLu = (now.getTime() - 23 * 60 * 60 * 1000) / 1000;
+    const bag = {
+      [probe]: [
+        { s: "11.2", lu: startLu },
+        { s: "12.6", lu: now.getTime() / 1000 - 60 },
+      ],
+    };
+    const day = tempsFromHistory(bag, probe, now, 24);
+    assert.equal(day.length, 24);
+    assert.equal(day[0].tempC, 11.2);
+    assert.equal(day[day.length - 1].tempC, 12.6);
+    assert.equal(day[day.length - 1].label, "12:00");
+    assert.deepEqual(tempsFromHistory(bag, undefined, now, 24), []);
   });
 });
