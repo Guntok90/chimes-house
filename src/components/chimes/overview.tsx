@@ -36,9 +36,10 @@ import {
   glassFill,
   nudgeOverviewBoxPosition,
   prefersManualOnlyBoxResize,
+  persistOverviewBox,
   readOverviewBox,
   resolveOverviewBox,
-  writeOverviewBox,
+  boxesNearlyEqual,
   type OverviewBox,
 } from "@/lib/overview-glass";
 import { cn } from "@/lib/utils";
@@ -434,11 +435,17 @@ function GlassTile({
 
   useEffect(() => {
     // Re-resolve after mount in case Safari chrome changed the viewport between
-    // first paint and effect. Never fall back to defaults when a save exists.
+    // first paint and effect. Prefer any save (localStorage or cookie backup);
+    // never replace a good boxRef with hardcoded defaults when storage is empty
+    // only because auth remounted — cookie restore runs inside readOverviewBox.
     manualOnly.current = detectManualOnlyResize();
     const saved = readOverviewBox(storageKey);
     const vp = viewportNow();
-    const initial = resolveOverviewBox(saved, fallback(), vp, {
+    const fb = fallback();
+    // If first paint already restored a save, only nudge/clamp for viewport —
+    // do not re-seed from fallback when saved is somehow briefly null.
+    const seed = saved ?? (boxRef.current && !boxesNearlyEqual(boxRef.current, fb) ? boxRef.current : null);
+    const initial = resolveOverviewBox(seed, fb, vp, {
       manualOnly: manualOnly.current,
     });
     boxRef.current = initial;
@@ -464,7 +471,7 @@ function GlassTile({
       const current = boxRef.current;
       if (!current) return;
       if (!dirty.current && !mode.current) return;
-      writeOverviewBox(storageKey, current);
+      persistOverviewBox(storageKey, current, { fallback: fallback() });
       dirty.current = false;
     };
     const onVisibility = () => {
@@ -525,9 +532,10 @@ function GlassTile({
         /* already released */
       }
       // Prefer boxRef (updated synchronously in move) over a lagged setState.
+      // Denylist: refuse to overwrite a custom save with hardcoded defaults.
       const current = boxRef.current;
       if (current) {
-        writeOverviewBox(storageKey, current);
+        persistOverviewBox(storageKey, current, { fallback: fallback() });
         dirty.current = false;
       }
     };
@@ -539,7 +547,7 @@ function GlassTile({
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
     };
-  }, [storageKey]);
+  }, [storageKey, fallback]);
 
   function begin(event: ReactPointerEvent, next: "drag" | "resize") {
     if (event.button !== 0) return;

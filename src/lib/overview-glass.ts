@@ -1,6 +1,16 @@
 /**
  * Overview glass info-box helpers (opacity clamp + box geometry).
  * Pure so unit tests can lock Dad-facing behaviour without mounting React.
+ *
+ * Persistence (per device):
+ * 1) Legacy per-tile localStorage keys (`chimes.overview.graph` / `.flow` / `.pond`)
+ * 2) Unified layout map (`chimes.overview.layout`) — merge-on-write so a new
+ *    tile (e.g. pond) never wipes geometry for the others
+ * 3) Same-origin cookie backup (`chimes_overview_layout`) — survives logout and
+ *    some Safari cases where localStorage is empty after a fresh session while
+ *    first-party cookies remain
+ *
+ * Logout only clears the family session cookie; it must never wipe these keys.
  */
 
 export const GLASS_OPACITY_KEY = "chimes.overview.glassOpacity";
@@ -14,10 +24,43 @@ export const OVERVIEW_GRAPH_BOX_KEY = "chimes.overview.graph";
 export const OVERVIEW_FLOW_BOX_KEY = "chimes.overview.flow";
 export const OVERVIEW_POND_BOX_KEY = "chimes.overview.pond";
 
+/** Merged layout document — one JSON object, one tile write at a time. */
+export const OVERVIEW_LAYOUT_KEY = "chimes.overview.layout";
+
+/** Cookie backup for the merged layout (not HttpOnly — readable by the SPA). */
+export const OVERVIEW_LAYOUT_COOKIE = "chimes_overview_layout";
+
+/** ~1 year — layout should outlive the 30-day family session cookie. */
+export const OVERVIEW_LAYOUT_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
+
+/** Keys the family logout path must never clear. */
+export const OVERVIEW_LAYOUT_STORAGE_KEYS = [
+  OVERVIEW_GRAPH_BOX_KEY,
+  OVERVIEW_FLOW_BOX_KEY,
+  OVERVIEW_POND_BOX_KEY,
+  OVERVIEW_LAYOUT_KEY,
+  GLASS_OPACITY_KEY,
+] as const;
+
+/** Short ids inside the merged layout / cookie JSON. */
+export const OVERVIEW_TILE_IDS: Record<string, string> = {
+  [OVERVIEW_GRAPH_BOX_KEY]: "graph",
+  [OVERVIEW_FLOW_BOX_KEY]: "flow",
+  [OVERVIEW_POND_BOX_KEY]: "pond",
+};
+
 export const BOX_MIN_W = 300;
 export const BOX_MIN_H = 220;
 
 export type OverviewBox = { x: number; y: number; w: number; h: number };
+
+export type OverviewLayoutMap = Record<string, OverviewBox>;
+
+/** Injectable cookie jar so unit tests do not need `document`. */
+export type CookieJar = {
+  getItem: (name: string) => string | null;
+  setItem: (name: string, value: string) => void;
+};
 
 /** Teal-deep #1c3940 — glass fill only; content stays fully opaque. */
 export function glassFill(pct: number): string {
@@ -99,6 +142,33 @@ export function parseOverviewBox(raw: unknown): OverviewBox | null {
   return { x, y, w, h };
 }
 
+/** Geometry equality within 1px — enough to catch default overwrite races. */
+export function boxesNearlyEqual(a: OverviewBox, b: OverviewBox, epsilon = 1): boolean {
+  return (
+    Math.abs(a.x - b.x) <= epsilon &&
+    Math.abs(a.y - b.y) <= epsilon &&
+    Math.abs(a.w - b.w) <= epsilon &&
+    Math.abs(a.h - b.h) <= epsilon
+  );
+}
+
+/**
+ * Refuse writes that would replace a custom save with hardcoded defaults.
+ * First save, intentional custom→custom, and default→default all still pass.
+ */
+export function shouldPersistOverviewBox(
+  next: OverviewBox,
+  existing: OverviewBox | null,
+  fallback: OverviewBox | null | undefined,
+): boolean {
+  if (![next.x, next.y, next.w, next.h].every(Number.isFinite)) return false;
+  if (!existing || !fallback) return true;
+  const existingIsCustom = !boxesNearlyEqual(existing, fallback);
+  const nextIsDefault = boxesNearlyEqual(next, fallback);
+  if (existingIsCustom && nextIsDefault) return false;
+  return true;
+}
+
 function storageOrNull(storage?: Storage | null): Storage | null {
   if (storage !== undefined) return storage;
   try {
@@ -108,34 +178,246 @@ function storageOrNull(storage?: Storage | null): Storage | null {
   }
 }
 
-/** Read a saved Overview box; null when missing / invalid / storage blocked. */
-export function readOverviewBox(key: string, storage?: Storage | null): OverviewBox | null {
+function defaultCookieJar(): CookieJar | null {
   try {
-    const store = storageOrNull(storage);
-    if (!store) return null;
-    const raw = store.getItem(key);
-    if (!raw) return null;
-    return parseOverviewBox(JSON.parse(raw) as unknown);
+    if (typeof document === "undefined") return null;
+    return {
+      getItem(name: string) {
+        const prefix = `${name}=`;
+        const parts = document.cookie.split(";");
+        for (const part of parts) {
+          const trimmed = part.trim();
+          if (!trimmed.startsWith(prefix)) continue;
+          try {
+            return decodeURIComponent(trimmed.slice(prefix.length));
+          } catch {
+            return trimmed.slice(prefix.length);
+          }
+        }
+        return null;
+      },
+      setItem(name: string, value: string) {
+        const secure =
+          typeof location !== "undefined" && location.protocol === "https:" ? "Secure" : "";
+        document.cookie = [
+          `${name}=${encodeURIComponent(value)}`,
+          "Path=/",
+          `Max-Age=${OVERVIEW_LAYOUT_COOKIE_MAX_AGE}`,
+          "SameSite=Lax",
+          secure,
+        ]
+          .filter(Boolean)
+          .join("; ");
+      },
+    };
   } catch {
     return null;
   }
 }
 
-/** Persist a box. Returns false when storage is unavailable (private mode). */
+function cookieJarOrNull(cookies?: CookieJar | null): CookieJar | null {
+  if (cookies !== undefined) return cookies;
+  return defaultCookieJar();
+}
+
+/** Parse `{ graph: {x,y,w,h}, ... }` — drop invalid entries, keep the rest. */
+export function parseOverviewLayout(raw: unknown): OverviewLayoutMap {
+  if (!raw || typeof raw !== "object") return {};
+  const out: OverviewLayoutMap = {};
+  for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+    const box = parseOverviewBox(value);
+    if (box) out[id] = box;
+  }
+  return out;
+}
+
+function readLayoutFromStore(store: Storage | null): OverviewLayoutMap {
+  if (!store) return {};
+  try {
+    const raw = store.getItem(OVERVIEW_LAYOUT_KEY);
+    if (!raw) return {};
+    return parseOverviewLayout(JSON.parse(raw) as unknown);
+  } catch {
+    return {};
+  }
+}
+
+function readLayoutFromCookie(cookies: CookieJar | null): OverviewLayoutMap {
+  if (!cookies) return {};
+  try {
+    const raw = cookies.getItem(OVERVIEW_LAYOUT_COOKIE);
+    if (!raw) return {};
+    return parseOverviewLayout(JSON.parse(raw) as unknown);
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Merge layout maps — later sources win per tile id, but never delete siblings.
+ * Used when hydrating from legacy keys + map + cookie.
+ */
+export function mergeOverviewLayouts(...maps: OverviewLayoutMap[]): OverviewLayoutMap {
+  const out: OverviewLayoutMap = {};
+  for (const map of maps) {
+    for (const [id, box] of Object.entries(map)) {
+      out[id] = box;
+    }
+  }
+  return out;
+}
+
+function legacyMapFromStore(store: Storage | null): OverviewLayoutMap {
+  if (!store) return {};
+  const out: OverviewLayoutMap = {};
+  for (const [key, id] of Object.entries(OVERVIEW_TILE_IDS)) {
+    try {
+      const raw = store.getItem(key);
+      if (!raw) continue;
+      const box = parseOverviewBox(JSON.parse(raw) as unknown);
+      if (box) out[id] = box;
+    } catch {
+      /* skip bad legacy entry */
+    }
+  }
+  return out;
+}
+
+/** Full merged layout from localStorage (+ optional cookie). */
+export function readOverviewLayout(
+  storage?: Storage | null,
+  cookies?: CookieJar | null,
+): OverviewLayoutMap {
+  const store = storageOrNull(storage);
+  const jar = cookieJarOrNull(cookies);
+  // Prefer explicit layout map, then fill gaps from legacy keys, then cookie.
+  // Cookie is last so a stale cookie cannot clobber a fresher localStorage save;
+  // when localStorage is empty after logout/re-auth, cookie still restores.
+  const fromMap = readLayoutFromStore(store);
+  const fromLegacy = legacyMapFromStore(store);
+  const fromCookie = readLayoutFromCookie(jar);
+  if (Object.keys(fromMap).length === 0 && Object.keys(fromLegacy).length === 0) {
+    return fromCookie;
+  }
+  return mergeOverviewLayouts(fromCookie, fromLegacy, fromMap);
+}
+
+/** Read a saved Overview box; null when missing / invalid / storage blocked. */
+export function readOverviewBox(
+  key: string,
+  storage?: Storage | null,
+  cookies?: CookieJar | null,
+): OverviewBox | null {
+  try {
+    const store = storageOrNull(storage);
+    const jar = cookieJarOrNull(cookies);
+    const tileId = OVERVIEW_TILE_IDS[key];
+
+    // Prefer the dedicated legacy key when present (most recent pointerup write).
+    if (store) {
+      const raw = store.getItem(key);
+      if (raw) {
+        const box = parseOverviewBox(JSON.parse(raw) as unknown);
+        if (box) return box;
+      }
+    }
+
+    if (tileId) {
+      const layout = readOverviewLayout(store, jar);
+      return layout[tileId] ?? null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function writeLayoutArtifacts(
+  layout: OverviewLayoutMap,
+  store: Storage | null,
+  cookies: CookieJar | null,
+): boolean {
+  const payload = JSON.stringify(layout);
+  let ok = false;
+  if (store) {
+    try {
+      store.setItem(OVERVIEW_LAYOUT_KEY, payload);
+      ok = true;
+    } catch {
+      /* private mode / quota */
+    }
+  }
+  if (cookies) {
+    try {
+      cookies.setItem(OVERVIEW_LAYOUT_COOKIE, payload);
+      ok = true;
+    } catch {
+      /* cookie blocked */
+    }
+  }
+  return ok;
+}
+
+/**
+ * Persist a box. Merges into the unified layout so other tiles stay put.
+ * Also mirrors the legacy per-key entry for older builds. Returns false when
+ * every backend (localStorage + cookie) refuses the write.
+ */
 export function writeOverviewBox(
   key: string,
   box: OverviewBox,
   storage?: Storage | null,
+  cookies?: CookieJar | null,
 ): boolean {
   try {
-    const store = storageOrNull(storage);
-    if (!store) return false;
     if (![box.x, box.y, box.w, box.h].every(Number.isFinite)) return false;
-    store.setItem(key, JSON.stringify(box));
-    return true;
+    const store = storageOrNull(storage);
+    const jar = cookieJarOrNull(cookies);
+    let ok = false;
+
+    if (store) {
+      try {
+        store.setItem(key, JSON.stringify(box));
+        ok = true;
+      } catch {
+        /* continue — cookie / layout may still work */
+      }
+    }
+
+    const tileId = OVERVIEW_TILE_IDS[key];
+    if (tileId) {
+      const layout = mergeOverviewLayouts(readOverviewLayout(store, jar), { [tileId]: box });
+      if (writeLayoutArtifacts(layout, store, jar)) ok = true;
+    }
+
+    return ok;
   } catch {
     return false;
   }
+}
+
+/**
+ * User-gesture persist with a denylist: never replace a custom save with
+ * geometry that matches the hardcoded fallback (default-paint → accidental
+ * pointerup race after logout/login remount).
+ */
+export function persistOverviewBox(
+  key: string,
+  box: OverviewBox,
+  opts?: {
+    fallback?: OverviewBox | null;
+    storage?: Storage | null;
+    cookies?: CookieJar | null;
+  },
+): boolean {
+  const storage = opts?.storage;
+  const cookies = opts?.cookies;
+  const existing = readOverviewBox(key, storage, cookies);
+  if (!shouldPersistOverviewBox(box, existing, opts?.fallback)) {
+    return false;
+  }
+  return writeOverviewBox(key, box, storage, cookies);
 }
 
 /**

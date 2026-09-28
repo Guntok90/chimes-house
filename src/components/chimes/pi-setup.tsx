@@ -135,7 +135,8 @@ export function PiSetup() {
         </div>
         <p className="text-sm text-ink-soft">
           Sign out clears the Shyft session cookie on this tablet. You’ll need the family password
-          again to open Chimes.
+          again to open Chimes. Overview box sizes and positions stay on this tablet — logout does
+          not reset them.
         </p>
         <button
           type="button"
