@@ -19,7 +19,9 @@ export function BatteryView() {
   const chartsReady = !liveMode || (historyStatus === "ready" && hoursSrc.length > 0);
   const today = week[week.length - 1];
   const discharging = live.batteryW < 0;
-  const hours = lastHoursWindow(hoursSrc).map((h) => ({
+  // Keep lastDay for Highest/Lowest SOC in "This week" (same 24h window as charts).
+  const lastDay = lastHoursWindow(hoursSrc);
+  const hours = lastDay.map((h) => ({
     hour: h.hour,
     SOC: h.soc,
     Power: h.battW,
