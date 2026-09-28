@@ -18,6 +18,7 @@ import {
   frontGardenSwitches,
   groupSwitchesByArea,
   hideHomeSwitch,
+  HOME_SWITCH_ENTITY_DENYLIST,
   resolveEntityAreaId,
   resolveFrontGardenTiles,
   interestForLiveUi,
@@ -955,6 +956,9 @@ describe("area-grouped switches (Home)", () => {
       hideHomeSwitch("switch.inverter_charge_from_grid", "Allow grid charge"),
       true,
     );
+    // Huawei inverter standby — exact entity denylist (not name heuristic).
+    assert.ok(HOME_SWITCH_ENTITY_DENYLIST.has("switch.inverter"));
+    assert.equal(hideHomeSwitch("switch.inverter", "Inverter"), true);
     // Real switches stay
     assert.equal(hideHomeSwitch("switch.smart_switch_4", "Lamp"), false);
     assert.equal(hideHomeSwitch("switch.pond_1_switch_1", "Pond 1"), false);
@@ -984,12 +988,20 @@ describe("area-grouped switches (Home)", () => {
       state("switch.cabinet_child_lock", "off", "Cabinet child lock"),
       state("switch.myenergi_zappi_boost", "off", "Boost"),
       state("switch.spare_boost", "off", "My Energy boost"),
+      state("switch.inverter", "on", "Inverter"),
       state("switch.pergola_switch_1", "off", "Pergola"),
+      state("switch.pond_2_switch_1", "off", "Pond 2 Switch 1"),
+      state("switch.spare", "off", "Spare"),
     ];
     const list = areaSwitchesFromStates(states, [], []);
     assert.deepEqual(
       list.map((s) => s.entityId).sort(),
-      ["switch.pergola_switch_1", "switch.smart_switch_4"],
+      [
+        "switch.pergola_switch_1",
+        "switch.pond_2_switch_1",
+        "switch.smart_switch_4",
+        "switch.spare",
+      ],
     );
     assert.equal(list.find((s) => s.entityId === "switch.smart_switch_4")?.on, true);
     assert.equal(list.find((s) => s.entityId === "switch.pergola_switch_1")?.on, false);
@@ -997,6 +1009,7 @@ describe("area-grouped switches (Home)", () => {
       list.find((s) => s.entityId === "switch.batteries_charge_from_grid"),
       undefined,
     );
+    assert.equal(list.find((s) => s.entityId === "switch.inverter"), undefined);
   });
 
   it("areaSwitchesFromStates renames Fan and first Spares Spare for Home UI", () => {
