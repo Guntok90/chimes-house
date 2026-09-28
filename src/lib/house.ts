@@ -222,6 +222,11 @@ export type DayPoint = {
   /** EV / Zappi charge energy (kWh) when a charge-power entity is mapped. */
   cars: number;
   /**
+   * Mean battery state of charge (%) for the period (day or month).
+   * From HA recorder statistics `mean` — not raw 5‑min history.
+   */
+  soc: number;
+  /**
    * Grid import kWh during the Intelligent Go cheap window (23:30–05:30).
    * Kept so tariff edits can reprice without re-falling back to 25%/75%.
    */
@@ -276,6 +281,7 @@ export function lastDays(count: number): DayPoint[] {
     const gridOut = clamp(surplus * 0.55, 0, 6.2);
     const gridIn = clamp(short * 0.7, 0.2, 8.4);
     const cars = clamp((seed % 7) * 0.35, 0, 4.2);
+    const soc = clamp(48 + ((seed * 3) % 45), 18, 96);
     // Demo has no hourly import series — split by Intelligent Go window hours,
     // priced with custom tariff defaults (same as editable Energy rates).
     const { lowKwh, highKwh } = splitDailyImportByWindow(gridIn);
@@ -293,6 +299,7 @@ export function lastDays(count: number): DayPoint[] {
       battCharge: Number(battCharge.toFixed(2)),
       battDischarge: Number(battDischarge.toFixed(2)),
       cars: Number(cars.toFixed(2)),
+      soc: Math.round(soc),
       importOffPeakKwh: Number(lowKwh.toFixed(4)),
       importPeakKwh: Number(highKwh.toFixed(4)),
       costOffPeak: spend.offPeak,
