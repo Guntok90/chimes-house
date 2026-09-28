@@ -16,6 +16,7 @@ import {
   normalizeHistoryResult,
   splitGridImportForDay,
   tempMeanC,
+  tempsFromMonthStatistics,
   tempsFromStatistics,
   type HaStatisticsBag,
 } from "./ha-history.ts";
@@ -502,5 +503,23 @@ describe("ha history helpers", () => {
       historyEntityIds({ ...map, pondWaterTempC: probe }).includes(probe),
       true,
     );
+  });
+
+  it("tempsFromMonthStatistics builds compact year series from monthly means", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const now = new Date(2026, 8, 23, 18, 0, 0, 0);
+    const rows = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(2026, 8 - i, 1, 0, 0, 0, 0);
+      rows.push({ start: d.getTime(), mean: 6 + i * 0.5, change: 0 });
+    }
+    const stats: HaStatisticsBag = { [probe]: rows };
+    const year = tempsFromMonthStatistics(stats, probe, 12, now);
+    assert.equal(year.length, 12);
+    // Oldest month first (i=11 → mean 11.5), newest last (i=0 → mean 6).
+    assert.equal(year[0].tempC, 11.5);
+    assert.equal(year[11].tempC, 6);
+    assert.match(year[0].label, /[A-Z][a-z]{2}/); // short month
+    assert.deepEqual(tempsFromMonthStatistics(stats, undefined, 12, now), []);
   });
 });

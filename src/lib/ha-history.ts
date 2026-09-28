@@ -543,6 +543,37 @@ export function tempsFromStatistics(
   return out;
 }
 
+/**
+ * Monthly mean temperatures from recorder statistics (period: month).
+ * Efficient year view — ~12 points, never raw 5‑min history.
+ * Empty → [].
+ */
+export function tempsFromMonthStatistics(
+  stats: HaStatisticsBag,
+  entityId: string | undefined,
+  count: number,
+  now = new Date(),
+): TempPoint[] {
+  if (!entityId) return [];
+  const rows = stats[entityId];
+  if (!rows?.length) return [];
+
+  const out: TempPoint[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1, 12, 0, 0, 0);
+    const key = localMonthKey(d);
+    const row = rows.find((r) => monthKeyFromStart(r.start) === key);
+    const tempC = tempMeanC(row);
+    if (tempC == null) continue;
+    out.push({
+      key,
+      label: monthLabel(key),
+      tempC,
+    });
+  }
+  return out;
+}
+
 export function historyEntityIds(map: HaMap): string[] {
   return [
     map.solarNowW,
