@@ -5,8 +5,11 @@ import {
   hoursFromHistory,
   monthsFromStatistics,
   normalizeHistoryResult,
+  tempsFromHistory,
+  tempsFromHourStatistics,
   tempsFromMonthStatistics,
   tempsFromStatistics,
+  type HaHistoryBag,
   type HaStatisticsBag,
 } from "./ha-history";
 import {
@@ -205,6 +208,8 @@ type Store = {
   historyMonth: DayPoint[];
   /** Last 12 months from period:month statistics. */
   historyYear: DayPoint[];
+  /** Fish pond water temp — last 24 hourly means (°C). */
+  historyPondTempDay: TempPoint[];
   /** Fish pond water temp — last 7 daily means (°C). */
   historyPondTempWeek: TempPoint[];
   /** Fish pond water temp — last 28 daily means (°C). */
@@ -328,6 +333,7 @@ function emptyHistory() {
     historyWeek: [] as DayPoint[],
     historyMonth: [] as DayPoint[],
     historyYear: [] as DayPoint[],
+    historyPondTempDay: [] as TempPoint[],
     historyPondTempWeek: [] as TempPoint[],
     historyPondTempMonth: [] as TempPoint[],
     historyPondTempYear: [] as TempPoint[],
@@ -752,6 +758,7 @@ export const useHouse = create<Store>((set, get) => {
           let week: DayPoint[] = [];
           let month: DayPoint[] = [];
           let year: DayPoint[] = [];
+          let pondDay: TempPoint[] = [];
           let pondWeek: TempPoint[] = [];
           let pondMonth: TempPoint[] = [];
           let pondYear: TempPoint[] = [];
@@ -764,9 +771,34 @@ export const useHouse = create<Store>((set, get) => {
               startHours.toISOString(),
               end.toISOString(),
             );
-            hours = hoursFromHistory(normalizeHistoryResult(raw), map, end, HISTORY_HOUR_COUNT);
+            const histBag: HaHistoryBag = normalizeHistoryResult(raw);
+            hours = hoursFromHistory(histBag, map, end, HISTORY_HOUR_COUNT);
+            // Day fallback from history samples (overwritten by hour stats when present).
+            pondDay = tempsFromHistory(histBag, map.pondWaterTempC, end, 24);
           } catch {
             hours = [];
+          }
+
+          // Prefer true hourly means for pond Day (last 24h) when recorder has them.
+          if (map.pondWaterTempC) {
+            try {
+              const startPondHours = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+              const pondHourStats = (await socket.statisticsDuringPeriod(
+                [map.pondWaterTempC],
+                startPondHours.toISOString(),
+                end.toISOString(),
+                "hour",
+              )) as HaStatisticsBag;
+              const fromHourStats = tempsFromHourStatistics(
+                pondHourStats,
+                map.pondWaterTempC,
+                24,
+                end,
+              );
+              if (fromHourStats.length) pondDay = fromHourStats;
+            } catch {
+              /* keep history-sampled pondDay */
+            }
           }
 
           try {
@@ -839,6 +871,7 @@ export const useHouse = create<Store>((set, get) => {
             days.length === 0 &&
             week.length === 0 &&
             year.length === 0 &&
+            pondDay.length === 0 &&
             pondWeek.length === 0 &&
             pondMonth.length === 0 &&
             pondYear.length === 0;
@@ -848,6 +881,7 @@ export const useHouse = create<Store>((set, get) => {
             historyWeek: week,
             historyMonth: month,
             historyYear: year,
+            historyPondTempDay: pondDay,
             historyPondTempWeek: pondWeek,
             historyPondTempMonth: pondMonth,
             historyPondTempYear: pondYear,
