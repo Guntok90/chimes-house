@@ -249,11 +249,27 @@ function monthValue(rows: HaStatRow[] | undefined, key: string): number {
   return periodValue(rows, key, monthKeyFromStart, 24 * 30.4);
 }
 
+/**
+ * Period mean for percentage / temperature-style sensors.
+ * Prefer `mean`; fall back to `state`. Never use energy `change`.
+ */
+function periodMean(
+  rows: HaStatRow[] | undefined,
+  key: string,
+  keyOf: (start: string | number | null | undefined) => string | null,
+): number {
+  if (!rows?.length) return 0;
+  const row = rows.find((r) => keyOf(r.start) === key);
+  const mean = tempMeanC(row);
+  return mean == null ? 0 : Math.round(mean);
+}
+
 function metersForPeriod(
   stats: HaStatisticsBag,
   map: HaMap,
   key: string,
   valueFn: (rows: HaStatRow[] | undefined, key: string) => number,
+  meanKeyOf: (start: string | number | null | undefined) => string | null,
 ): Omit<
   DayPoint,
   | "key"
@@ -275,6 +291,8 @@ function metersForPeriod(
   const battCharge = Math.max(0, battRaw);
   const battDischarge = Math.max(0, -battRaw);
   const cars = Math.max(0, valueFn(map.zappiW ? stats[map.zappiW] : undefined, key));
+  // Battery SOC % — statistics mean for the day/month (not raw history).
+  const soc = periodMean(map.soc ? stats[map.soc] : undefined, key, meanKeyOf);
   return {
     solar,
     house,
@@ -283,6 +301,7 @@ function metersForPeriod(
     battCharge,
     battDischarge,
     cars,
+    soc,
   };
 }
 
@@ -437,7 +456,7 @@ export function daysFromStatistics(
     d.setHours(12, 0, 0, 0);
     d.setDate(d.getDate() - i);
     const key = localDayKey(d);
-    const meters = metersForPeriod(stats, map, key, dayValue);
+    const meters = metersForPeriod(stats, map, key, dayValue, dayKeyFromStart);
     const spend = daySpendPartsGbp(meters.gridIn, key, hourRows, rates);
     // When daily stats only had watts-as-state (now 0) but hourly mean W worked,
     // show the TOU-measured import so Import kWh matches Costs.
@@ -480,7 +499,7 @@ export function monthsFromStatistics(
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1, 12, 0, 0, 0);
     const key = localMonthKey(d);
-    const meters = metersForPeriod(stats, map, key, monthValue);
+    const meters = metersForPeriod(stats, map, key, monthValue, monthKeyFromStart);
     const spend = daySpendPartsGbp(meters.gridIn, key, undefined, rates);
     out.push({
       key,

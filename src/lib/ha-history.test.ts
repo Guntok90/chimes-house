@@ -122,6 +122,7 @@ describe("ha history helpers", () => {
     const houseId = "sensor.inverter_input_power";
     const battId = "sensor.batteries_charge_discharge_power";
     const carId = "sensor.myenergi_chimes_power_charging";
+    const socId = "sensor.battery_1_state_of_capacity";
     const liveMap: HaMap = {
       solarTodayKwh: solarId,
       solarNowW: houseId,
@@ -129,10 +130,11 @@ describe("ha history helpers", () => {
       houseW: houseId,
       batteryW: battId,
       zappiW: carId,
+      soc: socId,
     };
 
     const stats: HaStatisticsBag = {};
-    for (const id of [solarId, gridId, houseId, battId, carId]) {
+    for (const id of [solarId, gridId, houseId, battId, carId, socId]) {
       stats[id] = [];
       for (let i = 6; i >= 0; i--) {
         const d = new Date(now);
@@ -142,9 +144,11 @@ describe("ha history helpers", () => {
           start: d.getTime(),
           end: d.getTime() + 24 * 60 * 60 * 1000,
           mean:
-            id === houseId || id === gridId || id === battId || id === carId
-              ? 400 + i * 10
-              : null,
+            id === socId
+              ? 55 + i * 3
+              : id === houseId || id === gridId || id === battId || id === carId
+                ? 400 + i * 10
+                : null,
           change: id === solarId ? 8.5 + i * 0.1 : null,
           state: null,
           sum: null,
@@ -157,6 +161,10 @@ describe("ha history helpers", () => {
     assert.ok(week.every((d) => d.solar > 0));
     assert.ok(week.every((d) => d.cars > 0));
     assert.ok(week.every((d) => d.battCharge > 0));
+    // Mean SOC for newest day (i=0) = 55; oldest (i=6) = 73.
+    assert.equal(week[0].soc, 73);
+    assert.equal(week[week.length - 1].soc, 55);
+    assert.ok(week.every((d) => d.soc >= 55 && d.soc <= 73));
     assert.equal(week[week.length - 1].key, localDayKey(now));
 
     const month = daysFromStatistics(stats, liveMap, 28, now);
@@ -164,6 +172,7 @@ describe("ha history helpers", () => {
     // Days without rows stay 0; days with rows are non-zero — series is kept.
     assert.ok(month.some((d) => d.solar > 0));
     assert.ok(month.some((d) => d.gridIn > 0 || d.house > 0));
+    assert.ok(month.some((d) => d.soc > 0));
   });
 
   it("builds days from ISO start strings without throwing", () => {
@@ -200,18 +209,40 @@ describe("ha history helpers", () => {
   it("builds monthly year series from epoch-ms month starts", () => {
     const now = new Date(2026, 8, 23, 15, 0, 0, 0);
     const solarId = "sensor.inverter_daily_yield";
-    const liveMap: HaMap = { solarTodayKwh: solarId, zappiW: "sensor.car" };
-    const stats: HaStatisticsBag = { [solarId]: [], "sensor.car": [] };
+    const socId = "sensor.battery_1_state_of_capacity";
+    const liveMap: HaMap = { solarTodayKwh: solarId, zappiW: "sensor.car", soc: socId };
+    const stats: HaStatisticsBag = { [solarId]: [], "sensor.car": [], [socId]: [] };
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1, 0, 0, 0, 0);
       stats[solarId].push({ start: d.getTime(), change: 120 + i, mean: null, state: null });
       stats["sensor.car"].push({ start: d.getTime(), mean: 200, change: null, state: null });
+      stats[socId].push({ start: d.getTime(), mean: 40 + i * 2, change: null, state: null });
     }
     const year = monthsFromStatistics(stats, liveMap, 12, now);
     assert.equal(year.length, 12);
     assert.equal(year[year.length - 1].key, localMonthKey(now));
     assert.ok(year.every((m) => m.solar > 0));
     assert.ok(year.every((m) => m.cars > 0));
+    // Newest month i=0 → mean 40; oldest i=11 → mean 62.
+    assert.equal(year[0].soc, 62);
+    assert.equal(year[year.length - 1].soc, 40);
+    assert.ok(year.every((m) => m.soc >= 40 && m.soc <= 62));
+  });
+
+  it("day/month SOC uses statistics mean (not energy change)", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const solarId = "sensor.inverter_daily_yield";
+    const socId = "sensor.battery_1_state_of_capacity";
+    const liveMap: HaMap = { solarTodayKwh: solarId, soc: socId };
+    const key = localDayKey(now);
+    const stats: HaStatisticsBag = {
+      [solarId]: [{ start: `${key}T00:00:00+01:00`, change: 10, mean: null, state: null }],
+      // change would be wrong for SOC % — mean is the period average.
+      [socId]: [{ start: `${key}T00:00:00+01:00`, mean: 72.6, change: 5, state: 99 }],
+    };
+    const week = daysFromStatistics(stats, liveMap, 7, now);
+    const today = week[week.length - 1];
+    assert.equal(today.soc, 73); // rounded mean, not change or state
   });
 
   it("splits hourly grid import into cheap vs peak using Intelligent Go window", () => {

@@ -372,6 +372,7 @@ type EnergyRow = {
   grid: number;
   battery: number;
   cars: number;
+  soc: number;
 };
 
 function toEnergyRows(data: DayPoint[]): EnergyRow[] {
@@ -382,6 +383,7 @@ function toEnergyRows(data: DayPoint[]): EnergyRow[] {
     grid: d.gridIn - d.gridOut,
     battery: d.battCharge - d.battDischarge,
     cars: d.cars,
+    soc: d.soc,
   }));
 }
 
@@ -459,7 +461,7 @@ export function EnergyMetersChart({
   const rows = toEnergyRows(data);
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <ComposedChart data={rows} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+      <ComposedChart data={rows} margin={{ top: 10, right: 28, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="rgba(244,239,232,0.12)" strokeDasharray="3 3" vertical={false} />
         <XAxis
           dataKey="label"
@@ -469,9 +471,20 @@ export function EnergyMetersChart({
           interval="preserveStartEnd"
           minTickGap={20}
         />
-        <YAxis tick={glassTick} axisLine={false} tickLine={false} width={40} />
+        <YAxis yAxisId="kwh" tick={glassTick} axisLine={false} tickLine={false} width={40} />
+        <YAxis
+          yAxisId="soc"
+          orientation="right"
+          domain={[0, 100]}
+          tick={glassTick}
+          axisLine={false}
+          tickLine={false}
+          width={32}
+          tickFormatter={(v: number) => `${v}`}
+        />
         <Tooltip content={<DayTip unit="kWh" />} />
         <Area
+          yAxisId="kwh"
           type="monotone"
           dataKey="solar"
           name="Solar"
@@ -481,6 +494,7 @@ export function EnergyMetersChart({
           strokeWidth={1.6}
         />
         <Line
+          yAxisId="kwh"
           type="monotone"
           dataKey="house"
           name="House"
@@ -489,6 +503,7 @@ export function EnergyMetersChart({
           strokeWidth={1.8}
         />
         <Line
+          yAxisId="kwh"
           type="monotone"
           dataKey="battery"
           name="Battery"
@@ -497,6 +512,7 @@ export function EnergyMetersChart({
           strokeWidth={1.6}
         />
         <Line
+          yAxisId="kwh"
           type="monotone"
           dataKey="grid"
           name="Grid"
@@ -506,6 +522,7 @@ export function EnergyMetersChart({
         />
         {showCars ? (
           <Line
+            yAxisId="kwh"
             type="monotone"
             dataKey="cars"
             name="Cars (+ into vehicle)"
@@ -514,6 +531,16 @@ export function EnergyMetersChart({
             strokeWidth={1.5}
           />
         ) : null}
+        <Line
+          yAxisId="soc"
+          type="monotone"
+          dataKey="soc"
+          name="SOC"
+          stroke={METER_COLORS.soc}
+          strokeDasharray="4 5"
+          dot={false}
+          strokeWidth={1.3}
+        />
       </ComposedChart>
     </ResponsiveContainer>
   );
