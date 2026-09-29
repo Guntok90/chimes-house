@@ -112,6 +112,8 @@ const CHIMES_PI: HaState[] = [
     "°C",
   ),
   state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
+  // Live Pi power is the Tuya smart plug (kW). Meross current_consumption often stays 0.
+  state("sensor.smart_plug_power", "0.35", "Range Rover Hybrid Power", "kW"),
   state(
     "sensor.range_rover_hybrid_current_consumption",
     "0",
@@ -119,9 +121,15 @@ const CHIMES_PI: HaState[] = [
     "W",
   ),
   state(
-    "sensor.range_rover_hybrid_today_s_consumption",
-    "3.2",
+    "sensor.smart_plug_today_s_consumption",
+    "4.1",
     "Range Rover Hybrid Today's consumption",
+    "kWh",
+  ),
+  state(
+    "sensor.range_rover_hybrid_today_s_consumption",
+    "0",
+    "Range Rover Hybrid Today's consumption (Meross)",
     "kWh",
   ),
   state("switch.batteries_charge_from_grid", "on", "Charge from grid"),
@@ -160,8 +168,8 @@ describe("ha autoMap preferences", () => {
     assert.notEqual(map.zappiW, "sensor.myenergi_zappi_25435526_power_generation");
     assert.equal(map.zappiTodayKwh, "sensor.myenergi_zappi_25435526_energy_used_today");
     assert.equal(map.rangeRoverPlugged, "switch.range_rover_hybrid");
-    assert.equal(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
-    assert.equal(map.rangeRoverTodayKwh, "sensor.range_rover_hybrid_today_s_consumption");
+    assert.equal(map.rangeRoverW, "sensor.smart_plug_power");
+    assert.equal(map.rangeRoverTodayKwh, "sensor.smart_plug_today_s_consumption");
     assert.equal(map.stevieHome, "person.stevie_w");
     assert.equal(
       map.pondWaterTempC,
@@ -214,13 +222,13 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.zappiMode, "Eco+");
     assert.equal(live.zappiPlugged, false);
     assert.equal(live.zappiW, 0);
-    assert.equal(live.rangeRoverW, 0);
+    assert.equal(live.rangeRoverW, 350); // 0.35 kW → W
     assert.equal(live.rangeRoverSoc, 0);
     assert.equal(live.rangeRoverPlugged, true);
-    assert.equal(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
+    assert.equal(map.rangeRoverW, "sensor.smart_plug_power");
     assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(live.zappiTodayKwh, 6.35);
-    assert.equal(live.rangeRoverTodayKwh, 3.2);
+    assert.equal(live.rangeRoverTodayKwh, 4.1);
     assert.equal(live.evReadyBy, "07:00");
     assert.equal(live.pondWaterTempC, 11.8);
     assert.equal(live.stevieHome, true);
@@ -243,9 +251,9 @@ describe("ha autoMap preferences", () => {
     // No rate sensors on Pi inventory → fallback Intelligent Go constants.
     assert.equal(live.cheapRateGbp, DEFAULT_TARIFF.lowGbpPerKwh);
     assert.equal(live.peakRateGbp, DEFAULT_TARIFF.highGbpPerKwh);
-    // houseW = solar + grid − battery − zappi = 1150 + 40 − (−380) − 0 = 1570
-    assert.equal(live.houseW, deriveHouseW(1150, 40, -380, 0));
-    assert.equal(live.houseW, 1570);
+    // houseW = solar + grid − battery − zappi − RR = 1150 + 40 − (−380) − 0 − 350 = 1220
+    assert.equal(live.houseW, deriveHouseW(1150, 40, -380, 0, 350));
+    assert.equal(live.houseW, 1220);
     assert.notEqual(live.solarTodayKwh, SNAPSHOT.solarTodayKwh);
     assert.notEqual(live.houseW, 7);
     assert.notEqual(live.houseW, SNAPSHOT.houseW);
@@ -579,18 +587,21 @@ describe("ha autoMap preferences", () => {
 });
 
 describe("deriveHouseW energy balance", () => {
-  it("solar + grid − battery − zappi (charging positive, discharging negative)", () => {
+  it("solar + grid − battery − zappi − RR (charging positive, discharging negative)", () => {
     assert.equal(deriveHouseW(1000, -300, 200), 500);
     assert.equal(deriveHouseW(0, 0, -400), 400);
     assert.equal(deriveHouseW(0, 500, 0), 500);
     assert.equal(deriveHouseW(200, 50, -100), 350);
     assert.equal(deriveHouseW(392, 3015, -4819, 7533), 693);
     assert.equal(deriveHouseW(1000, -300, 200, 0), 500);
+    // Dad Energy Flow: Grid 9591 + Solar 358 − Zappi 7178 − RR 2180 = Home 591
+    assert.equal(deriveHouseW(358, 9591, 0, 7178, 2180), 591);
   });
 
   it("clamps noise below zero to 0", () => {
     assert.equal(deriveHouseW(0, -100, 50), 0);
     assert.equal(deriveHouseW(100, 0, 0, 200), 0);
+    assert.equal(deriveHouseW(100, 0, 0, 0, 200), 0);
   });
 });
 
@@ -1335,7 +1346,9 @@ describe("Front garden switch filter", () => {
 describe("Range Rover entity discovery", () => {
   it("maps Range Rover power/SOC/plug only when entity names already say so", () => {
     const states: HaState[] = [
-      ...CHIMES_PI.filter((s) => !s.entity_id.includes("range_rover")),
+      ...CHIMES_PI.filter(
+        (s) => !s.entity_id.includes("range_rover") && !s.entity_id.includes("smart_plug"),
+      ),
       state("sensor.range_rover_battery", "64", "Range Rover battery", "%"),
       state("sensor.range_rover_charging_power", "0", "Range Rover charging power", "W"),
       state("binary_sensor.range_rover_plug_status", "off", "Range Rover plug"),
@@ -1378,7 +1391,8 @@ describe("Range Rover entity discovery", () => {
       ...CHIMES_PI.filter(
         (s) =>
           !s.entity_id.includes("range_rover_hybrid") &&
-          !s.entity_id.includes("range_rover"),
+          !s.entity_id.includes("range_rover") &&
+          !s.entity_id.includes("smart_plug"),
       ),
       state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
       state(
@@ -1463,13 +1477,55 @@ describe("Range Rover entity discovery", () => {
 
   it("does not invent brand entities when none are present", () => {
     const bare = CHIMES_PI.filter(
-      (s) => !s.entity_id.includes("range_rover") && !s.attributes.friendly_name?.toString().toLowerCase().includes("range rover"),
+      (s) =>
+        !s.entity_id.includes("range_rover") &&
+        !s.entity_id.includes("smart_plug") &&
+        !s.attributes.friendly_name?.toString().toLowerCase().includes("range rover"),
     );
     const map = autoMap(bare);
     assert.equal(map.rangeRoverW, undefined);
     assert.equal(map.rangeRoverSoc, undefined);
     assert.equal(map.rangeRoverPlugged, undefined);
-    assert.equal(PREFERRED.rangeRoverW?.[0], "sensor.range_rover_hybrid_current_consumption");
+    assert.equal(PREFERRED.rangeRoverW?.[0], "sensor.smart_plug_power");
+  });
+
+  it("prefers sensor.smart_plug_power (kW) over Meross current_consumption stuck at 0", () => {
+    const states: HaState[] = [
+      state("switch.smart_plug_socket_1", "on", "Range Rover Hybrid"),
+      state("sensor.smart_plug_power", "2.18", "Range Rover Hybrid Power", "kW"),
+      state(
+        "sensor.range_rover_hybrid_current_consumption",
+        "0",
+        "Range Rover Hybrid Current consumption",
+        "W",
+      ),
+      state("sensor.inverter_input_power", "358", "", "W"),
+      state("sensor.myenergi_chimes_power_grid", "9591", "", "W"),
+      state("sensor.batteries_charge_discharge_power", "0", "", "W"),
+      state("sensor.myenergi_chimes_power_charging", "7178", "", "W"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverW, "sensor.smart_plug_power");
+    assert.notEqual(map.rangeRoverW, "sensor.range_rover_hybrid_current_consumption");
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverW, 2180);
+    assert.equal(live.rangeRoverPlugged, true);
+    // Home excludes Zappi + RR: 358 + 9591 − 0 − 7178 − 2180 = 591
+    assert.equal(live.houseW, 591);
+    assert.equal(live.houseW, deriveHouseW(358, 9591, 0, 7178, 2180));
+  });
+
+  it("converts kW smart_plug_power to W and does not invent RR SOC", () => {
+    const states: HaState[] = [
+      state("sensor.smart_plug_power", "1.76", "Range Rover Hybrid Power", "kW"),
+      state("switch.smart_plug_socket_1", "on", "Smart Plug Socket 1"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverW, "sensor.smart_plug_power");
+    assert.equal(map.rangeRoverSoc, undefined);
+    const live = liveFromStates(states, map, EMPTY_LIVE);
+    assert.equal(live.rangeRoverW, 1760);
+    assert.equal(live.rangeRoverSoc, 0);
   });
 
   it("maps Octopus Intelligent EV ready-by select and options", () => {

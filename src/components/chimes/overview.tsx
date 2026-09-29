@@ -823,9 +823,11 @@ function OverviewPondGraph({
   const legend =
     range === "day"
       ? "Fish pond water temp (hourly)"
-      : range === "year"
-        ? "Fish pond water temp (monthly mean)"
-        : "Fish pond water temp";
+      : range === "week"
+        ? "Fish pond water temp (daily mean)"
+        : range === "month"
+          ? "Fish pond water temp (daily mean)"
+          : "Fish pond water temp (monthly mean)";
 
   return (
     <div className="flex h-full flex-col gap-1.5">

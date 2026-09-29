@@ -84,7 +84,13 @@ export function dateFromStatStart(start: string | number | null | undefined): Da
 
 /**
  * Normalise a statistics row `start` (ISO string, epoch ms number, or numeric
- * string) to YYYY-MM-DD. Never assume `start` is a string — HA WS returns ms.
+ * string) to YYYY-MM-DD for the statistics period.
+ *
+ * HA day rows are usually local midnight with an offset
+ * (`2026-09-23T00:00:00+01:00`) — use that wall-clock date. When HA emits the
+ * previous UTC evening instead (`…T23:00:00.000Z` for UK BST midnight), a naive
+ * date-prefix slice is a day early; parse and use the client local calendar
+ * (Dad’s browser ≈ HA TZ). Date-only `YYYY-MM-DD` stays as-is.
  */
 export function dayKeyFromStart(start: string | number | null | undefined): string | null {
   if (start == null || start === "") return null;
@@ -93,15 +99,25 @@ export function dayKeyFromStart(start: string | number | null | undefined): stri
     return localDayKey(new Date(start));
   }
   const s = String(start).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  // Bare calendar day — keep verbatim (no TZ shift from Date.parse).
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   if (/^\d+(\.\d+)?$/.test(s)) {
     const n = Number(s);
     if (!Number.isFinite(n)) return null;
     return localDayKey(new Date(n));
   }
-  const t = Date.parse(s);
-  if (!Number.isFinite(t)) return null;
-  return localDayKey(new Date(t));
+  const wall = s.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})/);
+  if (wall) {
+    const hour = Number(wall[2]);
+    const minute = Number(wall[3]);
+    // Local-midnight form (any offset) — date prefix is the period day.
+    if (hour === 0 && minute === 0) return wall[1];
+    // Non-midnight (e.g. 23:00Z = next local day in BST) — client local calendar.
+    const d = dateFromStatStart(s);
+    return d ? localDayKey(d) : wall[1];
+  }
+  const d = dateFromStatStart(s);
+  return d ? localDayKey(d) : null;
 }
 
 /** YYYY-MM from statistics `start` (ISO or epoch ms). */
@@ -112,8 +128,18 @@ export function monthKeyFromStart(start: string | number | null | undefined): st
     return localMonthKey(new Date(start));
   }
   const s = String(start).trim();
-  if (/^\d{4}-\d{2}/.test(s)) return s.slice(0, 7);
-  const d = dateFromStatStart(start);
+  // Bare YYYY-MM or YYYY-MM-DD — keep calendar month verbatim.
+  if (/^\d{4}-\d{2}$/.test(s)) return s;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7);
+  const wall = s.match(/^(\d{4}-\d{2})-\d{2}T(\d{2}):(\d{2})/);
+  if (wall) {
+    const hour = Number(wall[2]);
+    const minute = Number(wall[3]);
+    if (hour === 0 && minute === 0) return wall[1];
+    const d = dateFromStatStart(s);
+    return d ? localMonthKey(d) : wall[1];
+  }
+  const d = dateFromStatStart(s);
   return d ? localMonthKey(d) : null;
 }
 
@@ -632,6 +658,53 @@ export function tempsFromStatistics(
       key,
       label: dayLabel(key),
       tempC,
+    });
+  }
+  return out;
+}
+
+/**
+ * Daily mean temperatures by averaging period:hour means (last `dayCount` days).
+ *
+ * Preferred Week source — matches the Day tile’s hourly maths so Week labels
+ * and values line up with real daily averages when period:day rows are skewed
+ * (UTC midnight / missing mean). Empty → [].
+ */
+export function dailyMeansFromHourStatistics(
+  stats: HaStatisticsBag,
+  entityId: string | undefined,
+  dayCount: number,
+  now = new Date(),
+): TempPoint[] {
+  if (!entityId || dayCount <= 0) return [];
+  const rows = stats[entityId];
+  if (!rows?.length) return [];
+
+  const byDay = new Map<string, number[]>();
+  for (const row of rows) {
+    const d = dateFromStatStart(row.start);
+    if (!d) continue;
+    const key = localDayKey(d);
+    const tempC = tempMeanC(row);
+    if (tempC == null) continue;
+    const bag = byDay.get(key);
+    if (bag) bag.push(tempC);
+    else byDay.set(key, [tempC]);
+  }
+
+  const out: TempPoint[] = [];
+  for (let i = dayCount - 1; i >= 0; i--) {
+    const d = new Date(now);
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const key = localDayKey(d);
+    const samples = byDay.get(key);
+    if (!samples?.length) continue;
+    const mean = samples.reduce((a, b) => a + b, 0) / samples.length;
+    out.push({
+      key,
+      label: dayLabel(key),
+      tempC: Number(mean.toFixed(1)),
     });
   }
   return out;
