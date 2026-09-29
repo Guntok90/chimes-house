@@ -141,8 +141,12 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_internal_load_ct1",
     "sensor.myenergi_zappi_25435526_ct_internal",
   ],
-  // Range Rover / Meross Hybrid outdoor socket (Front garden) — no invented JLR brand ids.
-  rangeRoverW: ["sensor.range_rover_hybrid_current_consumption"],
+  // Range Rover front-garden smart plug power — Dad’s live entity is kW (×1000 → W).
+  // Prefer smart_plug_power over Meross “current consumption” (often stuck at 0 W).
+  rangeRoverW: [
+    "sensor.smart_plug_power",
+    "sensor.range_rover_hybrid_current_consumption",
+  ],
   rangeRoverSoc: [],
   // Plug mapping uses custom priority (cable → Hybrid switch → ambiguous); not PREFERRED alone.
   rangeRoverPlugged: [],
@@ -151,8 +155,11 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_energy_used_today",
     "sensor.myenergi_zappi_25435526_green_energy_today",
   ],
-  // Meross Hybrid “Today's consumption” (same pattern as Zappi energy_used_today).
-  rangeRoverTodayKwh: ["sensor.range_rover_hybrid_today_s_consumption"],
+  // Daily kWh only (never lifetime smart_plug_energy). Prefer plug today, else Meross.
+  rangeRoverTodayKwh: [
+    "sensor.smart_plug_today_s_consumption",
+    "sensor.range_rover_hybrid_today_s_consumption",
+  ],
   // Import electricity Octopus off-peak window only — never automations / helpers / export.
   // Fuzzy discovery also matches binary_sensor.octopus_energy_electricity_*_off_peak.
   offPeak: ["binary_sensor.octopus_off_peak"],
@@ -529,6 +536,33 @@ export function isPowerUnit(s: HaState) {
   return u === "w" || u === "kw" || u.includes("watt");
 }
 
+/** True when the power unit is kilowatts (not kWh). */
+export function isKilowattPowerUnit(s: HaState) {
+  const u = unitOf(s);
+  if (u === "kw") return true;
+  if (u.includes("kilowatt") && !u.includes("hour")) return true;
+  // Bare "kW" variants; never treat energy (kWh) as live power.
+  if (u.includes("kw") && !u.includes("kwh") && !u.includes("watt-hour")) return true;
+  return false;
+}
+
+/**
+ * Live watts from a power sensor. HA may report kW (e.g. `sensor.smart_plug_power`);
+ * Energy Flow / house maths use W — convert ×1000 when the unit is kilowatts.
+ *
+ * Dad’s `sensor.smart_plug_power` is always kW even if unit_of_measurement is blank.
+ */
+export function wattsFromPowerState(s: HaState | undefined, fallback = 0): number {
+  if (!s || !available(s)) return fallback;
+  const raw = num(s.state);
+  if (raw == null) return fallback;
+  const forceKw =
+    s.entity_id === "sensor.smart_plug_power" ||
+    (s.entity_id.includes("smart_plug") && s.entity_id.endsWith("_power"));
+  const w = forceKw || isKilowattPowerUnit(s) ? raw * 1000 : raw;
+  return Math.round(w);
+}
+
 /** True for tariff unit-rate sensors (£/kWh, p/kWh, GBP/kWh, …). */
 export function isRateUnit(s: HaState) {
   const u = unitOf(s);
@@ -758,26 +792,37 @@ export function autoMap(states: HaState[]): HaMap {
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
-  // Second vehicle — only when entity names already say Range Rover / Land Rover / JLR
-  // (never invent Cupra/VAG brand ids — those belong on the Zappi / Cupra driveway path).
+  // Second vehicle — Range Rover / Land Rover / JLR, or the Front-garden smart_plug
+  // power sensor Dad uses (friendly name often “Range Rover Hybrid Power”).
+  // Never invent Cupra/VAG brand ids — those belong on the Zappi / Cupra driveway path.
   const rangeRoverW = resolve(
     states,
     "rangeRoverW",
-    (_s, b) =>
-      isRangeRoverBlob(b) &&
-      (b.includes("power") ||
-        b.includes("charge_rate") ||
-        b.includes("charging") ||
-        b.includes("watt") ||
-        b.includes("current_consumption") ||
-        b.includes("current consumption")) &&
-      !b.includes("today") &&
-      !b.includes("daily") &&
-      !b.includes("energy") &&
-      !b.includes("consumption today") &&
-      !b.includes("zappi") &&
-      !b.includes("cupra") &&
-      !b.includes("vag"),
+    (s, b) => {
+      const smartPlugPower =
+        s.entity_id === "sensor.smart_plug_power" ||
+        (b.includes("smart_plug") &&
+          b.includes("power") &&
+          !b.includes("today") &&
+          !b.includes("energy") &&
+          !b.includes("consumption today"));
+      const namedRoverPower =
+        isRangeRoverBlob(b) &&
+        (b.includes("power") ||
+          b.includes("charge_rate") ||
+          b.includes("charging") ||
+          b.includes("watt") ||
+          b.includes("current_consumption") ||
+          b.includes("current consumption")) &&
+        !b.includes("today") &&
+        !b.includes("daily") &&
+        !b.includes("energy") &&
+        !b.includes("consumption today") &&
+        !b.includes("zappi") &&
+        !b.includes("cupra") &&
+        !b.includes("vag");
+      return smartPlugPower || namedRoverPower;
+    },
     (s) => !isEnergyUnit(s) && isPowerUnit(s),
   );
 
@@ -864,25 +909,32 @@ export function autoMap(states: HaState[]): HaMap {
   const rangeRoverToday = resolve(
     states,
     "rangeRoverTodayKwh",
-    (_s, b) =>
-      isRangeRoverBlob(b) &&
-      (b.includes("energy_used_today") ||
-        b.includes("charged_today") ||
-        b.includes("charge_today") ||
-        b.includes("energy_today") ||
-        b.includes("charging_energy") ||
-        b.includes("today_s_consumption") ||
-        b.includes("todays_consumption") ||
-        b.includes("today's consumption") ||
-        ((b.includes("energy") ||
-          b.includes("charged") ||
-          b.includes("kwh") ||
-          b.includes("consumption")) &&
-          (b.includes("today") || b.includes("daily")))) &&
-      !b.includes("zappi") &&
-      !b.includes("myenergi") &&
-      !b.includes("cupra") &&
-      !b.includes("vag"),
+    (s, b) => {
+      const smartPlugToday =
+        (s.entity_id.startsWith("sensor.smart_plug") || b.includes("smart_plug")) &&
+        (b.includes("today") || b.includes("daily") || b.includes("today_s_consumption")) &&
+        (b.includes("energy") || b.includes("consumption") || b.includes("kwh"));
+      const namedRoverToday =
+        isRangeRoverBlob(b) &&
+        (b.includes("energy_used_today") ||
+          b.includes("charged_today") ||
+          b.includes("charge_today") ||
+          b.includes("energy_today") ||
+          b.includes("charging_energy") ||
+          b.includes("today_s_consumption") ||
+          b.includes("todays_consumption") ||
+          b.includes("today's consumption") ||
+          ((b.includes("energy") ||
+            b.includes("charged") ||
+            b.includes("kwh") ||
+            b.includes("consumption")) &&
+            (b.includes("today") || b.includes("daily")))) &&
+        !b.includes("zappi") &&
+        !b.includes("myenergi") &&
+        !b.includes("cupra") &&
+        !b.includes("vag");
+      return smartPlugToday || namedRoverToday;
+    },
     isEnergyUnit,
   );
 
@@ -1289,7 +1341,8 @@ function statesById(states: HaState[] | Map<string, HaState>): Map<string, HaSta
  * become zeros/false — never demo SNAPSHOT leftovers like 16.68 kWh.
  *
  * When no live house-load watt sensor is mapped, houseW is derived via
- * `deriveHouseW(solar, grid, battery, zappi)` — household load excluding Zappi,
+ * `deriveHouseW(solar, grid, battery, zappi, rangeRover)` — household load
+ * excluding Zappi and the Range Rover smart plug (shown as separate Flow nodes),
  * never from SNAPSHOT, kWh totals, or myenergi home consumption.
  */
 export function liveFromStates(
@@ -1366,7 +1419,8 @@ export function liveFromStates(
   const solarNowW = Math.round(n("solarNowW", fallback.solarNowW));
   const gridW = Math.round(n("gridW", fallback.gridW));
   const zappiW = Math.round(n("zappiW", fallback.zappiW));
-  const rangeRoverW = Math.round(n("rangeRoverW", fallback.rangeRoverW));
+  // smart_plug_power is kW on Dad’s Pi — convert to W for Flow / house maths.
+  const rangeRoverW = wattsFromPowerState(take("rangeRoverW"), fallback.rangeRoverW);
   const rangeRoverSoc = Math.round(n("rangeRoverSoc", fallback.rangeRoverSoc));
   batteryW = Math.round(batteryW);
 
@@ -1400,10 +1454,12 @@ export function liveFromStates(
 
   let houseW: number;
   if (houseMappedOk) {
-    houseW = Math.round(n("houseW", fallback.houseW));
-  } else if (map.solarNowW || map.gridW || map.batteryW || map.zappiW) {
-    // Derive household load (excludes Zappi) when no true house-load W sensor exists.
-    houseW = deriveHouseW(solarNowW, gridW, batteryW, zappiW);
+    // True house-load sensor still double-counts the RR plug when Flow shows RR
+    // separately — peel RR watts off so Home matches the other nodes.
+    houseW = Math.max(0, Math.round(n("houseW", fallback.houseW) - rangeRoverW));
+  } else if (map.solarNowW || map.gridW || map.batteryW || map.zappiW || map.rangeRoverW) {
+    // Derive household load (excludes Zappi + Range Rover) when no true house-load W sensor exists.
+    houseW = deriveHouseW(solarNowW, gridW, batteryW, zappiW, rangeRoverW);
   } else {
     houseW = Math.round(fallback.houseW);
   }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  dailyMeansFromHourStatistics,
   dayKeyFromStart,
   daySpendGbp,
   daySpendPartsGbp,
@@ -99,9 +100,14 @@ describe("ha history helpers", () => {
     assert.ok(bag["sensor.inverter_input_power"]);
   });
 
-  it("dayKeyFromStart accepts ISO strings", () => {
+  it("dayKeyFromStart keeps midnight wall-clock dates and fixes UTC-evening starts", () => {
+    assert.equal(dayKeyFromStart("2026-09-17"), "2026-09-17");
+    // HA local midnight with offset — date prefix is the period day (UTC CI safe).
     assert.equal(dayKeyFromStart("2026-09-17T00:00:00+01:00"), "2026-09-17");
     assert.equal(dayKeyFromStart("2026-09-17T00:00:00.000Z"), "2026-09-17");
+    // Previous UTC evening (UK BST midnight) — use client local calendar, not slice.
+    const utcEve = "2026-09-16T23:00:00.000Z";
+    assert.equal(dayKeyFromStart(utcEve), localDayKey(new Date(utcEve)));
   });
 
   it("dayKeyFromStart accepts epoch milliseconds (number and numeric string)", () => {
@@ -114,7 +120,9 @@ describe("ha history helpers", () => {
   it("monthKeyFromStart accepts epoch milliseconds", () => {
     const mid = new Date(2026, 8, 15, 12, 0, 0, 0);
     assert.equal(monthKeyFromStart(mid.getTime()), "2026-09");
-    assert.equal(monthKeyFromStart("2026-09-01T00:00:00.000Z"), "2026-09");
+    const monthStart = "2026-09-01T00:00:00.000Z";
+    assert.equal(monthKeyFromStart(monthStart), localMonthKey(new Date(monthStart)));
+    assert.equal(monthKeyFromStart("2026-09"), "2026-09");
   });
 
   it("builds 7-day series from Pi-shaped stats (epoch ms start, mean set, change null)", () => {
@@ -589,5 +597,28 @@ describe("ha history helpers", () => {
     assert.equal(day[day.length - 1].tempC, 12.6);
     assert.equal(day[day.length - 1].label, "12:00");
     assert.deepEqual(tempsFromHistory(bag, undefined, now, 24), []);
+  });
+
+  it("dailyMeansFromHourStatistics averages hourly means into 7 daily Week points", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const now = new Date(2026, 8, 23, 18, 0, 0, 0);
+    const rows = [];
+    // 7 days × 24 hours; day offset i ago has constant hourly mean 10 + i.
+    for (let day = 6; day >= 0; day--) {
+      for (let h = 0; h < 24; h++) {
+        const d = new Date(2026, 8, 23 - day, h, 0, 0, 0);
+        rows.push({ start: d.getTime(), mean: 10 + day, change: 0 });
+      }
+    }
+    const stats: HaStatisticsBag = { [probe]: rows };
+    const week = dailyMeansFromHourStatistics(stats, probe, 7, now);
+    assert.equal(week.length, 7);
+    // Oldest (6 days ago) mean 16, newest today mean 10.
+    assert.equal(week[0].tempC, 16);
+    assert.equal(week[6].tempC, 10);
+    assert.equal(week[0].key, localDayKey(new Date(2026, 8, 17, 12)));
+    assert.equal(week[6].key, localDayKey(now));
+    assert.match(week[0].label, /\d/); // weekday + day
+    assert.deepEqual(dailyMeansFromHourStatistics(stats, undefined, 7, now), []);
   });
 });

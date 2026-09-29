@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import {
+  dailyMeansFromHourStatistics,
   daysFromStatistics,
   historyEntityIds,
   hoursFromHistory,
@@ -833,9 +834,31 @@ export const useHouse = create<Store>((set, get) => {
               ? days.slice(-28)
               : daysFromStatistics(stats, map, 28, end, opts);
             pondMonth = tempsFromStatistics(stats, map.pondWaterTempC, 28, end);
-            pondWeek = pondMonth.length
-              ? pondMonth.slice(-7)
-              : tempsFromStatistics(stats, map.pondWaterTempC, 7, end);
+            // Week = last 7 calendar days (not a sparse slice of month), so labels
+            // match real weekdays even when some days lack period:day rows.
+            pondWeek = tempsFromStatistics(stats, map.pondWaterTempC, 7, end);
+
+            // Prefer daily means averaged from hourly stats (same source as Day).
+            if (map.pondWaterTempC) {
+              try {
+                const startPondWeek = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+                const pondWeekHourStats = (await socket.statisticsDuringPeriod(
+                  [map.pondWaterTempC],
+                  startPondWeek.toISOString(),
+                  end.toISOString(),
+                  "hour",
+                )) as HaStatisticsBag;
+                const fromWeekHours = dailyMeansFromHourStatistics(
+                  pondWeekHourStats,
+                  map.pondWaterTempC,
+                  7,
+                  end,
+                );
+                if (fromWeekHours.length) pondWeek = fromWeekHours;
+              } catch {
+                /* keep period:day pondWeek */
+              }
+            }
           } catch {
             days = [];
             week = [];
