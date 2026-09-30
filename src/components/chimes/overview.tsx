@@ -1068,8 +1068,9 @@ function defaultGraph(): Box {
 
 /** Key weather readings — right side, above energy flow when possible. */
 function defaultWeather(): Box {
-  const w = Math.min(360, window.innerWidth - 48);
-  const h = Math.min(420, window.innerHeight - 160);
+  // Tall enough for lounge + gust + weekly rain with the rest of the key set.
+  const w = Math.min(380, window.innerWidth - 48);
+  const h = Math.min(520, window.innerHeight - 140);
   return {
     x: Math.max(24, window.innerWidth - w - 28),
     y: 96,
