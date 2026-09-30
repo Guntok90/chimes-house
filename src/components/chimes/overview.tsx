@@ -9,15 +9,16 @@ import {
   type ReactNode,
 } from "react";
 import { Minimize2 } from "lucide-react";
+import { lastHoursWindow } from "@/lib/ha-history";
 import {
   HOURS,
   POND_TEMP_DAY,
   POND_TEMP_MONTH,
   POND_TEMP_WEEK,
   POND_TEMP_YEAR,
-  SCROLL_DAYS,
-  WEEK_HOURS,
+  WEEK,
   YEAR,
+  lastDays,
   usesDemoCharts,
   type DayPoint,
   type HourPoint,
@@ -185,17 +186,23 @@ export function Overview({ onClose }: { onClose: () => void }) {
     live.batteryW < -30 ? "On battery" : live.solarNowW > 30 ? "Solar" : "Idle";
   const graphTitle =
     range === "day" ? "Day" : range === "week" ? "Week" : range === "month" ? "Month" : "Year";
+  // Day = last 24h · Week = last 7 days · Month = last 28 days · Year = 12 months.
   const graphBadge =
     range === "day"
-      ? `${live.solarTodayKwh} kWh solar`
+      ? `${live.solarTodayKwh} kWh solar · 24h`
       : range === "week"
-        ? "Scroll for history"
+        ? "7 days"
         : range === "month"
           ? "28 days"
           : "12 months";
   const pondBadge =
-    live.pondWaterTempC != null
-      ? `${live.pondWaterTempC.toFixed(1)} °C now`
+    live.pondWaterTempC != null || live.gardenTempC != null
+      ? [
+          live.pondWaterTempC != null ? `${live.pondWaterTempC.toFixed(1)}° water` : null,
+          live.gardenTempC != null ? `${live.gardenTempC.toFixed(1)}° garden` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")
       : pondRange === "day"
         ? "24 hours"
         : pondRange === "week"
@@ -627,40 +634,57 @@ function OverviewGraph({
   const map = useHouse((s) => s.map);
   const historyStatus = useHouse((s) => s.historyStatus);
   const historyHours = useHouse((s) => s.historyHours);
-  const historyDays = useHouse((s) => s.historyDays);
+  const historyWeek = useHouse((s) => s.historyWeek);
   const historyMonth = useHouse((s) => s.historyMonth);
   const historyYear = useHouse((s) => s.historyYear);
   const liveMode = !usesDemoCharts(status);
 
   const showCars = !liveMode || Boolean(map.zappiW);
 
-  const hours: HourPoint[] = liveMode ? historyHours : WEEK_HOURS;
-  const days: DayPoint[] = liveMode
-    ? historyDays.length
-      ? historyDays
-      : historyMonth
-    : SCROLL_DAYS;
-  const monthRows: DayPoint[] = liveMode ? historyMonth : SCROLL_DAYS.slice(-28);
+  // Day = trailing 24h · Week = 7 days · Month = last 28 days · Year = 12 months.
+  const hours: HourPoint[] = liveMode
+    ? lastHoursWindow(historyHours, 24)
+    : lastHoursWindow(HOURS, 24);
+  const weekRows: DayPoint[] = liveMode
+    ? historyWeek.length
+      ? historyWeek
+      : historyMonth.slice(-7)
+    : WEEK;
+  const monthRows: DayPoint[] = liveMode ? historyMonth : lastDays(28);
   const yearRows: DayPoint[] = liveMode ? historyYear : YEAR;
 
   const energyData =
-    range === "week" ? days : range === "month" ? monthRows : range === "year" ? yearRows : null;
+    range === "week"
+      ? weekRows
+      : range === "month"
+        ? monthRows
+        : range === "year"
+          ? yearRows
+          : null;
 
   const ready = useMemo(() => {
     if (!liveMode) return true;
     if (historyStatus === "loading" || historyStatus === "idle") return false;
     if (range === "day") return historyStatus === "ready" && hours.length > 0;
-    if (range === "week") return historyStatus === "ready" && days.length > 0;
+    if (range === "week") return historyStatus === "ready" && weekRows.length > 0;
     if (range === "month") return historyStatus === "ready" && monthRows.length > 0;
     return historyStatus === "ready" && yearRows.length > 0;
-  }, [liveMode, historyStatus, range, hours.length, days.length, monthRows.length, yearRows.length]);
+  }, [
+    liveMode,
+    historyStatus,
+    range,
+    hours.length,
+    weekRows.length,
+    monthRows.length,
+    yearRows.length,
+  ]);
 
   const scrollWidth = useMemo(() => {
-    if (range === "day") return Math.max(hours.length * 18, 420);
-    if (range === "week") return Math.max(days.length * 48, 420);
+    if (range === "day") return Math.max(hours.length * 28, 420);
+    if (range === "week") return Math.max(weekRows.length * 56, 420);
     if (range === "month") return Math.max(monthRows.length * 28, 420);
     return Math.max(yearRows.length * 56, 420);
-  }, [range, hours.length, days.length, monthRows.length, yearRows.length]);
+  }, [range, hours.length, weekRows.length, monthRows.length, yearRows.length]);
 
   return (
     <div className="flex h-full flex-col gap-1.5">
@@ -820,14 +844,19 @@ function OverviewPondGraph({
     return Math.max(data.length * 56, 420);
   }, [data.length, range]);
 
-  const legend =
+  const waterLegend =
     range === "day"
-      ? "Fish pond water temp (hourly)"
-      : range === "week"
-        ? "Fish pond water temp (daily mean)"
-        : range === "month"
-          ? "Fish pond water temp (daily mean)"
-          : "Fish pond water temp (monthly mean)";
+      ? "Water temp (hourly)"
+      : range === "week" || range === "month"
+        ? "Water temp (daily mean)"
+        : "Water temp (monthly mean)";
+  const gardenLegend =
+    range === "day"
+      ? "Garden temperature (hourly)"
+      : range === "week" || range === "month"
+        ? "Garden temperature (daily mean)"
+        : "Garden temperature (monthly mean)";
+  const showGarden = data.some((p) => p.gardenTempC != null);
 
   return (
     <div className="flex h-full flex-col gap-1.5">
@@ -848,7 +877,8 @@ function OverviewPondGraph({
             </ChartScroll>
           </div>
           <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-xs text-sidebar-fg/70">
-            <Key color={METER_COLORS.pond} label={legend} />
+            <Key color={METER_COLORS.pond} label={waterLegend} />
+            {showGarden ? <Key color={METER_COLORS.garden} label={gardenLegend} /> : null}
           </div>
         </>
       ) : (
