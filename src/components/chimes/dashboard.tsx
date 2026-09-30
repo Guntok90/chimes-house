@@ -3,6 +3,7 @@ import {
   BatteryMedium,
   Box,
   Car,
+  CloudSun,
   Fan,
   Fish,
   History,
@@ -33,10 +34,20 @@ import { HistoryView } from "./history-view";
 import { NoHistoryYet } from "./no-history";
 import { Overview } from "./overview";
 import { SiteView } from "./site-view";
+import { WeatherView } from "./weather-view";
 import { PiSetup } from "./pi-setup";
 import { Metric, PageTitle, Room, SectionLabel, Surface, Tile } from "./ui";
 
-type View = "home" | "energy" | "site" | "battery" | "charge" | "history" | "garden" | "house";
+type View =
+  | "home"
+  | "energy"
+  | "site"
+  | "battery"
+  | "charge"
+  | "history"
+  | "weather"
+  | "garden"
+  | "house";
 
 const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "home", label: "Home", icon: Home },
@@ -45,6 +56,7 @@ const NAV: { id: View; label: string; icon: typeof Home }[] = [
   { id: "battery", label: "Battery", icon: BatteryMedium },
   { id: "charge", label: "Charge", icon: Car },
   { id: "history", label: "History", icon: History },
+  { id: "weather", label: "Weather", icon: CloudSun },
   { id: "garden", label: "Garden", icon: Leaf },
   { id: "house", label: "House", icon: House },
 ];
@@ -111,6 +123,7 @@ export function ChimesDashboard() {
           {view === "battery" && <BatteryView />}
           {view === "charge" && <ChargeView />}
           {view === "history" && <HistoryView />}
+          {view === "weather" && <WeatherView />}
           {view === "garden" && <GardenView on={on} toggle={toggle} />}
           {view === "house" && <HouseView on={on} toggle={toggle} />}
         </main>

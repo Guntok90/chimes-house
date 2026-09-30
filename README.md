@@ -58,7 +58,14 @@ Mapped when present (preferred ids first):
 | EV Ready by     | `select.octopus_energy_<DEVICE_ID>_intelligent_target_time` (or `time.*_intelligent_target_time`) via `select.select_option` / `time.set_value` |
 | Stevie          | `person.stevie_w`                                                                |
 | Pond water °C   | `sensor.t_h_sensor_with_external_probe_probe_temperature` (external probe — Overview pond graphs; not ambient unit temp) |
-| Garden temp °C  | `sensor.t_h_sensor_with_external_probe_temperature` (T&H body / ambient — Overview “Garden temperature” series) |
+| Pond air °C     | `sensor.t_h_sensor_with_external_probe_temperature` (T&H body — Overview “Pond air temperature” series; HaMap key `gardenTempC`) |
+| Outdoor temp    | `sensor.hp2553ae_pro_v1_9_0_outdoor_temperature` (Ecowitt HP2553AE — Weather page + Overview overlay) |
+| Feels like      | `sensor.hp2553ae_pro_v1_9_0_feels_like_temperature` |
+| Dewpoint        | `sensor.hp2553ae_pro_v1_9_0_dewpoint` |
+| Humidity        | `sensor.hp2553ae_pro_v1_9_0_humidity` |
+| Lounge temp     | `sensor.hp2553ae_pro_v1_9_0_indoor_temperature` |
+| Greenhouse      | `sensor.hp2553ae_pro_v1_9_0_temperature_1` |
+| Wind / rain / pressure / solar / UV | `sensor.hp2553ae_pro_v1_9_0_*` (gust may be mph while speed is km/h — display HA units as-is) |
 
 If Range Rover Plug/Today still show “—” live, add (or rename) HA entities so the id/friendly name includes `range_rover` / `land_rover` / `jlr`, for example:
 
@@ -139,9 +146,10 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Battery  | SOC / charge / discharge + Grid / Solar cutoffs + min SOC (Allow vs actively charging clarified) |
 | Charge   | Zappi Eco+ mode, Range Rover status, Cheap Energy Available (read-only), EV Ready by Apply |
 | History  | 7 / 28 day solar, house, grid, spend                   |
+| Weather  | Ecowitt outdoor / wind / rain / sun + greenhouse + pond |
 | Garden   | Front (Willow Tree + Range Rover Hybrid switches) · Back (Pergola, ponds, Frank) |
 | House    | Lights, plugs, **Pi connection**, sign out             |
-| Overview | iPad wall — house film, glass tiles (flow + 24h graph) |
+| Overview | iPad wall — house film, glass tiles (flow + 24h graph + weather + pond) |
 
 ## Note
 

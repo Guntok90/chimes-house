@@ -3,6 +3,7 @@ import { describe, it, beforeEach } from "node:test";
 import { autoMap, liveFromStates, type HaMap, type HaState } from "./ha.ts";
 import { applyLiveStates } from "./live-updates.ts";
 import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house.ts";
+import { EMPTY_WEATHER, type WeatherLive } from "./weather.ts";
 
 function state(
   entity_id: string,
@@ -31,6 +32,7 @@ const PI: HaState[] = [
 
 type Slice = {
   live: HouseLive;
+  weather: WeatherLive;
   switches: Record<string, boolean>;
   status: "demo" | "connecting" | "live" | "error";
   map: HaMap;
@@ -67,6 +69,7 @@ describe("applyLiveStates", () => {
     let historyCalls = 0;
     const slice: Slice = {
       live: { ...SNAPSHOT },
+      weather: { ...EMPTY_WEATHER },
       switches: {},
       status: "connecting",
       map: {},
@@ -132,6 +135,7 @@ describe("applyLiveStates", () => {
     const expected = liveFromStates(PI, map, EMPTY_LIVE);
     const slice: Slice = {
       live: { ...SNAPSHOT },
+      weather: { ...EMPTY_WEATHER },
       switches: {},
       status: "connecting",
       map: {},
@@ -151,6 +155,7 @@ describe("applyLiveStates", () => {
   it("keeps the previous live object when only a switch flips", () => {
     const slice: Slice = {
       live: { ...SNAPSHOT },
+      weather: { ...EMPTY_WEATHER },
       switches: {},
       status: "connecting",
       map: {},

@@ -59,6 +59,7 @@ import {
   type SwitchId,
 } from "./ha";
 import { applyLiveStates } from "./live-updates";
+import { DEMO_WEATHER, type WeatherLive } from "./weather";
 import {
   SNAPSHOT,
   type DayPoint,
@@ -101,9 +102,14 @@ function rebuildAreaSwitches(states: HaState[]) {
   return areaSwitchesFromStates(states, areasCache, entityRegCache, deviceRegCache);
 }
 
-/** Keep WS interest covering Home tiles (incl. Spares / Fan helpers). */
-function syncSocketInterest(map: HaMap, areaSwitches: AreaSwitch[], fan: FanControl) {
-  socket.interest = interestForLiveUi(map, areaSwitches, fan);
+/** Keep WS interest covering Home tiles (incl. Spares / Fan helpers) + weather. */
+function syncSocketInterest(
+  map: HaMap,
+  areaSwitches: AreaSwitch[],
+  fan: FanControl,
+  states?: HaState[],
+) {
+  socket.interest = interestForLiveUi(map, areaSwitches, fan, states);
 }
 
 function bootTariffs(): TariffState {
@@ -198,6 +204,8 @@ export type WritePending = {
 
 type Store = {
   live: HouseLive;
+  /** Ecowitt station + pond T&H readings (Weather page / Overview overlay). */
+  weather: WeatherLive;
   switches: Record<string, boolean>;
   /** All controllable switches/lights by HA area (Home). */
   areaSwitches: AreaSwitch[];
@@ -537,6 +545,7 @@ export function resumeLiveSession(): Promise<void> {
 export const useHouse = create<Store>((set, get) => {
   return {
     live: { ...SNAPSHOT },
+    weather: DEMO_WEATHER,
     switches: {},
     areaSwitches: demoAreaSwitches({}),
     fanControl: demoFanControl(),
@@ -583,6 +592,7 @@ export const useHouse = create<Store>((set, get) => {
             set({
               status: "demo",
               live: { ...SNAPSHOT },
+              weather: DEMO_WEATHER,
               areaSwitches: demoAreaSwitches({}),
               fanControl: demoFanControl(),
               tariffs: resolveTariffs(null, readLocalTariffs()),
@@ -608,6 +618,7 @@ export const useHouse = create<Store>((set, get) => {
           set({
             status: bootstrapFailed ? "error" : "demo",
             live: { ...SNAPSHOT },
+            weather: DEMO_WEATHER,
             error: bootstrapFailed
               ? "Could not read Pi setup. Connect from House, on Tailscale."
               : undefined,
@@ -679,6 +690,7 @@ export const useHouse = create<Store>((set, get) => {
             status: "error",
             error: wsFailureMessage(err ?? "Disconnected."),
             live: { ...SNAPSHOT },
+            weather: DEMO_WEATHER,
             ...emptyHistory(),
             historyStatus: "idle",
           });
@@ -702,7 +714,7 @@ export const useHouse = create<Store>((set, get) => {
         if (tariffs.source === "ha") writeLocalTariffs(tariffs);
         const areaSwitches = rebuildAreaSwitches(list);
         const fanControl = fanControlFromStates(list, mapped);
-        syncSocketInterest(mapped, areaSwitches, fanControl);
+        syncSocketInterest(mapped, areaSwitches, fanControl, list);
         set({
           areaSwitches,
           fanControl,
@@ -736,6 +748,7 @@ export const useHouse = create<Store>((set, get) => {
             status: "error",
             error: message,
             live: { ...SNAPSHOT },
+            weather: DEMO_WEATHER,
             historyStatus: "idle",
           });
         }
@@ -974,6 +987,7 @@ export const useHouse = create<Store>((set, get) => {
       set({
         status: "demo",
         live: { ...SNAPSHOT },
+        weather: DEMO_WEATHER,
         areaSwitches: demoAreaSwitches({}),
         fanControl: demoFanControl(),
         error: undefined,
@@ -1692,12 +1706,16 @@ async function refreshRegistries() {
   const map = useHouse.getState().map;
   const areaSwitches = rebuildAreaSwitches(lastStates);
   const fanControl = fanControlFromStates(lastStates, map);
-  syncSocketInterest(map, areaSwitches, fanControl);
+  syncSocketInterest(map, areaSwitches, fanControl, lastStates);
   useHouse.setState({ areaSwitches, fanControl });
 }
 
 export function useLive() {
   return useHouse((s) => s.live);
+}
+
+export function useWeather() {
+  return useHouse((s) => s.weather);
 }
 
 export function useTariffs() {
