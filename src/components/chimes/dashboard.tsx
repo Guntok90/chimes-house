@@ -146,7 +146,9 @@ function OverviewButton({ onClick, compact = false }: { onClick: () => void; com
       type="button"
       aria-label="Overview"
       onPointerDown={(event) => {
-        if (event.button === 0) onClick();
+        // Touch/pen: do not require button===0 (Safari can disagree); mouse stays primary-only.
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        onClick();
       }}
       onClick={onClick}
       className={cn(
