@@ -71,6 +71,19 @@
     linear-gradient(180deg, rgb(28 57 64 / 0.42) 0%, rgb(28 57 64 / 0.08) 28%, rgb(28 57 64 / 0.05) 58%, rgb(28 57 64 / 0.72) 100%);
 }
 
+/* Overview graph scrubber — hide the bright desktop scrollbar chrome.
+   Charts stay horizontally scrollable via trackpad / shift+wheel / touch. */
+.chart-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.chart-scroll::-webkit-scrollbar {
+  display: none;
+  height: 0;
+  width: 0;
+}
+
 /**
  * Ambient Overview (iPad-first).
  * - manipulation: kill double-tap zoom without blocking chart pan when idle

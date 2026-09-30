@@ -158,6 +158,8 @@ export const METER_COLORS = {
   soc: "#f4efe8",
   /** Cool teal-water accent for fish pond probe temp. */
   pond: "#7eb8c0",
+  /** Warmer sand accent for garden / ambient T&H body temp. */
+  garden: "#e6d2c0",
 } as const;
 
 type DayTipProps = {
@@ -242,7 +244,10 @@ export function ChartScroll({
   return (
     <div
       ref={ref}
-      className={className ?? "h-full w-full overflow-x-auto overflow-y-hidden overscroll-x-contain"}
+      className={
+        className ??
+        "chart-scroll h-full w-full overflow-x-auto overflow-y-hidden overscroll-x-contain"
+      }
       style={{ WebkitOverflowScrolling: "touch" }}
     >
       <div className="h-full min-w-full" style={{ width: Math.max(widthPx, 1) }}>
@@ -413,11 +418,13 @@ function TempTip({ active, payload, label }: TempTipProps) {
   );
 }
 
-/** Daily mean pond water temperature — Overview week / month tabs. */
+/** Pond water + garden ambient temperatures — Overview day / week / month / year. */
 export function PondTempChart({ data }: { data: TempPoint[] }) {
+  const showGarden = data.some((p) => p.gardenTempC != null);
+  const showWater = data.some((p) => p.tempC != null);
   return (
     <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
+      <ComposedChart data={data} margin={{ top: 10, right: 12, left: 0, bottom: 0 }}>
         <CartesianGrid stroke="rgba(244,239,232,0.12)" strokeDasharray="3 3" vertical={false} />
         <XAxis
           dataKey="label"
@@ -436,16 +443,30 @@ export function PondTempChart({ data }: { data: TempPoint[] }) {
           domain={["auto", "auto"]}
         />
         <Tooltip content={<TempTip />} />
-        <Area
-          type="monotone"
-          dataKey="tempC"
-          name="Water temp"
-          stroke={METER_COLORS.pond}
-          fill={METER_COLORS.pond}
-          fillOpacity={0.22}
-          strokeWidth={1.8}
-        />
-      </AreaChart>
+        {showWater ? (
+          <Area
+            type="monotone"
+            dataKey="tempC"
+            name="Water temp"
+            stroke={METER_COLORS.pond}
+            fill={METER_COLORS.pond}
+            fillOpacity={0.22}
+            strokeWidth={1.8}
+            connectNulls
+          />
+        ) : null}
+        {showGarden ? (
+          <Line
+            type="monotone"
+            dataKey="gardenTempC"
+            name="Garden temperature"
+            stroke={METER_COLORS.garden}
+            dot={false}
+            strokeWidth={1.8}
+            connectNulls
+          />
+        ) : null}
+      </ComposedChart>
     </ResponsiveContainer>
   );
 }

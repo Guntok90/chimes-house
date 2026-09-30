@@ -4,6 +4,7 @@ import {
   daysFromStatistics,
   historyEntityIds,
   hoursFromHistory,
+  mergeGardenIntoTemps,
   monthsFromStatistics,
   normalizeHistoryResult,
   tempsFromHistory,
@@ -147,9 +148,16 @@ function ratesForHistory(tariffs: TariffRates): {
   return { lowGbpPerKwh: tariffs.cheap, highGbpPerKwh: tariffs.peak };
 }
 
-/** Hourly points for Overview day tab (past week, scrollable). */
+/**
+ * Hourly buffer kept in the store (reuse / scroll elsewhere).
+ * Overview Energy Day slices to the trailing 24h via `lastHoursWindow`.
+ */
 export const HISTORY_HOUR_COUNT = 7 * 24;
-/** Daily points kept for week scroll + month tab. */
+/**
+ * Daily buffer for Month (last 28) and other consumers.
+ * Overview Energy Week uses `historyWeek` (7 days); Month uses last 28 days
+ * (same window as pond Month — not a calendar month).
+ */
 export const HISTORY_DAY_COUNT = 56;
 /** Monthly points for year tab. */
 export const HISTORY_YEAR_COUNT = 12;
@@ -775,27 +783,39 @@ export const useHouse = create<Store>((set, get) => {
             const histBag: HaHistoryBag = normalizeHistoryResult(raw);
             hours = hoursFromHistory(histBag, map, end, HISTORY_HOUR_COUNT);
             // Day fallback from history samples (overwritten by hour stats when present).
-            pondDay = tempsFromHistory(histBag, map.pondWaterTempC, end, 24);
+            const waterDay = tempsFromHistory(histBag, map.pondWaterTempC, end, 24);
+            const gardenDay = tempsFromHistory(histBag, map.gardenTempC, end, 24);
+            pondDay = mergeGardenIntoTemps(waterDay, gardenDay);
           } catch {
             hours = [];
           }
 
-          // Prefer true hourly means for pond Day (last 24h) when recorder has them.
-          if (map.pondWaterTempC) {
+          // Prefer true hourly means for pond/garden Day (last 24h) when recorder has them.
+          const tempIds = [map.pondWaterTempC, map.gardenTempC].filter(
+            (id): id is string => Boolean(id),
+          );
+          if (tempIds.length) {
             try {
               const startPondHours = new Date(end.getTime() - 24 * 60 * 60 * 1000);
               const pondHourStats = (await socket.statisticsDuringPeriod(
-                [map.pondWaterTempC],
+                tempIds,
                 startPondHours.toISOString(),
                 end.toISOString(),
                 "hour",
               )) as HaStatisticsBag;
-              const fromHourStats = tempsFromHourStatistics(
+              const waterHour = tempsFromHourStatistics(
                 pondHourStats,
                 map.pondWaterTempC,
                 24,
                 end,
               );
+              const gardenHour = tempsFromHourStatistics(
+                pondHourStats,
+                map.gardenTempC,
+                24,
+                end,
+              );
+              const fromHourStats = mergeGardenIntoTemps(waterHour, gardenHour);
               if (fromHourStats.length) pondDay = fromHourStats;
             } catch {
               /* keep history-sampled pondDay */
@@ -833,26 +853,40 @@ export const useHouse = create<Store>((set, get) => {
             month = days.length
               ? days.slice(-28)
               : daysFromStatistics(stats, map, 28, end, opts);
-            pondMonth = tempsFromStatistics(stats, map.pondWaterTempC, 28, end);
+            pondMonth = mergeGardenIntoTemps(
+              tempsFromStatistics(stats, map.pondWaterTempC, 28, end),
+              tempsFromStatistics(stats, map.gardenTempC, 28, end),
+            );
             // Week = last 7 calendar days (not a sparse slice of month), so labels
             // match real weekdays even when some days lack period:day rows.
-            pondWeek = tempsFromStatistics(stats, map.pondWaterTempC, 7, end);
+            pondWeek = mergeGardenIntoTemps(
+              tempsFromStatistics(stats, map.pondWaterTempC, 7, end),
+              tempsFromStatistics(stats, map.gardenTempC, 7, end),
+            );
 
             // Prefer daily means averaged from hourly stats (same source as Day).
-            if (map.pondWaterTempC) {
+            if (tempIds.length) {
               try {
                 const startPondWeek = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
                 const pondWeekHourStats = (await socket.statisticsDuringPeriod(
-                  [map.pondWaterTempC],
+                  tempIds,
                   startPondWeek.toISOString(),
                   end.toISOString(),
                   "hour",
                 )) as HaStatisticsBag;
-                const fromWeekHours = dailyMeansFromHourStatistics(
-                  pondWeekHourStats,
-                  map.pondWaterTempC,
-                  7,
-                  end,
+                const fromWeekHours = mergeGardenIntoTemps(
+                  dailyMeansFromHourStatistics(
+                    pondWeekHourStats,
+                    map.pondWaterTempC,
+                    7,
+                    end,
+                  ),
+                  dailyMeansFromHourStatistics(
+                    pondWeekHourStats,
+                    map.gardenTempC,
+                    7,
+                    end,
+                  ),
                 );
                 if (fromWeekHours.length) pondWeek = fromWeekHours;
               } catch {
@@ -877,12 +911,20 @@ export const useHouse = create<Store>((set, get) => {
             year = monthsFromStatistics(yearStats, map, HISTORY_YEAR_COUNT, end, {
               rates: ratesForHistory(get().tariffs),
             });
-            // Pond year = monthly mean °C (same compact period:month payload).
-            pondYear = tempsFromMonthStatistics(
-              yearStats,
-              map.pondWaterTempC,
-              HISTORY_YEAR_COUNT,
-              end,
+            // Pond/garden year = monthly mean °C (same compact period:month payload).
+            pondYear = mergeGardenIntoTemps(
+              tempsFromMonthStatistics(
+                yearStats,
+                map.pondWaterTempC,
+                HISTORY_YEAR_COUNT,
+                end,
+              ),
+              tempsFromMonthStatistics(
+                yearStats,
+                map.gardenTempC,
+                HISTORY_YEAR_COUNT,
+                end,
+              ),
             );
           } catch {
             year = [];

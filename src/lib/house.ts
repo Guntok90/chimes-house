@@ -97,6 +97,12 @@ export type HouseLive = {
    * `null` when the probe entity is not mapped.
    */
   pondWaterTempC: number | null;
+  /**
+   * Garden / ambient temperature (°C) from the T&H sensor body
+   * (`sensor.t_h_sensor_with_external_probe_temperature`).
+   * `null` when the entity is not mapped.
+   */
+  gardenTempC: number | null;
 };
 
 /**
@@ -141,6 +147,7 @@ export const EMPTY_LIVE: HouseLive = {
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
   peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
   pondWaterTempC: null,
+  gardenTempC: null,
 };
 
 export const SNAPSHOT: HouseLive = {
@@ -181,6 +188,7 @@ export const SNAPSHOT: HouseLive = {
   cheapRateGbp: DEFAULT_TARIFF.lowGbpPerKwh,
   peakRateGbp: DEFAULT_TARIFF.highGbpPerKwh,
   pondWaterTempC: 12.4,
+  gardenTempC: 21.2,
 };
 
 /** Demo snapshot. Live values come from `useLive()`. */
@@ -252,11 +260,17 @@ export type HourPoint = {
   carW: number;
 };
 
-/** Daily (or monthly) mean temperature for Overview pond graphs. */
+/**
+ * Temperature point for Overview pond graphs.
+ * `tempC` = pond water (external probe); `gardenTempC` = garden ambient (T&H body).
+ */
 export type TempPoint = {
   key: string;
   label: string;
-  tempC: number;
+  /** Pond water °C from the external probe. Omitted when only garden is present. */
+  tempC?: number;
+  /** Garden / ambient °C from the T&H body sensor. */
+  gardenTempC?: number;
 };
 
 function clamp(n: number, min: number, max: number) {
@@ -402,7 +416,7 @@ export const HOURS = lastHours();
 export const WEEK_HOURS = lastWeekHours();
 export const SCROLL_DAYS = lastDays(56);
 
-/** Demo pond hourly temps (°C) — mild drift over the last 24 hours. */
+/** Demo pond + garden hourly temps (°C) — mild drift over the last 24 hours. */
 export function lastTempHours(count: number): TempPoint[] {
   const out: TempPoint[] = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -415,6 +429,7 @@ export function lastTempHours(count: number): TempPoint[] {
       key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${hh}`,
       label: `${hh}:00`,
       tempC: Number((12.4 + drift).toFixed(1)),
+      gardenTempC: Number((21.2 + drift * 1.4).toFixed(1)),
     });
   }
   return out;
@@ -422,7 +437,7 @@ export function lastTempHours(count: number): TempPoint[] {
 
 export const POND_TEMP_DAY = lastTempHours(24);
 
-/** Demo pond water temps (°C) — cool UK outdoor pond, mild day-to-day drift. */
+/** Demo pond + garden temps (°C) — cool UK outdoor pond, warmer garden ambient. */
 export function lastTempDays(count: number): TempPoint[] {
   const out: TempPoint[] = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -435,6 +450,7 @@ export function lastTempDays(count: number): TempPoint[] {
       key,
       label: d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" }),
       tempC: Number((12.2 + drift).toFixed(1)),
+      gardenTempC: Number((20.8 + drift * 1.3).toFixed(1)),
     });
   }
   return out;
@@ -443,7 +459,7 @@ export function lastTempDays(count: number): TempPoint[] {
 export const POND_TEMP_WEEK = lastTempDays(7);
 export const POND_TEMP_MONTH = lastTempDays(28);
 
-/** Demo pond monthly means — seasonal UK outdoor pond drift over 12 months. */
+/** Demo pond + garden monthly means — seasonal UK outdoor drift over 12 months. */
 export function lastTempMonths(count: number): TempPoint[] {
   const out: TempPoint[] = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -452,10 +468,12 @@ export function lastTempMonths(count: number): TempPoint[] {
     // Cooler in winter months, milder mid-year — rough outdoor pond shape.
     const month = d.getMonth();
     const seasonal = 8 + 6 * Math.sin(((month - 2) / 12) * Math.PI * 2);
+    const gardenSeasonal = 14 + 8 * Math.sin(((month - 2) / 12) * Math.PI * 2);
     out.push({
       key,
       label: d.toLocaleDateString("en-GB", { month: "short", year: "2-digit" }),
       tempC: Number(seasonal.toFixed(1)),
+      gardenTempC: Number(gardenSeasonal.toFixed(1)),
     });
   }
   return out;

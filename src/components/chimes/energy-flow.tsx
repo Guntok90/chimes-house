@@ -358,7 +358,8 @@ function Node({
       <div className="relative">
         <div
           className={cn(
-            "grid size-[4.75rem] place-items-center rounded-full border-[3px] md:size-24",
+            "grid place-items-center rounded-full border-[3px]",
+            glass ? "size-24 md:size-28" : "size-[4.75rem] md:size-24",
             ring,
             fill
               ? "bg-teal text-paper"
@@ -369,20 +370,39 @@ function Node({
           )}
         >
           <div>
-            <Icon className="mx-auto size-4 opacity-80" strokeWidth={1.7} />
-            <div className="mt-0.5 text-sm font-medium tabular-nums leading-none md:text-lg">
+            <Icon
+              className={cn("mx-auto opacity-80", glass ? "size-5" : "size-4")}
+              strokeWidth={1.7}
+            />
+            <div
+              className={cn(
+                "mt-0.5 font-medium tabular-nums leading-none",
+                glass ? "text-lg md:text-xl" : "text-sm md:text-lg",
+              )}
+            >
               {value}
             </div>
           </div>
         </div>
         <div
           className={cn(
-            "absolute left-1/2 top-full mt-2 w-28 -translate-x-1/2 text-center",
-            glass ? "text-sidebar-fg" : "text-ink",
+            "absolute left-1/2 top-full mt-2 -translate-x-1/2 text-center",
+            glass ? "w-36 text-sidebar-fg" : "w-28 text-ink",
           )}
         >
-          <div className="text-xs font-medium tracking-wide">{label}</div>
-          <div className={cn("text-xs", glass ? "text-sidebar-fg/65" : "text-ink-soft")}>
+          <div
+            className={cn(
+              "font-medium tracking-wide",
+              glass ? "text-sm md:text-base" : "text-xs",
+            )}
+          >
+            {label}
+          </div>
+          <div
+            className={cn(
+              glass ? "text-sm text-sidebar-fg/70" : "text-xs text-ink-soft",
+            )}
+          >
             {hint}
           </div>
         </div>

@@ -175,6 +175,10 @@ describe("ha autoMap preferences", () => {
       map.pondWaterTempC,
       "sensor.t_h_sensor_with_external_probe_probe_temperature",
     );
+    assert.equal(
+      map.gardenTempC,
+      "sensor.t_h_sensor_with_external_probe_temperature",
+    );
     assert.notEqual(
       map.pondWaterTempC,
       "sensor.t_h_sensor_with_external_probe_temperature",
@@ -231,6 +235,7 @@ describe("ha autoMap preferences", () => {
     assert.equal(live.rangeRoverTodayKwh, 4.1);
     assert.equal(live.evReadyBy, "07:00");
     assert.equal(live.pondWaterTempC, 11.8);
+    assert.equal(live.gardenTempC, 18.2);
     assert.equal(live.stevieHome, true);
     assert.equal(live.offPeak, true);
     assert.equal(live.intelligent, false);
@@ -624,14 +629,19 @@ describe("tariff helper mapping", () => {
     assert.equal(map.tariffPeak, undefined);
   });
 
-  it("maps fish pond probe temperature and ignores ambient unit temp", () => {
+  it("maps fish pond probe and garden ambient T&H body separately", () => {
     const map = autoMap(CHIMES_PI);
     assert.equal(
       map.pondWaterTempC,
       "sensor.t_h_sensor_with_external_probe_probe_temperature",
     );
+    assert.equal(
+      map.gardenTempC,
+      "sensor.t_h_sensor_with_external_probe_temperature",
+    );
     const live = liveFromStates(CHIMES_PI, map, EMPTY_LIVE);
     assert.equal(live.pondWaterTempC, 11.8);
+    assert.equal(live.gardenTempC, 18.2);
     // Ambient-only inventory must not steal the pond mapping.
     const ambientOnly = [
       state(
@@ -641,7 +651,27 @@ describe("tariff helper mapping", () => {
         "°C",
       ),
     ];
-    assert.equal(autoMap(ambientOnly).pondWaterTempC, undefined);
+    const ambientMap = autoMap(ambientOnly);
+    assert.equal(ambientMap.pondWaterTempC, undefined);
+    assert.equal(
+      ambientMap.gardenTempC,
+      "sensor.t_h_sensor_with_external_probe_temperature",
+    );
+    // Probe-only inventory must not steal the garden mapping.
+    const probeOnly = [
+      state(
+        "sensor.t_h_sensor_with_external_probe_probe_temperature",
+        "11.1",
+        "T&H Sensor with External Probe Probe Temperature",
+        "°C",
+      ),
+    ];
+    const probeMap = autoMap(probeOnly);
+    assert.equal(
+      probeMap.pondWaterTempC,
+      "sensor.t_h_sensor_with_external_probe_probe_temperature",
+    );
+    assert.equal(probeMap.gardenTempC, undefined);
   });
 });
 

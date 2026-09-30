@@ -163,9 +163,9 @@ function hourLabel(t: Date, multiDay: boolean): string {
 }
 
 /**
- * Newest `count` hourly points for a single-day (24h) chart.
- * Store history keeps 7×24 for Overview day-scroll; Home / Battery need the
- * trailing day with HH:00 labels (not "Mon 14 09:00").
+ * Newest `count` hourly points for a true Day (24h) chart.
+ * Store may keep a longer hourly buffer; Overview / Home / Battery Day views
+ * slice to the trailing window with HH:00 labels (not "Mon 14 09:00").
  */
 export function lastHoursWindow(hours: HourPoint[], count = 24): HourPoint[] {
   if (hours.length === 0) return [];
@@ -178,7 +178,7 @@ export function lastHoursWindow(hours: HourPoint[], count = 24): HourPoint[] {
 
 /**
  * Build hourly points from live HA history.
- * `count` defaults to 24; Overview day-scroll uses 7×24 over the past week.
+ * `count` defaults to 24; the store may fetch a longer buffer for reuse.
  * Empty → [] (never invent demo curves).
  */
 export function hoursFromHistory(
@@ -741,6 +741,36 @@ export function tempsFromMonthStatistics(
   return out;
 }
 
+/**
+ * Merge pond water + garden ambient series by `key`.
+ * Water stays on `tempC`; garden ambient lands on `gardenTempC`.
+ * Keys present in only one series are kept (other field omitted).
+ */
+export function mergeGardenIntoTemps(water: TempPoint[], garden: TempPoint[]): TempPoint[] {
+  if (!garden.length) return water;
+  if (!water.length) {
+    return garden.map((g) => ({
+      key: g.key,
+      label: g.label,
+      gardenTempC: g.tempC,
+    }));
+  }
+  const waterByKey = new Map(water.map((p) => [p.key, p]));
+  const gardenByKey = new Map(garden.map((p) => [p.key, p]));
+  const keys = [...new Set([...waterByKey.keys(), ...gardenByKey.keys()])].sort();
+  return keys.map((key) => {
+    const w = waterByKey.get(key);
+    const g = gardenByKey.get(key);
+    const point: TempPoint = {
+      key,
+      label: w?.label ?? g!.label,
+    };
+    if (w?.tempC != null) point.tempC = w.tempC;
+    if (g?.tempC != null) point.gardenTempC = g.tempC;
+    return point;
+  });
+}
+
 export function historyEntityIds(map: HaMap): string[] {
   return [
     map.solarNowW,
@@ -751,6 +781,7 @@ export function historyEntityIds(map: HaMap): string[] {
     map.zappiW,
     map.solarTodayKwh,
     map.pondWaterTempC,
+    map.gardenTempC,
   ].filter((id): id is string => Boolean(id));
 }
 

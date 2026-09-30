@@ -12,6 +12,7 @@ import {
   lastHoursWindow,
   localDayKey,
   localMonthKey,
+  mergeGardenIntoTemps,
   monthKeyFromStart,
   monthsFromStatistics,
   normalizeHistoryResult,
@@ -24,7 +25,7 @@ import {
   type HaStatisticsBag,
 } from "./ha-history.ts";
 import type { HaMap } from "./ha.ts";
-import type { HourPoint } from "./house.ts";
+import type { HourPoint, TempPoint } from "./house.ts";
 import { DEFAULT_TARIFF } from "./octopus.ts";
 
 describe("ha history helpers", () => {
@@ -56,17 +57,20 @@ describe("ha history helpers", () => {
     assert.equal(last.houseW, 0);
   });
 
-  it("builds multi-day hourly series for Overview day scroll", () => {
+  it("can build a longer hourly buffer (store reuse); Day UI slices with lastHoursWindow", () => {
     const now = new Date("2026-09-23T12:00:00Z");
     const bag = {
       "sensor.inverter_input_power": [{ s: "100", lu: now.getTime() / 1000 - 60 }],
     };
     const hours = hoursFromHistory(bag, { solarNowW: map.solarNowW }, now, 48);
     assert.equal(hours.length, 48);
-    assert.match(hours[0].hour, / /); // weekday label when multi-day
+    assert.match(hours[0].hour, / /); // weekday label when multi-day buffer
+    const day = lastHoursWindow(hours, 24);
+    assert.equal(day.length, 24);
+    assert.match(day[0].hour, /^\d{2}:00$/); // Day view uses HH:00 only
   });
 
-  it("lastHoursWindow keeps Home/Battery on a true 24h series with HH:00 labels", () => {
+  it("lastHoursWindow keeps Overview/Home/Battery Day on a true 24h series with HH:00 labels", () => {
     const week: HourPoint[] = Array.from({ length: 48 }, (_, i) => ({
       hour: `Mon ${10 + Math.floor(i / 24)} ${String(i % 24).padStart(2, "0")}:00`,
       soc: i,
@@ -525,8 +529,9 @@ describe("ha history helpers", () => {
     assert.equal(tempMeanC({ start: 0, change: 3 }), null);
   });
 
-  it("tempsFromStatistics builds daily pond means and historyEntityIds includes probe", () => {
+  it("tempsFromStatistics builds daily pond means and historyEntityIds includes probe + garden", () => {
     const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const garden = "sensor.t_h_sensor_with_external_probe_temperature";
     const now = new Date(2026, 8, 23, 18, 0, 0, 0);
     const rows = [];
     for (let i = 6; i >= 0; i--) {
@@ -540,10 +545,43 @@ describe("ha history helpers", () => {
     assert.equal(week[0].tempC, 11.8);
     assert.equal(week[6].tempC, 10);
     assert.deepEqual(tempsFromStatistics(stats, undefined, 7, now), []);
-    assert.equal(
-      historyEntityIds({ ...map, pondWaterTempC: probe }).includes(probe),
-      true,
-    );
+    const ids = historyEntityIds({ ...map, pondWaterTempC: probe, gardenTempC: garden });
+    assert.equal(ids.includes(probe), true);
+    assert.equal(ids.includes(garden), true);
+  });
+
+  it("mergeGardenIntoTemps joins water + garden ambient by key", () => {
+    const water: TempPoint[] = [
+      { key: "2026-09-22", label: "Tue 22", tempC: 11.2 },
+      { key: "2026-09-23", label: "Wed 23", tempC: 12.1 },
+    ];
+    const garden: TempPoint[] = [
+      { key: "2026-09-22", label: "Tue 22", tempC: 20.5 },
+      { key: "2026-09-24", label: "Thu 24", tempC: 21.2 },
+    ];
+    const merged = mergeGardenIntoTemps(water, garden);
+    assert.equal(merged.length, 3);
+    assert.deepEqual(merged[0], {
+      key: "2026-09-22",
+      label: "Tue 22",
+      tempC: 11.2,
+      gardenTempC: 20.5,
+    });
+    assert.deepEqual(merged[1], {
+      key: "2026-09-23",
+      label: "Wed 23",
+      tempC: 12.1,
+    });
+    assert.deepEqual(merged[2], {
+      key: "2026-09-24",
+      label: "Thu 24",
+      gardenTempC: 21.2,
+    });
+    assert.deepEqual(mergeGardenIntoTemps(water, []), water);
+    assert.deepEqual(mergeGardenIntoTemps([], garden), [
+      { key: "2026-09-22", label: "Tue 22", gardenTempC: 20.5 },
+      { key: "2026-09-24", label: "Thu 24", gardenTempC: 21.2 },
+    ]);
   });
 
   it("tempsFromMonthStatistics builds compact year series from monthly means", () => {
