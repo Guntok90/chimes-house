@@ -351,8 +351,14 @@ export const WEATHER_SECTION_ORDER: { group: WeatherGroup; title: string }[] = [
   { group: "extra", title: "More from the station" },
 ];
 
-/** Overlay shows only these keys (quiet large numbers, no charts). */
+/**
+ * Overlay shows only these keys (quiet large numbers, no charts).
+ * Lounge is first so it sits at the top of the ambient weather tile.
+ * Rain rate / daily rain collapse to one slot via {@link overlayRainReading};
+ * weekly rain is always its own row when mapped.
+ */
 export const WEATHER_OVERLAY_KEYS: readonly WeatherKey[] = [
+  "loungeTemp",
   "outdoorTemp",
   "feelsLike",
   "dewpoint",
@@ -360,8 +366,10 @@ export const WEATHER_OVERLAY_KEYS: readonly WeatherKey[] = [
   "pondAir",
   "pondWater",
   "windSpeed",
+  "windGust",
   "rainRate",
   "dailyRain",
+  "weeklyRain",
 ] as const;
 
 const SKIP_EXTRA_TOKENS = [

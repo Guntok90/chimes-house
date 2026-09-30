@@ -832,7 +832,7 @@ function OverviewGraph({
               </div>
             )}
           </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-xs text-sidebar-fg/70">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-sm text-sidebar-fg/80">
             <Key color={METER_COLORS.solar} label="Solar" />
             <Key color={METER_COLORS.house} label="House" />
             <Key color={METER_COLORS.battery} label="Battery" />
@@ -996,7 +996,7 @@ function OverviewPondGraph({
               <PondTempChart data={data} />
             </ChartScroll>
           </div>
-          <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-xs text-sidebar-fg/70">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 px-3 pt-0.5 text-sm text-sidebar-fg/80">
             <Key color={METER_COLORS.pond} label={waterLegend} />
             {showGarden ? <Key color={METER_COLORS.garden} label={gardenLegend} /> : null}
           </div>
@@ -1012,7 +1012,7 @@ function OverviewPondGraph({
 
 function Key({ color, label, dashed = false }: { color: string; label: string; dashed?: boolean }) {
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5 font-bold">
       <span
         className="h-px w-3.5"
         style={{ borderTop: `${dashed ? "1.5px dashed" : "2px solid"} ${color}` }}
@@ -1122,7 +1122,7 @@ function OverviewWeatherPanel({ weather }: { weather: WeatherLive }) {
 function WeatherAmbientCell({ reading }: { reading: WeatherReading }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-[0.65rem] uppercase tracking-widest text-sidebar-fg/55">
+      <div className="truncate text-xs font-bold uppercase tracking-widest text-sidebar-fg/80">
         {reading.label}
       </div>
       <div className="mt-1 flex items-baseline gap-1.5 tabular-nums leading-none">
