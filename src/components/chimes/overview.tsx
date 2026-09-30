@@ -59,8 +59,12 @@ type Box = OverviewBox;
 type ChartRange = "day" | "week" | "month" | "year";
 type PondRange = "day" | "week" | "month" | "year";
 
-/** Match Tailwind `md` — freeform tiles above; stacked scroll below. */
-const STACK_MQ = "(max-width: 767px)";
+/**
+ * Stack only on phones. iPad Mini portrait is ~744 CSS px — it must stay on the
+ * freeform ambient layout (drag/resize), not the phone stack.
+ * Match Tailwind `sm` (640px).
+ */
+const STACK_MQ = "(max-width: 639px)";
 
 let zTop = 20;
 
@@ -152,6 +156,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
   const [range, setRange] = useState<ChartRange>("day");
   const [pondRange, setPondRange] = useState<PondRange>("day");
   const [glassOpacity, setGlassOpacity] = useGlassOpacity();
+  const [tileGrabbing, setTileGrabbing] = useState(false);
   const live = useLive();
   const stacked = useStackedOverview();
 
@@ -212,8 +217,9 @@ export function Overview({ onClose }: { onClose: () => void }) {
   return (
     <div
       className={cn(
-        "fixed inset-0 z-[80] flex flex-col overflow-hidden bg-teal-deep text-sidebar-fg transition-opacity duration-700",
+        "overview-ambient fixed inset-0 z-[80] flex h-dvh max-h-dvh flex-col overflow-hidden bg-teal-deep text-sidebar-fg transition-opacity duration-700",
         ready ? "opacity-100" : "opacity-0",
+        tileGrabbing && "overview-ambient--grabbing",
       )}
     >
       <video
@@ -228,7 +234,15 @@ export function Overview({ onClose }: { onClose: () => void }) {
       />
       <div className="overview-wash pointer-events-none absolute inset-0" />
 
-      <header className="relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-3 px-4 py-4 sm:gap-4 sm:p-6 md:p-10">
+      <header
+        className="relative z-20 flex shrink-0 flex-wrap items-center justify-between gap-x-2 gap-y-3 sm:gap-4"
+        style={{
+          paddingTop: "max(1rem, env(safe-area-inset-top, 0px))",
+          paddingBottom: "1rem",
+          paddingLeft: "max(1rem, env(safe-area-inset-left, 0px))",
+          paddingRight: "max(1rem, env(safe-area-inset-right, 0px))",
+        }}
+      >
         <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <img src="/brand/mark.png" alt="" className="size-9 shrink-0 object-contain sm:size-10" />
           <div className="min-w-0">
@@ -246,7 +260,8 @@ export function Overview({ onClose }: { onClose: () => void }) {
             type="button"
             aria-label="Close overview"
             onPointerDown={(event) => {
-              if (event.button === 0) onClose();
+              if (event.pointerType === "mouse" && event.button !== 0) return;
+              onClose();
             }}
             onClick={onClose}
             className="grid size-11 shrink-0 place-items-center rounded-md border border-sidebar-fg/25 bg-teal-deep/40 text-sidebar-fg backdrop-blur-sm"
@@ -257,7 +272,14 @@ export function Overview({ onClose }: { onClose: () => void }) {
       </header>
 
       {stacked ? (
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 pb-5">
+        <div
+          className="relative z-10 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain"
+          style={{
+            paddingLeft: "max(1rem, env(safe-area-inset-left, 0px))",
+            paddingRight: "max(1rem, env(safe-area-inset-right, 0px))",
+            paddingBottom: "max(1.25rem, env(safe-area-inset-bottom, 0px))",
+          }}
+        >
           <StackedTile title={graphTitle} badge={graphBadge} tall="chart" style={tileStyle}>
             <OverviewGraph range={range} onRangeChange={setRange} />
           </StackedTile>
@@ -282,6 +304,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
             handleOnly
             fallback={defaultGraph}
             style={tileStyle}
+            onGrabChange={setTileGrabbing}
           >
             <OverviewGraph range={range} onRangeChange={setRange} />
           </GlassTile>
@@ -293,6 +316,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
             handleOnly
             fallback={defaultPond}
             style={tileStyle}
+            onGrabChange={setTileGrabbing}
           >
             <OverviewPondGraph range={pondRange} onRangeChange={setPondRange} />
           </GlassTile>
@@ -303,6 +327,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
             badge={flowBadge}
             fallback={defaultFlow}
             style={tileStyle}
+            onGrabChange={setTileGrabbing}
           >
             <FitFlow />
           </GlassTile>
@@ -344,7 +369,7 @@ function GlassOpacitySlider({
   return (
     <label
       className={cn(
-        "flex items-center gap-2 rounded-md border border-sidebar-fg/20 bg-teal-deep/40 px-2.5 py-1.5 backdrop-blur-sm",
+        "flex min-h-11 items-center gap-2 rounded-md border border-sidebar-fg/20 bg-teal-deep/40 px-2.5 py-1.5 backdrop-blur-sm",
         compact ? "max-w-[11rem]" : "max-w-[14rem]",
       )}
     >
@@ -410,6 +435,7 @@ function GlassTile({
   fallback,
   handleOnly = false,
   style,
+  onGrabChange,
 }: {
   storageKey: string;
   title: string;
@@ -418,6 +444,8 @@ function GlassTile({
   fallback: () => Box;
   handleOnly?: boolean;
   style: CSSProperties;
+  /** Notify ambient shell so it can set touch-action:none during a gesture. */
+  onGrabChange?: (grabbing: boolean) => void;
 }) {
   const tile = useRef<HTMLDivElement>(null);
   const mode = useRef<"drag" | "resize" | null>(null);
@@ -427,6 +455,9 @@ function GlassTile({
   const boxRef = useRef<Box | null>(null);
   /** True after the user starts a drag/resize — avoids open/close rewriting saves. */
   const dirty = useRef(false);
+  const activePointer = useRef<number | null>(null);
+  const onGrabChangeRef = useRef(onGrabChange);
+  onGrabChangeRef.current = onGrabChange;
   const [box, setBox] = useState<Box>(() => {
     // First paint must use saved layout when present — hardcoded defaults here
     // previously raced pointerup and could overwrite localStorage on open.
@@ -500,10 +531,10 @@ function GlassTile({
   }, [storageKey, fallback]);
 
   useEffect(() => {
-    const move = (event: PointerEvent) => {
+    const applyMove = (clientX: number, clientY: number) => {
       if (!mode.current) return;
-      const dx = event.clientX - origin.current.px;
-      const dy = event.clientY - origin.current.py;
+      const dx = clientX - origin.current.px;
+      const dy = clientY - origin.current.py;
       const vp = viewportNow();
       let next: Box;
       if (mode.current === "drag") {
@@ -531,12 +562,22 @@ function GlassTile({
       boxRef.current = next;
       setBox(next);
     };
-    const up = (event: PointerEvent) => {
+
+    const endGesture = (pointerId?: number) => {
       if (!mode.current) return;
+      if (
+        pointerId != null &&
+        activePointer.current != null &&
+        pointerId !== activePointer.current
+      ) {
+        return;
+      }
       mode.current = null;
+      activePointer.current = null;
       setGrab(false);
+      onGrabChangeRef.current?.(false);
       try {
-        tile.current?.releasePointerCapture(event.pointerId);
+        if (pointerId != null) tile.current?.releasePointerCapture(pointerId);
       } catch {
         /* already released */
       }
@@ -548,25 +589,68 @@ function GlassTile({
         dirty.current = false;
       }
     };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+
+    const move = (event: PointerEvent) => {
+      if (!mode.current) return;
+      if (activePointer.current != null && event.pointerId !== activePointer.current) return;
+      // Keep the gesture alive on iPad — Safari will otherwise pan/cancel.
+      if (event.cancelable) event.preventDefault();
+      applyMove(event.clientX, event.clientY);
+    };
+    const up = (event: PointerEvent) => {
+      endGesture(event.pointerId);
+    };
+
+    /**
+     * Fallback for iPad Safari builds where pointermove stops after a short
+     * drag (gesture claimed as scroll) even with touch-action:none. Non-passive
+     * touchmove + preventDefault keeps the finger driving our geometry.
+     */
+    const touchMove = (event: TouchEvent) => {
+      if (!mode.current) return;
+      if (event.cancelable) event.preventDefault();
+      const touch = event.touches[0];
+      if (!touch) return;
+      applyMove(touch.clientX, touch.clientY);
+    };
+    const touchEnd = () => {
+      endGesture(activePointer.current ?? undefined);
+    };
+
+    const opts: AddEventListenerOptions = { capture: true };
+    const touchOpts: AddEventListenerOptions = { capture: true, passive: false };
+    window.addEventListener("pointermove", move, opts);
+    window.addEventListener("pointerup", up, opts);
+    window.addEventListener("pointercancel", up, opts);
+    window.addEventListener("lostpointercapture", up, opts);
+    window.addEventListener("touchmove", touchMove, touchOpts);
+    window.addEventListener("touchend", touchEnd, opts);
+    window.addEventListener("touchcancel", touchEnd, opts);
     return () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointermove", move, opts);
+      window.removeEventListener("pointerup", up, opts);
+      window.removeEventListener("pointercancel", up, opts);
+      window.removeEventListener("lostpointercapture", up, opts);
+      window.removeEventListener("touchmove", touchMove, touchOpts);
+      window.removeEventListener("touchend", touchEnd, opts);
+      window.removeEventListener("touchcancel", touchEnd, opts);
     };
   }, [storageKey, fallback]);
 
   function begin(event: ReactPointerEvent, next: "drag" | "resize") {
-    if (event.button !== 0) return;
+    // Mouse: primary button only. Touch/pen often report button 0; some Safari
+    // builds are inconsistent — do not reject non-mouse on button.
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (mode.current) return;
     event.preventDefault();
     event.stopPropagation();
     zTop += 1;
     setZ(zTop);
     mode.current = next;
     dirty.current = true;
+    activePointer.current = event.pointerId;
     setGrab(true);
+    onGrabChangeRef.current?.(true);
     const current = boxRef.current ?? box;
     origin.current = {
       px: event.clientX,
@@ -576,7 +660,11 @@ function GlassTile({
       w: current.w,
       h: current.h,
     };
-    tile.current?.setPointerCapture(event.pointerId);
+    try {
+      tile.current?.setPointerCapture(event.pointerId);
+    } catch {
+      /* Safari may throw if the pointer is already gone */
+    }
   }
 
   return (
@@ -584,14 +672,15 @@ function GlassTile({
       ref={tile}
       style={{ ...style, left: box.x, top: box.y, width: box.w, height: box.h, zIndex: z }}
       className={cn(
-        "absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card",
+        "overview-glass-tile absolute flex flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card",
+        !handleOnly && "overview-tile-drag-surface",
         grab ? "cursor-grabbing" : handleOnly ? "" : "cursor-grab",
       )}
       onPointerDown={handleOnly ? undefined : (event) => begin(event, "drag")}
     >
       <div
         className={cn(
-          "flex shrink-0 items-center justify-between gap-3 px-4 py-2.5",
+          "overview-tile-drag-handle flex shrink-0 items-center justify-between gap-3 px-4 py-2.5",
           handleOnly && (grab ? "cursor-grabbing" : "cursor-grab"),
         )}
         onPointerDown={handleOnly ? (event) => begin(event, "drag") : undefined}
@@ -603,15 +692,14 @@ function GlassTile({
           {badge}
         </div>
       </div>
-      <div className="min-h-0 flex-1 px-2 pb-4">{children}</div>
+      {/* Extra bottom pad so ChartScroll does not sit under the resize hit target. */}
+      <div className="min-h-0 flex-1 px-2 pb-10">{children}</div>
       <button
         type="button"
         aria-label={`Resize ${title}`}
-        className="absolute bottom-1.5 right-1.5 z-10 size-7 cursor-nwse-resize"
+        className="overview-tile-resize absolute bottom-0 right-0 z-20 cursor-nwse-resize border-0 bg-transparent p-0"
         onPointerDown={(event) => begin(event, "resize")}
-      >
-        <span className="absolute bottom-1.5 right-1.5 h-2.5 w-2.5 border-b-2 border-r-2 border-sidebar-fg/55" />
-      </button>
+      />
     </div>
   );
 }
@@ -723,7 +811,7 @@ function GlassRangeTabs({
           aria-selected={value === opt.id}
           onClick={() => onChange(opt.id)}
           className={cn(
-            "min-h-7 rounded-sm px-2.5 text-[0.7rem] font-medium uppercase tracking-wider transition-colors",
+            "min-h-9 min-w-[2.75rem] rounded-sm px-2.5 text-[0.75rem] font-medium uppercase tracking-wider transition-colors",
             value === opt.id
               ? "bg-sidebar-fg/15 text-sidebar-fg"
               : "text-sidebar-fg/55 hover:text-sidebar-fg/80",
