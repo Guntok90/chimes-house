@@ -1,6 +1,11 @@
 import { deriveHouseW } from "./energy-balance.ts";
 import { EMPTY_LIVE, SNAPSHOT, type HouseLive } from "./house.ts";
 import { PREFERRED_TARIFF_ENTITIES, type TariffRates } from "./tariffs.ts";
+import {
+  mapWeatherEntities,
+  weatherInterestIds,
+  type WeatherMapKey,
+} from "./weather.ts";
 
 export type HaState = {
   entity_id: string;
@@ -13,7 +18,7 @@ export type TariffEntityId = "tariffCheap" | "tariffPeak";
 export type HaExtraMapKey = "fan" | "fanSpeed" | "fanLight" | "stopForcibleCharge";
 
 export type HaMap = Partial<
-  Record<keyof HouseLive | SwitchId | TariffEntityId | HaExtraMapKey, string>
+  Record<keyof HouseLive | SwitchId | TariffEntityId | HaExtraMapKey | WeatherMapKey, string>
 >;
 
 export type SwitchId =
@@ -206,7 +211,8 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.t_h_sensor_with_external_probe_probe_temperature",
     "sensor.th_sensor_with_external_probe_probe_temperature",
   ],
-  // Same T&H device body — garden / ambient air (not the water probe).
+  // Same T&H device body — pond air / ambient (not the water probe).
+  // Friendly name on Pi: "Pond Air Temperature" (was labelled Garden in Overview).
   gardenTempC: [
     "sensor.t_h_sensor_with_external_probe_temperature",
     "sensor.th_sensor_with_external_probe_temperature",
@@ -1159,7 +1165,8 @@ export function autoMap(states: HaState[]): HaMap {
     },
   );
 
-  // Garden ambient — T&H body sensor (…_external_probe_temperature), never the water probe.
+  // Pond air — T&H body sensor (…_external_probe_temperature), never the water probe.
+  // HaMap key stays gardenTempC for history compatibility; UI label is Pond air.
   const gardenTemp = resolve(
     states,
     "gardenTempC",
@@ -1167,8 +1174,10 @@ export function autoMap(states: HaState[]): HaMap {
       if (!s.entity_id.startsWith("sensor.")) return false;
       if (b.includes("humidity") || b.includes("battery") || b.includes("signal")) return false;
       const id = s.entity_id.toLowerCase();
-      // Water probe — never use for garden ambient.
+      // Water probe — never use for pond air.
       if (id.includes("probe_probe_temperature")) return false;
+      // Friendly rename on Pi.
+      if (b.includes("pond air") && b.includes("temperature")) return true;
       // Tuya ambient body: …_external_probe_temperature (not …_probe_probe_…).
       if (id.endsWith("_external_probe_temperature")) return true;
       if (
@@ -1247,6 +1256,12 @@ export function autoMap(states: HaState[]): HaMap {
   if (stevie) map.stevieHome = stevie.entity_id;
   if (pondWaterTemp) map.pondWaterTempC = pondWaterTemp.entity_id;
   if (gardenTemp) map.gardenTempC = gardenTemp.entity_id;
+
+  // Ecowitt HP2553AE station + pond T&H — Weather page / Overview overlay.
+  Object.assign(map, mapWeatherEntities(states));
+  // Keep pond wx* keys aligned with the Overview history pair when present.
+  if (map.pondWaterTempC) map.wxPondWater = map.pondWaterTempC;
+  if (map.gardenTempC) map.wxPondAir = map.gardenTempC;
   if (cheapRate) map.cheapRateGbp = cheapRate.entity_id;
   if (peakRate) map.peakRateGbp = peakRate.entity_id;
 
@@ -1293,10 +1308,13 @@ export function autoMap(states: HaState[]): HaMap {
 }
 
 /** Entity ids Overview / live cards care about — plus sun.sun for dusk hint. */
-export function interestFromMap(map: HaMap): Set<string> {
+export function interestFromMap(map: HaMap, states?: HaState[] | Map<string, HaState>): Set<string> {
   const ids = new Set<string>(["sun.sun"]);
   for (const value of Object.values(map)) {
     if (typeof value === "string" && value) ids.add(value);
+  }
+  if (states) {
+    for (const id of weatherInterestIds(states, map)) ids.add(id);
   }
   return ids;
 }
@@ -1309,8 +1327,9 @@ export function interestForLiveUi(
   map: HaMap,
   areaSwitches: AreaSwitch[] = [],
   fan: Pick<FanControl, "entityId" | "speedEntityId" | "lightEntityId"> | null = null,
+  states?: HaState[] | Map<string, HaState>,
 ): Set<string> {
-  const ids = interestFromMap(map);
+  const ids = interestFromMap(map, states);
   for (const sw of areaSwitches) {
     if (sw.entityId) ids.add(sw.entityId);
   }

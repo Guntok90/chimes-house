@@ -24,7 +24,7 @@ import {
   type HourPoint,
   type TempPoint,
 } from "@/lib/house";
-import { useHouse, useLive } from "@/lib/house-store";
+import { useHouse, useLive, useWeather } from "@/lib/house-store";
 import {
   GLASS_OPACITY_DEFAULT,
   GLASS_OPACITY_KEY,
@@ -33,6 +33,7 @@ import {
   OVERVIEW_FLOW_BOX_KEY,
   OVERVIEW_GRAPH_BOX_KEY,
   OVERVIEW_POND_BOX_KEY,
+  OVERVIEW_WEATHER_BOX_KEY,
   clampGlassOpacity,
   clampOverviewBox,
   glassBackdropBlurPx,
@@ -46,6 +47,13 @@ import {
   type OverviewBox,
 } from "@/lib/overview-glass";
 import { cn } from "@/lib/utils";
+import {
+  DEMO_WEATHER,
+  formatWeatherNumber,
+  overlayReadings,
+  type WeatherLive,
+  type WeatherReading,
+} from "@/lib/weather";
 import {
   ChartScroll,
   DayAllChart,
@@ -159,6 +167,9 @@ export function Overview({ onClose }: { onClose: () => void }) {
   const [glassOpacity, setGlassOpacity] = useGlassOpacity();
   const [tileGrabbing, setTileGrabbing] = useState(false);
   const live = useLive();
+  const liveWeather = useWeather();
+  const status = useHouse((s) => s.status);
+  const weather = usesDemoCharts(status) ? DEMO_WEATHER : liveWeather;
   const stacked = useStackedOverview();
 
   useEffect(() => {
@@ -204,7 +215,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
     live.pondWaterTempC != null || live.gardenTempC != null
       ? [
           live.pondWaterTempC != null ? `${live.pondWaterTempC.toFixed(1)}° water` : null,
-          live.gardenTempC != null ? `${live.gardenTempC.toFixed(1)}° garden` : null,
+          live.gardenTempC != null ? `${live.gardenTempC.toFixed(1)}° air` : null,
         ]
           .filter(Boolean)
           .join(" · ")
@@ -215,6 +226,11 @@ export function Overview({ onClose }: { onClose: () => void }) {
           : pondRange === "month"
             ? "28 days"
             : "12 months";
+  const outdoor = weather.byKey.outdoorTemp;
+  const weatherBadge =
+    outdoor && !outdoor.unavailable && outdoor.value != null
+      ? `${formatWeatherNumber(outdoor)}${outdoor.unit ? ` ${outdoor.unit}` : ""}`
+      : "Station";
   const tileStyle = {
     backgroundColor: glassFill(glassOpacity),
     backdropFilter: `blur(${glassBackdropBlurPx(glassOpacity)}px)`,
@@ -290,6 +306,9 @@ export function Overview({ onClose }: { onClose: () => void }) {
           <StackedTile title={graphTitle} badge={graphBadge} tall="chart" style={tileStyle}>
             <OverviewGraph range={range} onRangeChange={setRange} />
           </StackedTile>
+          <StackedTile title="Weather" badge={weatherBadge} tall="chart" style={tileStyle}>
+            <OverviewWeatherPanel weather={weather} />
+          </StackedTile>
           <StackedTile
             title="Fish pond water temp"
             badge={pondBadge}
@@ -314,6 +333,18 @@ export function Overview({ onClose }: { onClose: () => void }) {
             onGrabChange={setTileGrabbing}
           >
             <OverviewGraph range={range} onRangeChange={setRange} />
+          </GlassTile>
+
+          <GlassTile
+            storageKey={OVERVIEW_WEATHER_BOX_KEY}
+            title="Weather"
+            badge={weatherBadge}
+            handleOnly
+            fallback={defaultWeather}
+            style={tileStyle}
+            onGrabChange={setTileGrabbing}
+          >
+            <OverviewWeatherPanel weather={weather} />
           </GlassTile>
 
           <GlassTile
@@ -935,16 +966,16 @@ function OverviewPondGraph({
 
   const waterLegend =
     range === "day"
-      ? "Water temp (hourly)"
+      ? "Pond water (hourly)"
       : range === "week" || range === "month"
-        ? "Water temp (daily mean)"
-        : "Water temp (monthly mean)";
+        ? "Pond water (daily mean)"
+        : "Pond water (monthly mean)";
   const gardenLegend =
     range === "day"
-      ? "Garden temperature (hourly)"
+      ? "Pond air temperature (hourly)"
       : range === "week" || range === "month"
-        ? "Garden temperature (daily mean)"
-        : "Garden temperature (monthly mean)";
+        ? "Pond air temperature (daily mean)"
+        : "Pond air temperature (monthly mean)";
   const showGarden = data.some((p) => p.gardenTempC != null);
 
   return (
@@ -1035,6 +1066,18 @@ function defaultGraph(): Box {
   return { x: 28, y: 96, w, h };
 }
 
+/** Key weather readings — right side, above energy flow when possible. */
+function defaultWeather(): Box {
+  const w = Math.min(360, window.innerWidth - 48);
+  const h = Math.min(420, window.innerHeight - 160);
+  return {
+    x: Math.max(24, window.innerWidth - w - 28),
+    y: 96,
+    w,
+    h,
+  };
+}
+
 function defaultPond(): Box {
   const w = Math.min(420, window.innerWidth - 48);
   const h = Math.min(260, window.innerHeight - 160);
@@ -1055,6 +1098,43 @@ function defaultFlow(): Box {
     w,
     h,
   };
+}
+
+/** Quiet large numbers — no charts. Rain rate OR rainfall today (one rain slot). */
+function OverviewWeatherPanel({ weather }: { weather: WeatherLive }) {
+  const rows = overlayReadings(weather);
+  if (rows.length === 0) {
+    return (
+      <div className="flex h-full items-center justify-center px-4 text-sm text-sidebar-fg/60">
+        Waiting for station…
+      </div>
+    );
+  }
+  return (
+    <div className="grid h-full grid-cols-2 content-start gap-x-4 gap-y-5 overflow-auto px-4 pb-4 pt-1">
+      {rows.map((r) => (
+        <WeatherAmbientCell key={r.entityId || r.key} reading={r} />
+      ))}
+    </div>
+  );
+}
+
+function WeatherAmbientCell({ reading }: { reading: WeatherReading }) {
+  return (
+    <div className="min-w-0">
+      <div className="truncate text-[0.65rem] uppercase tracking-widest text-sidebar-fg/55">
+        {reading.label}
+      </div>
+      <div className="mt-1 flex items-baseline gap-1.5 tabular-nums leading-none">
+        <span className="text-3xl font-medium tracking-tight text-sidebar-fg sm:text-4xl">
+          {formatWeatherNumber(reading)}
+        </span>
+        {reading.unit && !reading.unavailable && reading.value != null ? (
+          <span className="text-sm text-sidebar-fg/55">{reading.unit}</span>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 function OverviewClock({ compact = false }: { compact?: boolean }) {

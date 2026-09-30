@@ -98,8 +98,9 @@ export type HouseLive = {
    */
   pondWaterTempC: number | null;
   /**
-   * Garden / ambient temperature (°C) from the T&H sensor body
+   * Pond air temperature (°C) from the T&H sensor body
    * (`sensor.t_h_sensor_with_external_probe_temperature`).
+   * HaMap key stays `gardenTempC` for history compatibility; UI says Pond air.
    * `null` when the entity is not mapped.
    */
   gardenTempC: number | null;
@@ -262,14 +263,14 @@ export type HourPoint = {
 
 /**
  * Temperature point for Overview pond graphs.
- * `tempC` = pond water (external probe); `gardenTempC` = garden ambient (T&H body).
+ * `tempC` = pond water (external probe); `gardenTempC` = pond air (T&H body).
  */
 export type TempPoint = {
   key: string;
   label: string;
-  /** Pond water °C from the external probe. Omitted when only garden is present. */
+  /** Pond water °C from the external probe. Omitted when only pond air is present. */
   tempC?: number;
-  /** Garden / ambient °C from the T&H body sensor. */
+  /** Pond air °C from the T&H body sensor. */
   gardenTempC?: number;
 };
 

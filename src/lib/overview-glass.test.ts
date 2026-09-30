@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   GLASS_OPACITY_DEFAULT,
+  GLASS_OPACITY_KEY,
   GLASS_OPACITY_MAX,
   GLASS_OPACITY_MIN,
   OVERVIEW_FLOW_BOX_KEY,
@@ -10,6 +11,7 @@ import {
   OVERVIEW_LAYOUT_KEY,
   OVERVIEW_LAYOUT_STORAGE_KEYS,
   OVERVIEW_POND_BOX_KEY,
+  OVERVIEW_WEATHER_BOX_KEY,
   boxesNearlyEqual,
   clampGlassOpacity,
   clampOverviewBox,
@@ -154,15 +156,18 @@ describe("overview box persistence", () => {
     assert.equal(OVERVIEW_GRAPH_BOX_KEY, "chimes.overview.graph");
     assert.equal(OVERVIEW_POND_BOX_KEY, "chimes.overview.pond");
     assert.equal(OVERVIEW_FLOW_BOX_KEY, "chimes.overview.flow");
+    assert.equal(OVERVIEW_WEATHER_BOX_KEY, "chimes.overview.weather");
     assert.equal(OVERVIEW_LAYOUT_KEY, "chimes.overview.layout");
     assert.equal(OVERVIEW_LAYOUT_COOKIE, "chimes_overview_layout");
   });
 
   it("lists layout keys that logout must never clear", () => {
     assert.ok(OVERVIEW_LAYOUT_STORAGE_KEYS.includes(OVERVIEW_GRAPH_BOX_KEY));
-    assert.ok(OVERVIEW_LAYOUT_STORAGE_KEYS.includes(OVERVIEW_FLOW_BOX_KEY));
     assert.ok(OVERVIEW_LAYOUT_STORAGE_KEYS.includes(OVERVIEW_POND_BOX_KEY));
+    assert.ok(OVERVIEW_LAYOUT_STORAGE_KEYS.includes(OVERVIEW_WEATHER_BOX_KEY));
+    assert.ok(OVERVIEW_LAYOUT_STORAGE_KEYS.includes(OVERVIEW_FLOW_BOX_KEY));
     assert.ok(OVERVIEW_LAYOUT_STORAGE_KEYS.includes(OVERVIEW_LAYOUT_KEY));
+    assert.ok(OVERVIEW_LAYOUT_STORAGE_KEYS.includes(GLASS_OPACITY_KEY));
   });
 
   it("parseOverviewBox accepts finite geometry and rejects garbage", () => {

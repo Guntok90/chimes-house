@@ -742,8 +742,8 @@ export function tempsFromMonthStatistics(
 }
 
 /**
- * Merge pond water + garden ambient series by `key`.
- * Water stays on `tempC`; garden ambient lands on `gardenTempC`.
+ * Merge pond water + pond air series by `key`.
+ * Water stays on `tempC`; pond air (T&H body) lands on `gardenTempC`.
  * Keys present in only one series are kept (other field omitted).
  */
 export function mergeGardenIntoTemps(water: TempPoint[], garden: TempPoint[]): TempPoint[] {

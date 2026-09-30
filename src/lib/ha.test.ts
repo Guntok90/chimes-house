@@ -639,6 +639,8 @@ describe("tariff helper mapping", () => {
       map.gardenTempC,
       "sensor.t_h_sensor_with_external_probe_temperature",
     );
+    assert.equal(map.wxPondWater, map.pondWaterTempC);
+    assert.equal(map.wxPondAir, map.gardenTempC);
     const live = liveFromStates(CHIMES_PI, map, EMPTY_LIVE);
     assert.equal(live.pondWaterTempC, 11.8);
     assert.equal(live.gardenTempC, 18.2);
@@ -672,6 +674,33 @@ describe("tariff helper mapping", () => {
       "sensor.t_h_sensor_with_external_probe_probe_temperature",
     );
     assert.equal(probeMap.gardenTempC, undefined);
+  });
+
+  it("maps Ecowitt HP2553AE weather station sensors onto wx* keys", () => {
+    const prefix = "sensor.hp2553ae_pro_v1_9_0_";
+    const states = [
+      ...CHIMES_PI,
+      state(`${prefix}outdoor_temperature`, "22.5", "Chimes Outdoor Temperature", "°C"),
+      state(`${prefix}feels_like_temperature`, "21.8", "Chimes Feels Like", "°C"),
+      state(`${prefix}dewpoint`, "14.2", "Chimes Dewpoint", "°C"),
+      state(`${prefix}humidity`, "58", "Chimes Humidity", "%"),
+      state(`${prefix}temperature_1`, "32.6", "Chimes Greenhouse Temperature", "°C"),
+      state(`${prefix}wind_speed`, "8.4", "Wind Speed", "km/h"),
+      state(`${prefix}wind_gust`, "12.1", "Wind Gust", "mph"),
+      state(`${prefix}rain_rate`, "0", "Rain Rate", "mm/h"),
+      state(`${prefix}daily_rain`, "1.2", "Daily Rain", "mm"),
+      state(`${prefix}relative_pressure`, "761", "Relative Pressure", "mmHg"),
+      state(`${prefix}solar_radiation`, "400", "Solar", "W/m²"),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.wxOutdoorTemp, `${prefix}outdoor_temperature`);
+    assert.equal(map.wxGreenhouseTemp, `${prefix}temperature_1`);
+    assert.equal(map.wxWindSpeed, `${prefix}wind_speed`);
+    assert.equal(map.wxWindGust, `${prefix}wind_gust`);
+    assert.equal(map.wxDailyRain, `${prefix}daily_rain`);
+    assert.equal(map.wxRelativePressure, `${prefix}relative_pressure`);
+    assert.equal(map.wxSolarRadiation, `${prefix}solar_radiation`);
+    assert.ok(interestFromMap(map, states).has(`${prefix}outdoor_temperature`));
   });
 });
 

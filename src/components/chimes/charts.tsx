@@ -158,8 +158,10 @@ export const METER_COLORS = {
   soc: "#f4efe8",
   /** Cool teal-water accent for fish pond probe temp. */
   pond: "#7eb8c0",
-  /** Warmer sand accent for garden / ambient T&H body temp. */
+  /** Warmer sand accent for pond air (T&H body) temp. */
   garden: "#e6d2c0",
+  /** Alias — same sand accent as pond air series. */
+  pondAir: "#e6d2c0",
 } as const;
 
 type DayTipProps = {
@@ -418,7 +420,7 @@ function TempTip({ active, payload, label }: TempTipProps) {
   );
 }
 
-/** Pond water + garden ambient temperatures — Overview day / week / month / year. */
+/** Pond water + pond air temperatures — Overview day / week / month / year. */
 export function PondTempChart({ data }: { data: TempPoint[] }) {
   const showGarden = data.some((p) => p.gardenTempC != null);
   const showWater = data.some((p) => p.tempC != null);
@@ -447,7 +449,7 @@ export function PondTempChart({ data }: { data: TempPoint[] }) {
           <Area
             type="monotone"
             dataKey="tempC"
-            name="Water temp"
+            name="Pond water"
             stroke={METER_COLORS.pond}
             fill={METER_COLORS.pond}
             fillOpacity={0.22}
@@ -459,8 +461,8 @@ export function PondTempChart({ data }: { data: TempPoint[] }) {
           <Line
             type="monotone"
             dataKey="gardenTempC"
-            name="Garden temperature"
-            stroke={METER_COLORS.garden}
+            name="Pond air temperature"
+            stroke={METER_COLORS.pondAir}
             dot={false}
             strokeWidth={1.8}
             connectNulls
