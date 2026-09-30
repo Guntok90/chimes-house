@@ -10,9 +10,18 @@ export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
-      { name: "viewport", content: "width=device-width, initial-scale=1" },
+      // viewport-fit=cover + max-scale: ambient Overview on iPad Safari (safe-area,
+      // fewer accidental pinch-zooms on the glass tiles). Desktop browsers ignore.
+      {
+        name: "viewport",
+        content:
+          "width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover",
+      },
       { title: APP_NAME },
       { name: "theme-color", content: "#F1EEE9" },
+      { name: "apple-mobile-web-app-capable", content: "yes" },
+      { name: "mobile-web-app-capable", content: "yes" },
+      { name: "apple-mobile-web-app-status-bar-style", content: "black-translucent" },
       { name: "description", content: "Chimes house dashboard" },
     ],
     links: [
