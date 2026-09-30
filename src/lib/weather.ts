@@ -708,7 +708,7 @@ export const DEMO_WEATHER: WeatherLive = weatherFromStates(
     },
     {
       entity_id: "sensor.t_h_sensor_with_external_probe_temperature",
-      state: "18.2",
+      state: "21.2",
       attributes: { friendly_name: "Pond Air Temperature", unit_of_measurement: "°C" },
     },
     {
