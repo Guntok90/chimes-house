@@ -140,6 +140,32 @@ describe("Ecowitt weather mapping", () => {
     assert.equal(overlay.filter((r) => r.key === "rainRate" || r.key === "dailyRain").length, 1);
   });
 
+  it("overlay puts lounge first and includes gust + weekly rain", () => {
+    // STATION fixture needs weekly rain for this assertion.
+    const withWeek = [
+      ...STATION,
+      state(`${ECOWITT_PREFIX}weekly_rain`, "4.8", "Chimes Weekly Rain", "mm"),
+    ];
+    const mapWeek = mapWeatherEntities(withWeek);
+    const overlay = overlayReadings(weatherFromStates(withWeek, mapWeek));
+    assert.equal(overlay[0]?.key, "loungeTemp");
+    assert.ok(overlay.some((r) => r.key === "windGust"));
+    assert.ok(overlay.some((r) => r.key === "weeklyRain"));
+    assert.ok(overlay.some((r) => r.key === "outdoorTemp"));
+    assert.ok(overlay.some((r) => r.key === "feelsLike"));
+    assert.ok(overlay.some((r) => r.key === "dewpoint"));
+    assert.ok(overlay.some((r) => r.key === "greenhouseTemp"));
+    assert.ok(overlay.some((r) => r.key === "pondAir"));
+    assert.ok(overlay.some((r) => r.key === "pondWater"));
+    assert.ok(overlay.some((r) => r.key === "windSpeed"));
+    assert.equal(overlay.filter((r) => r.key === "rainRate" || r.key === "dailyRain").length, 1);
+    // Demo snapshot also covers the ambient set Dad asked for.
+    const demo = overlayReadings(DEMO_WEATHER);
+    assert.equal(demo[0]?.key, "loungeTemp");
+    assert.ok(demo.some((r) => r.key === "windGust"));
+    assert.ok(demo.some((r) => r.key === "weeklyRain"));
+  });
+
   it("formats values with HA units", () => {
     const r = DEMO_WEATHER.byKey.outdoorTemp!;
     assert.equal(formatWeatherNumber(r), "22.5");

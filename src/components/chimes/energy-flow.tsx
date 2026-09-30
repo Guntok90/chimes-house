@@ -392,8 +392,8 @@ function Node({
         >
           <div
             className={cn(
-              "font-medium tracking-wide",
-              glass ? "text-sm md:text-base" : "text-xs",
+              "tracking-wide",
+              glass ? "text-base font-bold md:text-lg" : "text-xs font-medium",
             )}
           >
             {label}
