@@ -71,28 +71,17 @@
     linear-gradient(180deg, rgb(28 57 64 / 0.42) 0%, rgb(28 57 64 / 0.08) 28%, rgb(28 57 64 / 0.05) 58%, rgb(28 57 64 / 0.72) 100%);
 }
 
-/* Overview graph scrubber — desktop-only scrollbar; keep it very dim on the
-   ambient PC screen. Touch UIs typically hide overlay scrollbars. */
+/* Overview graph scrubber — hide the bright desktop scrollbar chrome.
+   Charts stay horizontally scrollable via trackpad / shift+wheel / touch. */
 .chart-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(244 239 232 / 0.1) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .chart-scroll::-webkit-scrollbar {
-  height: 4px;
-}
-
-.chart-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.chart-scroll::-webkit-scrollbar-thumb {
-  background: rgb(244 239 232 / 0.1);
-  border-radius: 9999px;
-}
-
-.chart-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgb(244 239 232 / 0.22);
+  display: none;
+  height: 0;
+  width: 0;
 }
 
 .overview-glass-slider {
