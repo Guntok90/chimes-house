@@ -417,18 +417,20 @@ export const HOURS = lastHours();
 export const WEEK_HOURS = lastWeekHours();
 export const SCROLL_DAYS = lastDays(56);
 
-/** Demo pond + garden hourly temps (°C) — mild drift over the last 24 hours. */
+/** Demo pond + garden hourly temps (°C) — mild drift over the last N hours. */
 export function lastTempHours(count: number): TempPoint[] {
   const out: TempPoint[] = [];
+  const multiDay = count > 24;
   for (let i = count - 1; i >= 0; i--) {
     const d = new Date(NOW);
     d.setMinutes(0, 0, 0);
     d.setHours(d.getHours() - i);
     const hh = String(d.getHours()).padStart(2, "0");
     const drift = Math.sin(i / 3.2) * 0.8 + Math.cos(i / 7.1) * 0.35;
+    const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
     out.push({
       key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}T${hh}`,
-      label: `${hh}:00`,
+      label: multiDay ? `${day} ${hh}:00` : `${hh}:00`,
       tempC: Number((12.4 + drift).toFixed(1)),
       gardenTempC: Number((21.2 + drift * 1.4).toFixed(1)),
     });
@@ -438,7 +440,13 @@ export function lastTempHours(count: number): TempPoint[] {
 
 export const POND_TEMP_DAY = lastTempHours(24);
 
-/** Demo pond + garden temps (°C) — cool UK outdoor pond, warmer garden ambient. */
+/** Demo pond Week / Month / Year — hourly series (same resolution as Day). */
+export const POND_TEMP_WEEK = lastTempHours(7 * 24);
+export const POND_TEMP_MONTH = lastTempHours(28 * 24);
+/** Cap demo year at ~90 days of hours so the ambient chart stays snappy. */
+export const POND_TEMP_YEAR = lastTempHours(90 * 24);
+
+/** Demo pond + garden daily means — kept for tests / legacy callers. */
 export function lastTempDays(count: number): TempPoint[] {
   const out: TempPoint[] = [];
   for (let i = count - 1; i >= 0; i--) {
@@ -456,9 +464,6 @@ export function lastTempDays(count: number): TempPoint[] {
   }
   return out;
 }
-
-export const POND_TEMP_WEEK = lastTempDays(7);
-export const POND_TEMP_MONTH = lastTempDays(28);
 
 /** Demo pond + garden monthly means — seasonal UK outdoor drift over 12 months. */
 export function lastTempMonths(count: number): TempPoint[] {
@@ -479,5 +484,3 @@ export function lastTempMonths(count: number): TempPoint[] {
   }
   return out;
 }
-
-export const POND_TEMP_YEAR = lastTempMonths(12);

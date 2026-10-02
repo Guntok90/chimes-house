@@ -600,7 +600,11 @@ export function tempsFromHistory(
 
 /**
  * Hourly mean temperatures from recorder statistics (period: hour).
- * Preferred Day view — ~24 points, not raw 5‑min history. Empty → [].
+ * Preferred for Day / Week / Month / Year pond charts — finest HA long-term
+ * bucket (not daily/monthly means). Empty → [].
+ *
+ * Labels are `HH:00` for a single day (count ≤ 24); multi-day ranges include
+ * a short weekday so Week / Month / Year stay readable while scrolling.
  */
 export function tempsFromHourStatistics(
   stats: HaStatisticsBag,
@@ -615,6 +619,7 @@ export function tempsFromHourStatistics(
   const out: TempPoint[] = [];
   const end = new Date(now);
   end.setMinutes(0, 0, 0);
+  const multiDay = count > 24;
   for (let i = count - 1; i >= 0; i--) {
     const t = new Date(end);
     t.setHours(end.getHours() - i);
@@ -624,11 +629,52 @@ export function tempsFromHourStatistics(
     if (tempC == null) continue;
     out.push({
       key,
-      label: `${pad2(t.getHours())}:00`,
+      label: hourLabel(t, multiDay),
       tempC,
     });
   }
   return out;
+}
+
+/**
+ * Today's energy (kWh) from period:hour statistics for a live power sensor.
+ *
+ * Used for Range Rover when a dedicated “today kWh” entity is missing or stuck
+ * at 0 — sum each hour’s mean power. `meanIsKilowatts` must be true for Dad’s
+ * `sensor.smart_plug_power` (kW); otherwise mean is treated as watts.
+ * Empty / no rows for today → null (never invent 0 as “no data”).
+ */
+export function todayKwhFromPowerHourStats(
+  stats: HaStatisticsBag,
+  entityId: string | undefined,
+  now = new Date(),
+  opts?: { meanIsKilowatts?: boolean },
+): number | null {
+  if (!entityId) return null;
+  const rows = stats[entityId];
+  if (!rows?.length) return null;
+
+  const dayKey = localDayKey(now);
+  const meanIsKw = Boolean(opts?.meanIsKilowatts);
+  let total = 0;
+  let hits = 0;
+  for (const row of rows) {
+    const start = dateFromStatStart(row.start);
+    if (!start || localDayKey(start) !== dayKey) continue;
+    hits += 1;
+    const change = num(row.change);
+    // Energy sensors may expose change (kWh); prefer that when present.
+    if (change != null && change !== 0) {
+      total += change;
+      continue;
+    }
+    const mean = num(row.mean);
+    if (mean == null || mean === 0) continue;
+    // mean kW over 1h ≈ kWh; mean W over 1h ≈ kWh / 1000.
+    total += meanIsKw ? mean : mean / 1000;
+  }
+  if (hits === 0) return null;
+  return Number(total.toFixed(2));
 }
 
 /**

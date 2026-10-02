@@ -160,9 +160,12 @@ export const PREFERRED: Partial<Record<keyof HouseLive, string[]>> = {
     "sensor.myenergi_zappi_25435526_energy_used_today",
     "sensor.myenergi_zappi_25435526_green_energy_today",
   ],
-  // Daily kWh only (never lifetime smart_plug_energy). Prefer plug today, else Meross.
+  // Daily kWh only (never lifetime smart_plug_energy as a direct Today reading).
+  // Prefer plug today; skip Meross when stuck at 0 (same pattern as current_consumption).
   rangeRoverTodayKwh: [
     "sensor.smart_plug_today_s_consumption",
+    "sensor.smart_plug_energy_today",
+    "sensor.smart_plug_electric_consumption_today",
     "sensor.range_rover_hybrid_today_s_consumption",
   ],
   // Import electricity Octopus off-peak window only — never automations / helpers / export.
@@ -563,14 +566,26 @@ export function isKilowattPowerUnit(s: HaState) {
  *
  * Dad’s `sensor.smart_plug_power` is always kW even if unit_of_measurement is blank.
  */
+export function powerSensorReportsKilowatts(entityId: string | undefined): boolean {
+  if (!entityId) return false;
+  return (
+    entityId === "sensor.smart_plug_power" ||
+    (entityId.includes("smart_plug") && entityId.endsWith("_power"))
+  );
+}
+
+/**
+ * Live watts from a power sensor. HA may report kW (e.g. `sensor.smart_plug_power`);
+ * Energy Flow / house maths use W — convert ×1000 when the unit is kilowatts.
+ *
+ * Dad’s `sensor.smart_plug_power` is always kW even if unit_of_measurement is blank.
+ */
 export function wattsFromPowerState(s: HaState | undefined, fallback = 0): number {
   if (!s || !available(s)) return fallback;
   const raw = num(s.state);
   if (raw == null) return fallback;
-  const forceKw =
-    s.entity_id === "sensor.smart_plug_power" ||
-    (s.entity_id.includes("smart_plug") && s.entity_id.endsWith("_power"));
-  const w = forceKw || isKilowattPowerUnit(s) ? raw * 1000 : raw;
+  const forceKw = powerSensorReportsKilowatts(s.entity_id) || isKilowattPowerUnit(s);
+  const w = forceKw ? raw * 1000 : raw;
   return Math.round(w);
 }
 
@@ -629,6 +644,91 @@ function resolve(
   ok: (s: HaState) => boolean = () => true,
 ) {
   return prefer(states, PREFERRED[key], ok) ?? find(states, (s, b) => ok(s) && fuzzy(s, b));
+}
+
+function isTodayEnergyCandidate(s: HaState, b: string): boolean {
+  const smartPlugToday =
+    (s.entity_id.startsWith("sensor.smart_plug") || b.includes("smart_plug")) &&
+    (b.includes("today") || b.includes("daily") || b.includes("today_s_consumption")) &&
+    (b.includes("energy") || b.includes("consumption") || b.includes("kwh")) &&
+    // Never treat lifetime / total energy as “today”.
+    !b.includes("total") &&
+    !b.includes("lifetime") &&
+    !b.endsWith("_energy");
+  const namedRoverToday =
+    isRangeRoverBlob(b) &&
+    (b.includes("energy_used_today") ||
+      b.includes("charged_today") ||
+      b.includes("charge_today") ||
+      b.includes("energy_today") ||
+      b.includes("charging_energy") ||
+      b.includes("today_s_consumption") ||
+      b.includes("todays_consumption") ||
+      b.includes("today's consumption") ||
+      ((b.includes("energy") ||
+        b.includes("charged") ||
+        b.includes("kwh") ||
+        b.includes("consumption")) &&
+        (b.includes("today") || b.includes("daily")))) &&
+    !b.includes("zappi") &&
+    !b.includes("myenergi") &&
+    !b.includes("cupra") &&
+    !b.includes("vag") &&
+    !b.includes("total") &&
+    !b.includes("lifetime");
+  return smartPlugToday || namedRoverToday;
+}
+
+function energyStateNum(s: HaState): number | null {
+  const raw = num(s.state);
+  if (raw == null) return null;
+  const u = unitOf(s);
+  return u === "wh" || u.includes("watt-hour") ? raw / 1000 : raw;
+}
+
+/**
+ * Range Rover today kWh — prefer smart_plug today sensors; skip Meross (and
+ * similar) when stuck at 0, matching the live power preference for
+ * `sensor.smart_plug_power` over Meross current_consumption.
+ */
+function resolveRangeRoverTodayKwh(states: HaState[]): HaState | undefined {
+  const preferred = PREFERRED.rangeRoverTodayKwh ?? [];
+  const hits: HaState[] = [];
+  for (const id of preferred) {
+    const hit = states.find((s) => s.entity_id === id && available(s) && isEnergyUnit(s));
+    if (hit) hits.push(hit);
+  }
+  for (const s of states) {
+    if (!available(s) || !isEnergyUnit(s)) continue;
+    if (hits.some((h) => h.entity_id === s.entity_id)) continue;
+    if (isTodayEnergyCandidate(s, blob(s))) hits.push(s);
+  }
+  if (!hits.length) return undefined;
+
+  const nonZero = hits.find((s) => {
+    const v = energyStateNum(s);
+    return v != null && v > 0;
+  });
+  if (nonZero) return nonZero;
+
+  // All candidates read 0 / null — prefer a smart_plug *today* id over Meross
+  // so history-derived totals can still attach to the plug path; otherwise
+  // leave Meross mapped (UI may still override from power hour stats).
+  const smartPlug = hits.find(
+    (s) =>
+      s.entity_id.startsWith("sensor.smart_plug") ||
+      blob(s).includes("smart_plug"),
+  );
+  if (smartPlug) return smartPlug;
+
+  // Meross (or named Rover) stuck at 0 with a working smart_plug_power → unmapped
+  // so Charge “Today” can be filled from power hour statistics instead of “0 kWh”.
+  const hasSmartPlugPower = states.some(
+    (s) => available(s) && powerSensorReportsKilowatts(s.entity_id),
+  );
+  if (hasSmartPlugPower) return undefined;
+
+  return hits[0];
 }
 
 function isLiveHouseWatts(s: HaState) {
@@ -917,37 +1017,7 @@ export function autoMap(states: HaState[]): HaMap {
     isEnergyUnit,
   );
 
-  const rangeRoverToday = resolve(
-    states,
-    "rangeRoverTodayKwh",
-    (s, b) => {
-      const smartPlugToday =
-        (s.entity_id.startsWith("sensor.smart_plug") || b.includes("smart_plug")) &&
-        (b.includes("today") || b.includes("daily") || b.includes("today_s_consumption")) &&
-        (b.includes("energy") || b.includes("consumption") || b.includes("kwh"));
-      const namedRoverToday =
-        isRangeRoverBlob(b) &&
-        (b.includes("energy_used_today") ||
-          b.includes("charged_today") ||
-          b.includes("charge_today") ||
-          b.includes("energy_today") ||
-          b.includes("charging_energy") ||
-          b.includes("today_s_consumption") ||
-          b.includes("todays_consumption") ||
-          b.includes("today's consumption") ||
-          ((b.includes("energy") ||
-            b.includes("charged") ||
-            b.includes("kwh") ||
-            b.includes("consumption")) &&
-            (b.includes("today") || b.includes("daily")))) &&
-        !b.includes("zappi") &&
-        !b.includes("myenergi") &&
-        !b.includes("cupra") &&
-        !b.includes("vag");
-      return smartPlugToday || namedRoverToday;
-    },
-    isEnergyUnit,
-  );
+  const rangeRoverToday = resolveRangeRoverTodayKwh(states);
 
   // Cheap/Peak badge — only the import Octopus off-peak binary_sensor.
   // Never automation.*/input_* (enabled automations stay "on") or export_off_peak.

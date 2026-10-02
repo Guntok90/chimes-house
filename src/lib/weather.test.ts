@@ -10,6 +10,7 @@ import {
   mapWeatherEntities,
   overlayRainReading,
   overlayReadings,
+  overlayWeatherRows,
   weatherFromStates,
   weatherInterestIds,
 } from "./weather.ts";
@@ -133,37 +134,59 @@ describe("Ecowitt weather mapping", () => {
     const wet = weatherFromStates(wetStates, map);
     assert.equal(overlayRainReading(wet)?.key, "rainRate");
     assert.equal(overlayRainReading(wet)?.value, 2.4);
-
-    const overlay = overlayReadings(wet);
-    assert.ok(overlay.some((r) => r.key === "outdoorTemp"));
-    assert.ok(overlay.some((r) => r.key === "pondWater"));
-    assert.equal(overlay.filter((r) => r.key === "rainRate" || r.key === "dailyRain").length, 1);
   });
 
-  it("overlay puts lounge first and includes gust + weekly rain", () => {
+  it("overlay ambient rows: lounge hero then Dad’s pairs (rain today|week)", () => {
     // STATION fixture needs weekly rain for this assertion.
     const withWeek = [
       ...STATION,
       state(`${ECOWITT_PREFIX}weekly_rain`, "4.8", "Chimes Weekly Rain", "mm"),
     ];
     const mapWeek = mapWeatherEntities(withWeek);
-    const overlay = overlayReadings(weatherFromStates(withWeek, mapWeek));
+    const live = weatherFromStates(withWeek, mapWeek);
+    const overlay = overlayReadings(live);
     assert.equal(overlay[0]?.key, "loungeTemp");
-    assert.ok(overlay.some((r) => r.key === "windGust"));
-    assert.ok(overlay.some((r) => r.key === "weeklyRain"));
-    assert.ok(overlay.some((r) => r.key === "outdoorTemp"));
-    assert.ok(overlay.some((r) => r.key === "feelsLike"));
-    assert.ok(overlay.some((r) => r.key === "dewpoint"));
-    assert.ok(overlay.some((r) => r.key === "greenhouseTemp"));
-    assert.ok(overlay.some((r) => r.key === "pondAir"));
-    assert.ok(overlay.some((r) => r.key === "pondWater"));
-    assert.ok(overlay.some((r) => r.key === "windSpeed"));
-    assert.equal(overlay.filter((r) => r.key === "rainRate" || r.key === "dailyRain").length, 1);
+    assert.deepEqual(
+      overlay.map((r) => r.key),
+      [
+        "loungeTemp",
+        "outdoorTemp",
+        "feelsLike",
+        "windSpeed",
+        "windGust",
+        "dailyRain",
+        "weeklyRain",
+        "pondWater",
+        "pondAir",
+        "greenhouseTemp",
+        "dewpoint",
+      ],
+    );
+
+    const rows = overlayWeatherRows(live);
+    assert.equal(rows[0]?.kind, "hero");
+    if (rows[0]?.kind === "hero") assert.equal(rows[0].reading.key, "loungeTemp");
+    assert.equal(rows.length, 6);
+    const pairKeys = rows.slice(1).map((r) => {
+      assert.equal(r.kind, "pair");
+      if (r.kind !== "pair") return "";
+      return `${r.left?.key}|${r.right?.key}`;
+    });
+    assert.deepEqual(pairKeys, [
+      "outdoorTemp|feelsLike",
+      "windSpeed|windGust",
+      "dailyRain|weeklyRain",
+      "pondWater|pondAir",
+      "greenhouseTemp|dewpoint",
+    ]);
+
     // Demo snapshot also covers the ambient set Dad asked for.
     const demo = overlayReadings(DEMO_WEATHER);
     assert.equal(demo[0]?.key, "loungeTemp");
     assert.ok(demo.some((r) => r.key === "windGust"));
     assert.ok(demo.some((r) => r.key === "weeklyRain"));
+    assert.ok(demo.some((r) => r.key === "dailyRain"));
+    assert.ok(!demo.some((r) => r.key === "rainRate"));
   });
 
   it("formats values with HA units", () => {
