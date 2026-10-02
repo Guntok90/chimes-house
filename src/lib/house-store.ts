@@ -169,8 +169,14 @@ export const HISTORY_YEAR_COUNT = 12;
 /** Pond Week / Month / Year use hourly statistics (not daily/monthly means). */
 export const POND_WEEK_HOUR_COUNT = 7 * 24;
 export const POND_MONTH_HOUR_COUNT = 28 * 24;
-/** ~1 year of hourly pond points — finest long-term HA bucket. */
-export const POND_YEAR_HOUR_COUNT = 365 * 24;
+/**
+ * Live pond Year = last ~90 days of hours (matches demo `POND_TEMP_YEAR`).
+ * Full 365×24 blocked Overview Energy+Pond after #57: one huge period:hour
+ * fetch ran before energy stats, then O(n²) hour matching froze the tab.
+ */
+export const POND_YEAR_HOUR_COUNT = 90 * 24;
+/** WS timeout for dense pond period:hour statistics (Tailscale / Pi). */
+const POND_HOUR_STATS_TIMEOUT_MS = 45_000;
 
 type Status = "demo" | "connecting" | "live" | "error";
 type HistoryStatus = "idle" | "loading" | "ready" | "empty";
@@ -773,22 +779,55 @@ export const useHouse = create<Store>((set, get) => {
       }
       set({ historyStatus: "loading" });
       historyInFlight = (async () => {
+        const end = new Date();
+        const startHours = new Date(end.getTime() - HISTORY_HOUR_COUNT * 60 * 60 * 1000);
+        const startDays = new Date(end.getTime() - HISTORY_DAY_COUNT * 24 * 60 * 60 * 1000);
+        const startYear = new Date(end.getFullYear(), end.getMonth() - (HISTORY_YEAR_COUNT - 1), 1);
+
+        let hours: HourPoint[] = [];
+        let days: DayPoint[] = [];
+        let week: DayPoint[] = [];
+        let month: DayPoint[] = [];
+        let year: DayPoint[] = [];
+        let pondDay: TempPoint[] = [];
+        let pondWeek: TempPoint[] = [];
+        let pondMonth: TempPoint[] = [];
+        let pondYear: TempPoint[] = [];
+        let rrTodayFromPower: number | null = null;
+
+        const publish = (status: HistoryStatus) => {
+          const livePatch =
+            rrTodayFromPower != null &&
+            (get().live.rangeRoverTodayKwh == null ||
+              (get().live.rangeRoverTodayKwh === 0 && rrTodayFromPower > 0))
+              ? { live: { ...get().live, rangeRoverTodayKwh: rrTodayFromPower } }
+              : {};
+          set({
+            historyHours: hours,
+            historyDays: days,
+            historyWeek: week,
+            historyMonth: month,
+            historyYear: year,
+            historyPondTempDay: pondDay,
+            historyPondTempWeek: pondWeek,
+            historyPondTempMonth: pondMonth,
+            historyPondTempYear: pondYear,
+            historyStatus: status,
+            ...livePatch,
+          });
+        };
+
+        const anySeries = () =>
+          hours.length > 0 ||
+          days.length > 0 ||
+          week.length > 0 ||
+          year.length > 0 ||
+          pondDay.length > 0 ||
+          pondWeek.length > 0 ||
+          pondMonth.length > 0 ||
+          pondYear.length > 0;
+
         try {
-          const end = new Date();
-          const startHours = new Date(end.getTime() - HISTORY_HOUR_COUNT * 60 * 60 * 1000);
-          const startDays = new Date(end.getTime() - HISTORY_DAY_COUNT * 24 * 60 * 60 * 1000);
-          const startYear = new Date(end.getFullYear(), end.getMonth() - (HISTORY_YEAR_COUNT - 1), 1);
-
-          let hours: HourPoint[] = [];
-          let days: DayPoint[] = [];
-          let week: DayPoint[] = [];
-          let month: DayPoint[] = [];
-          let year: DayPoint[] = [];
-          let pondDay: TempPoint[] = [];
-          let pondWeek: TempPoint[] = [];
-          let pondMonth: TempPoint[] = [];
-          let pondYear: TempPoint[] = [];
-
           // Hourly and daily paths are independent — a stats parse throw must
           // not wipe an otherwise-valid series (and never invent demo data).
           try {
@@ -807,52 +846,8 @@ export const useHouse = create<Store>((set, get) => {
             hours = [];
           }
 
-          // Prefer true hourly means for pond/garden Day / Week / Month / Year.
-          // Dad: Week/Month/Year must not be coarse daily/monthly means — use
-          // period:hour (finest long-term HA bucket) for the same water + air series.
-          const tempIds = [map.pondWaterTempC, map.gardenTempC].filter(
-            (id): id is string => Boolean(id),
-          );
-          if (tempIds.length) {
-            const loadPondHours = async (hours: number) => {
-              const start = new Date(end.getTime() - hours * 60 * 60 * 1000);
-              const bag = (await socket.statisticsDuringPeriod(
-                tempIds,
-                start.toISOString(),
-                end.toISOString(),
-                "hour",
-              )) as HaStatisticsBag;
-              return mergeGardenIntoTemps(
-                tempsFromHourStatistics(bag, map.pondWaterTempC, hours, end),
-                tempsFromHourStatistics(bag, map.gardenTempC, hours, end),
-              );
-            };
-            try {
-              const fromDay = await loadPondHours(24);
-              if (fromDay.length) pondDay = fromDay;
-            } catch {
-              /* keep history-sampled pondDay */
-            }
-            try {
-              const fromWeek = await loadPondHours(POND_WEEK_HOUR_COUNT);
-              if (fromWeek.length) pondWeek = fromWeek;
-            } catch {
-              /* leave empty — never fall back to daily means */
-            }
-            try {
-              const fromMonth = await loadPondHours(POND_MONTH_HOUR_COUNT);
-              if (fromMonth.length) pondMonth = fromMonth;
-            } catch {
-              /* leave empty */
-            }
-            try {
-              const fromYear = await loadPondHours(POND_YEAR_HOUR_COUNT);
-              if (fromYear.length) pondYear = fromYear;
-            } catch {
-              /* leave empty */
-            }
-          }
-
+          // Energy first — Overview Energy / Home / Battery must not wait on
+          // dense pond period:hour Year (regression from #57).
           try {
             const stats = (await socket.statisticsDuringPeriod(
               ids,
@@ -870,6 +865,7 @@ export const useHouse = create<Store>((set, get) => {
                   startDays.toISOString(),
                   end.toISOString(),
                   "hour",
+                  POND_HOUR_STATS_TIMEOUT_MS,
                 )) as HaStatisticsBag;
               } catch {
                 hourStats = {};
@@ -906,7 +902,6 @@ export const useHouse = create<Store>((set, get) => {
 
           // Range Rover “Today” kWh — when the dedicated today entity is missing
           // or stuck at 0, derive from today’s hourly means of the live plug power.
-          let rrTodayFromPower: number | null = null;
           if (map.rangeRoverW) {
             try {
               const startToday = new Date(end);
@@ -928,36 +923,46 @@ export const useHouse = create<Store>((set, get) => {
             }
           }
 
-          const empty =
-            hours.length === 0 &&
-            days.length === 0 &&
-            week.length === 0 &&
-            year.length === 0 &&
-            pondDay.length === 0 &&
-            pondWeek.length === 0 &&
-            pondMonth.length === 0 &&
-            pondYear.length === 0;
+          // Publish energy as soon as it is ready so charts paint while pond loads.
+          if (anySeries()) publish("ready");
 
-          const livePatch =
-            rrTodayFromPower != null &&
-            (get().live.rangeRoverTodayKwh == null ||
-              (get().live.rangeRoverTodayKwh === 0 && rrTodayFromPower > 0))
-              ? { live: { ...get().live, rangeRoverTodayKwh: rrTodayFromPower } }
-              : {};
+          // One period:hour fetch covers Day / Week / Month / Year (Year ⊆ Month ⊆ …).
+          // Dad: keep hourly resolution — never coarse daily/monthly means.
+          const tempIds = [map.pondWaterTempC, map.gardenTempC].filter(
+            (id): id is string => Boolean(id),
+          );
+          if (tempIds.length) {
+            try {
+              const startPond = new Date(end.getTime() - POND_YEAR_HOUR_COUNT * 60 * 60 * 1000);
+              const bag = (await socket.statisticsDuringPeriod(
+                tempIds,
+                startPond.toISOString(),
+                end.toISOString(),
+                "hour",
+                POND_HOUR_STATS_TIMEOUT_MS,
+              )) as HaStatisticsBag;
+              const pondSlice = (count: number) =>
+                mergeGardenIntoTemps(
+                  tempsFromHourStatistics(bag, map.pondWaterTempC, count, end),
+                  tempsFromHourStatistics(bag, map.gardenTempC, count, end),
+                );
+              const fromDay = pondSlice(24);
+              if (fromDay.length) pondDay = fromDay;
+              const fromWeek = pondSlice(POND_WEEK_HOUR_COUNT);
+              if (fromWeek.length) pondWeek = fromWeek;
+              const fromMonth = pondSlice(POND_MONTH_HOUR_COUNT);
+              if (fromMonth.length) pondMonth = fromMonth;
+              const fromYear = pondSlice(POND_YEAR_HOUR_COUNT);
+              if (fromYear.length) pondYear = fromYear;
+            } catch {
+              /* keep history-sampled pondDay; leave longer ranges empty */
+            }
+          }
 
-          set({
-            historyHours: hours,
-            historyDays: days,
-            historyWeek: week,
-            historyMonth: month,
-            historyYear: year,
-            historyPondTempDay: pondDay,
-            historyPondTempWeek: pondWeek,
-            historyPondTempMonth: pondMonth,
-            historyPondTempYear: pondYear,
-            historyStatus: empty ? "empty" : "ready",
-            ...livePatch,
-          });
+          publish(anySeries() ? "ready" : "empty");
+        } catch {
+          // Never leave Overview stuck on "loading" if something unexpected throws.
+          publish(anySeries() ? "ready" : "empty");
         } finally {
           historyInFlight = null;
         }
