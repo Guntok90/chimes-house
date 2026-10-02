@@ -50,7 +50,7 @@ import { cn } from "@/lib/utils";
 import {
   DEMO_WEATHER,
   formatWeatherNumber,
-  overlayReadings,
+  overlayWeatherRows,
   type WeatherLive,
   type WeatherReading,
 } from "@/lib/weather";
@@ -957,25 +957,16 @@ function OverviewPondGraph({
     return historyStatus === "ready" && data.length > 0;
   }, [liveMode, historyStatus, data.length]);
 
-  // Day / Week fit the tile; Month / Year may scroll when dense.
+  // Day fits the tile; Week / Month / Year scroll when dense hourly series.
   const scrollWidth = useMemo(() => {
-    if (range === "day" || range === "week") return 0;
-    if (range === "month") return Math.max(data.length * 28, 420);
-    return Math.max(data.length * 56, 420);
+    if (range === "day") return 0;
+    if (range === "week") return Math.max(data.length * 14, 420);
+    if (range === "month") return Math.max(data.length * 10, 420);
+    return Math.max(data.length * 6, 420);
   }, [data.length, range]);
 
-  const waterLegend =
-    range === "day"
-      ? "Pond water (hourly)"
-      : range === "week" || range === "month"
-        ? "Pond water (daily mean)"
-        : "Pond water (monthly mean)";
-  const gardenLegend =
-    range === "day"
-      ? "Pond air temperature (hourly)"
-      : range === "week" || range === "month"
-        ? "Pond air temperature (daily mean)"
-        : "Pond air temperature (monthly mean)";
+  const waterLegend = "Pond water (hourly)";
+  const gardenLegend = "Pond air temperature (hourly)";
   const showGarden = data.some((p) => p.gardenTempC != null);
 
   return (
@@ -1068,9 +1059,9 @@ function defaultGraph(): Box {
 
 /** Key weather readings — right side, above energy flow when possible. */
 function defaultWeather(): Box {
-  // Tall enough for lounge + gust + weekly rain with the rest of the key set.
-  const w = Math.min(380, window.innerWidth - 48);
-  const h = Math.min(520, window.innerHeight - 140);
+  // Tall enough for lounge hero + five paired rows (incl. rain week + pond pair).
+  const w = Math.min(400, window.innerWidth - 48);
+  const h = Math.min(560, window.innerHeight - 120);
   return {
     x: Math.max(24, window.innerWidth - w - 28),
     y: 96,
@@ -1101,9 +1092,13 @@ function defaultFlow(): Box {
   };
 }
 
-/** Quiet large numbers — no charts. Rain rate OR rainfall today (one rain slot). */
+/**
+ * Quiet large numbers — no charts.
+ * Lounge centered on top; then outdoor|feels, wind|gust, rain today|week,
+ * pond water|air, greenhouse|dew. Captions stay bold; values slightly smaller.
+ */
 function OverviewWeatherPanel({ weather }: { weather: WeatherLive }) {
-  const rows = overlayReadings(weather);
+  const rows = overlayWeatherRows(weather);
   if (rows.length === 0) {
     return (
       <div className="flex h-full items-center justify-center px-4 text-sm text-sidebar-fg/60">
@@ -1112,26 +1107,55 @@ function OverviewWeatherPanel({ weather }: { weather: WeatherLive }) {
     );
   }
   return (
-    <div className="grid h-full grid-cols-2 content-start gap-x-4 gap-y-5 overflow-auto px-4 pb-4 pt-1">
-      {rows.map((r) => (
-        <WeatherAmbientCell key={r.entityId || r.key} reading={r} />
-      ))}
+    <div className="flex h-full flex-col gap-y-3.5 overflow-auto px-4 pb-4 pt-1">
+      {rows.map((row) => {
+        if (row.kind === "hero") {
+          return (
+            <div key={row.reading.entityId || row.reading.key} className="flex justify-center">
+              <WeatherAmbientCell reading={row.reading} align="center" />
+            </div>
+          );
+        }
+        const key = `${row.left?.key ?? "x"}-${row.right?.key ?? "y"}`;
+        return (
+          <div key={key} className="grid grid-cols-2 gap-x-4">
+            {row.left ? <WeatherAmbientCell reading={row.left} /> : <div />}
+            {row.right ? <WeatherAmbientCell reading={row.right} /> : <div />}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function WeatherAmbientCell({ reading }: { reading: WeatherReading }) {
+function WeatherAmbientCell({
+  reading,
+  align = "start",
+}: {
+  reading: WeatherReading;
+  align?: "start" | "center";
+}) {
   return (
-    <div className="min-w-0">
-      <div className="truncate text-xs font-bold uppercase tracking-widest text-sidebar-fg/80">
+    <div className={cn("min-w-0", align === "center" && "text-center")}>
+      <div
+        className={cn(
+          "truncate text-[0.65rem] font-bold uppercase tracking-widest text-sidebar-fg/80",
+          align === "center" && "mx-auto",
+        )}
+      >
         {reading.label}
       </div>
-      <div className="mt-1 flex items-baseline gap-1.5 tabular-nums leading-none">
-        <span className="text-3xl font-medium tracking-tight text-sidebar-fg sm:text-4xl">
+      <div
+        className={cn(
+          "mt-1 flex items-baseline gap-1.5 tabular-nums leading-none",
+          align === "center" && "justify-center",
+        )}
+      >
+        <span className="text-2xl font-medium tracking-tight text-sidebar-fg sm:text-3xl">
           {formatWeatherNumber(reading)}
         </span>
         {reading.unit && !reading.unavailable && reading.value != null ? (
-          <span className="text-sm text-sidebar-fg/55">{reading.unit}</span>
+          <span className="text-xs text-sidebar-fg/55">{reading.unit}</span>
         ) : null}
       </div>
     </div>

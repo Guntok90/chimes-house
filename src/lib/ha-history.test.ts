@@ -22,6 +22,7 @@ import {
   tempsFromHourStatistics,
   tempsFromMonthStatistics,
   tempsFromStatistics,
+  todayKwhFromPowerHourStats,
   type HaStatisticsBag,
 } from "./ha-history.ts";
 import type { HaMap } from "./ha.ts";
@@ -616,6 +617,55 @@ describe("ha history helpers", () => {
     assert.match(day[0].label, /^\d{2}:00$/);
     assert.equal(day[day.length - 1].label, "18:00");
     assert.deepEqual(tempsFromHourStatistics(stats, undefined, 24, now), []);
+  });
+
+  it("tempsFromHourStatistics Week keeps hourly points with multi-day labels", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const now = new Date(2026, 8, 23, 18, 0, 0, 0);
+    const rows = [];
+    for (let i = 7 * 24 - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setHours(now.getHours() - i, 0, 0, 0);
+      rows.push({ start: d.getTime(), mean: 10 + (i % 7) * 0.1, change: 0 });
+    }
+    const stats: HaStatisticsBag = { [probe]: rows };
+    const week = tempsFromHourStatistics(stats, probe, 7 * 24, now);
+    assert.equal(week.length, 7 * 24);
+    // Not a daily-mean collapse — many more than 7 points.
+    assert.ok(week.length > 7);
+    assert.match(week[0].label, /\d{2}:00$/);
+    assert.match(week[0].label, /[A-Za-z]/); // weekday prefix
+    assert.equal(week[week.length - 1].label.endsWith("18:00"), true);
+  });
+
+  it("todayKwhFromPowerHourStats sums today’s hour means (kW or W)", () => {
+    const plug = "sensor.smart_plug_power";
+    const now = new Date(2026, 8, 23, 14, 30, 0, 0);
+    const rows = [];
+    // Today 00–13: 2.0 kW mean each hour → 14 × 2.0 = 28 kWh when meanIsKilowatts.
+    for (let h = 0; h <= 13; h++) {
+      rows.push({
+        start: new Date(2026, 8, 23, h, 0, 0, 0).getTime(),
+        mean: 2.0,
+        change: 0,
+      });
+    }
+    // Yesterday should be ignored.
+    rows.push({
+      start: new Date(2026, 8, 22, 12, 0, 0, 0).getTime(),
+      mean: 9.0,
+      change: 0,
+    });
+    const stats: HaStatisticsBag = { [plug]: rows };
+    assert.equal(todayKwhFromPowerHourStats(stats, plug, now, { meanIsKilowatts: true }), 28);
+    // Watts path: mean 2000 W → 2 kWh/h × 14 = 28.
+    const wattsRows = rows.map((r) => ({ ...r, mean: r.mean === 9.0 ? 9000 : 2000 }));
+    assert.equal(
+      todayKwhFromPowerHourStats({ [plug]: wattsRows }, plug, now, { meanIsKilowatts: false }),
+      28,
+    );
+    assert.equal(todayKwhFromPowerHourStats(stats, undefined, now), null);
+    assert.equal(todayKwhFromPowerHourStats({}, plug, now), null);
   });
 
   it("tempsFromHistory samples probe states into hourly Day points", () => {

@@ -352,25 +352,29 @@ export const WEATHER_SECTION_ORDER: { group: WeatherGroup; title: string }[] = [
 ];
 
 /**
- * Overlay shows only these keys (quiet large numbers, no charts).
- * Lounge is first so it sits at the top of the ambient weather tile.
- * Rain rate / daily rain collapse to one slot via {@link overlayRainReading};
- * weekly rain is always its own row when mapped.
+ * Overlay key order for the ambient weather tile (Dad row layout).
+ * Lounge is hero-centered on its own row; remaining keys pair left|right:
+ * outdoor|feels, wind|gust, rain today|week, pond water|air, greenhouse|dew.
+ * Rain rate is Weather-page only — overlay always prefers daily + weekly rain.
  */
 export const WEATHER_OVERLAY_KEYS: readonly WeatherKey[] = [
   "loungeTemp",
   "outdoorTemp",
   "feelsLike",
-  "dewpoint",
-  "greenhouseTemp",
-  "pondAir",
-  "pondWater",
   "windSpeed",
   "windGust",
-  "rainRate",
   "dailyRain",
   "weeklyRain",
+  "pondWater",
+  "pondAir",
+  "greenhouseTemp",
+  "dewpoint",
 ] as const;
+
+/** One ambient weather row — hero (lounge) or a left|right pair. */
+export type OverlayWeatherRow =
+  | { kind: "hero"; reading: WeatherReading }
+  | { kind: "pair"; left?: WeatherReading; right?: WeatherReading };
 
 const SKIP_EXTRA_TOKENS = [
   "battery",
@@ -786,15 +790,41 @@ export function overlayRainReading(weather: WeatherLive): WeatherReading | undef
   return rate ?? daily;
 }
 
-/** Overlay key list with rain collapsed to a single slot. */
+/**
+ * Flat overlay readings in Dad’s ambient order (lounge first, then pairs).
+ * Prefer daily rain over rain rate so “Rain today | Rain week” stays intact.
+ */
 export function overlayReadings(weather: WeatherLive): WeatherReading[] {
   const out: WeatherReading[] = [];
   for (const key of WEATHER_OVERLAY_KEYS) {
-    if (key === "rainRate" || key === "dailyRain") continue;
     const r = weather.byKey[key];
     if (r) out.push(r);
   }
-  const rain = overlayRainReading(weather);
-  if (rain) out.push(rain);
   return out;
+}
+
+/**
+ * Structured ambient weather rows for the Overview glass tile.
+ * 1. Lounge (centered hero)
+ * 2–6. Paired rows in {@link WEATHER_OVERLAY_KEYS} order.
+ */
+export function overlayWeatherRows(weather: WeatherLive): OverlayWeatherRow[] {
+  const bk = weather.byKey;
+  const rows: OverlayWeatherRow[] = [];
+  if (bk.loungeTemp) rows.push({ kind: "hero", reading: bk.loungeTemp });
+
+  const pairs: [WeatherKey, WeatherKey][] = [
+    ["outdoorTemp", "feelsLike"],
+    ["windSpeed", "windGust"],
+    ["dailyRain", "weeklyRain"],
+    ["pondWater", "pondAir"],
+    ["greenhouseTemp", "dewpoint"],
+  ];
+  for (const [leftKey, rightKey] of pairs) {
+    const left = bk[leftKey];
+    const right = bk[rightKey];
+    if (!left && !right) continue;
+    rows.push({ kind: "pair", left, right });
+  }
+  return rows;
 }

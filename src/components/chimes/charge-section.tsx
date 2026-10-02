@@ -230,8 +230,9 @@ export function ChargeSection({
           </div>
           <p className="text-sm leading-relaxed text-ink-soft">
             Plug/charge from a cable sensor when present, else the Front garden Meross Range Rover
-            Hybrid switch (on = charging path) and its today kWh. Cupra / VAG Connect stays on the
-            Zappi path — no invented Rover charge writes.
+            Hybrid switch (on = charging path). Today kWh prefers the smart plug’s today sensor; if
+            that is missing or stuck at 0, it uses today’s hourly power from the live plug. Cupra /
+            VAG Connect stays on the Zappi path — no invented Rover charge writes.
           </p>
         </Surface>
       </div>

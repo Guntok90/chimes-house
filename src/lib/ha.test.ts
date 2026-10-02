@@ -1587,6 +1587,45 @@ describe("Range Rover entity discovery", () => {
     assert.equal(live.rangeRoverSoc, 0);
   });
 
+  it("skips Meross today stuck at 0 when smart_plug_power exists (derive later)", () => {
+    const states: HaState[] = [
+      state("switch.range_rover_hybrid", "on", "Range Rover Hybrid"),
+      state("sensor.smart_plug_power", "1.5", "Range Rover Hybrid Power", "kW"),
+      state(
+        "sensor.range_rover_hybrid_today_s_consumption",
+        "0",
+        "Range Rover Hybrid Today's consumption",
+        "kWh",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverW, "sensor.smart_plug_power");
+    // Meross today at 0 maps to nothing so Charge can use power hour stats.
+    assert.equal(map.rangeRoverTodayKwh, undefined);
+    assert.equal(liveFromStates(states, map, EMPTY_LIVE).rangeRoverTodayKwh, null);
+  });
+
+  it("prefers non-zero smart_plug today over Meross zero", () => {
+    const states: HaState[] = [
+      state("sensor.smart_plug_power", "0.8", "Range Rover Hybrid Power", "kW"),
+      state(
+        "sensor.smart_plug_today_s_consumption",
+        "3.4",
+        "Range Rover Hybrid Today's consumption",
+        "kWh",
+      ),
+      state(
+        "sensor.range_rover_hybrid_today_s_consumption",
+        "0",
+        "Range Rover Hybrid Today's consumption (Meross)",
+        "kWh",
+      ),
+    ];
+    const map = autoMap(states);
+    assert.equal(map.rangeRoverTodayKwh, "sensor.smart_plug_today_s_consumption");
+    assert.equal(liveFromStates(states, map, EMPTY_LIVE).rangeRoverTodayKwh, 3.4);
+  });
+
   it("maps Octopus Intelligent EV ready-by select and options", () => {
     const states: HaState[] = [
       state(
