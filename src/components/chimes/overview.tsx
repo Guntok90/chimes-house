@@ -1059,9 +1059,9 @@ function defaultGraph(): Box {
 
 /** Key weather readings — right side, above energy flow when possible. */
 function defaultWeather(): Box {
-  // Tall enough for lounge + gust + weekly rain with the rest of the key set.
-  const w = Math.min(380, window.innerWidth - 48);
-  const h = Math.min(520, window.innerHeight - 140);
+  // Tall enough for lounge hero + five paired rows (incl. rain week + pond pair).
+  const w = Math.min(400, window.innerWidth - 48);
+  const h = Math.min(560, window.innerHeight - 120);
   return {
     x: Math.max(24, window.innerWidth - w - 28),
     y: 96,

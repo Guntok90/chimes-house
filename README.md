@@ -57,7 +57,7 @@ Mapped when present (preferred ids first):
 | Cheap window    | Import Octopus off-peak binary only: preferred `binary_sensor.octopus_off_peak`, else `binary_sensor.octopus_energy_electricity_*_off_peak` (never automations / `input_*` / `export_off_peak`) — UI: Cheap/Peak badge, Cheap Energy Available |
 | EV Ready by     | `select.octopus_energy_<DEVICE_ID>_intelligent_target_time` (or `time.*_intelligent_target_time`) via `select.select_option` / `time.set_value` |
 | Stevie          | `person.stevie_w`                                                                |
-| Pond water °C   | `sensor.t_h_sensor_with_external_probe_probe_temperature` (external probe — Overview pond graphs; not ambient unit temp) |
+| Pond water °C   | `sensor.t_h_sensor_with_external_probe_probe_temperature` (external probe — Overview pond graphs Day/Week/Month/Year are **hourly** means; not ambient unit temp) |
 | Pond air °C     | `sensor.t_h_sensor_with_external_probe_temperature` (T&H body — Overview “Pond air temperature” series; HaMap key `gardenTempC`) |
 | Outdoor temp    | `sensor.hp2553ae_pro_v1_9_0_outdoor_temperature` (Ecowitt HP2553AE — Weather page + Overview overlay) |
 | Feels like      | `sensor.hp2553ae_pro_v1_9_0_feels_like_temperature` |
