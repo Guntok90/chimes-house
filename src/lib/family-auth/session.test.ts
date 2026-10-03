@@ -80,6 +80,14 @@ describe("family-auth session", () => {
     assert.equal(isPublicPath("/"), false);
     assert.equal(isPublicPath("/api/ha/bootstrap"), false);
     assert.equal(isPublicPath("/api/ha/live"), false);
+    // Guy inbox + MCP submit are public to the family gate (own auth inside).
+    assert.equal(isPublicPath("/inbox"), true);
+    assert.equal(isPublicPath("/api/inbox"), true);
+    assert.equal(isPublicPath("/api/inbox/login"), true);
+    assert.equal(isPublicPath("/api/inbox/images/img_abc"), true);
+    assert.equal(isPublicPath("/api/requests"), true);
+    // Dad form page still needs the family session.
+    assert.equal(isPublicPath("/request"), false);
     assert.equal(isAssetPath("/favicon.svg"), true);
     assert.equal(isAssetPath("/assets/index.js"), true);
     assert.equal(isAssetPath("/"), false);
