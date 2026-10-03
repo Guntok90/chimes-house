@@ -71,43 +71,45 @@ export function ChimesDashboard() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-paper text-ink">
-      <aside className="sidebar-wash relative z-30 hidden h-full w-72 shrink-0 flex-col gap-5 overflow-auto p-7 text-sidebar-fg md:flex">
-        <div className="flex items-start justify-between gap-3">
-          <Brand />
-          <OverviewButton onClick={() => setOverview(true)} />
-        </div>
-        <Clock />
-        <p className="text-sm text-sidebar-fg/80">
-          <Greeting />
-        </p>
-        <button
-          type="button"
-          onPointerDown={(event) => {
-            if (event.button === 0) setView("battery");
-          }}
-          onClick={() => setView("battery")}
-          className="text-left"
-        >
-          <BatteryCard />
-        </button>
-        <div className="rounded-md border border-sidebar-fg/15 bg-sidebar-fg/10 px-3.5 py-3">
-          <p className="mb-2 text-xs font-medium uppercase tracking-widest text-sidebar-fg/55">
-            Status
+      <aside className="sidebar-wash relative z-30 hidden h-full w-72 shrink-0 flex-col text-sidebar-fg md:flex">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto p-7 pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <Brand />
+            <OverviewButton onClick={() => setOverview(true)} />
+          </div>
+          <Clock />
+          <p className="text-sm text-sidebar-fg/80">
+            <Greeting />
           </p>
-          <StatusChips />
+          <button
+            type="button"
+            onPointerDown={(event) => {
+              if (event.button === 0) setView("battery");
+            }}
+            onClick={() => setView("battery")}
+            className="text-left"
+          >
+            <BatteryCard />
+          </button>
+          <div className="rounded-md border border-sidebar-fg/15 bg-sidebar-fg/10 px-3.5 py-3">
+            <p className="mb-2 text-xs font-medium uppercase tracking-widest text-sidebar-fg/55">
+              Status
+            </p>
+            <StatusChips />
+          </div>
+          <nav className="flex flex-col gap-1.5">
+            {NAV.map((item) => (
+              <NavButton
+                key={item.id}
+                active={view === item.id}
+                icon={item.icon}
+                label={item.label}
+                onClick={() => setView(item.id)}
+              />
+            ))}
+          </nav>
         </div>
-        <nav className="flex flex-col gap-1.5">
-          {NAV.map((item) => (
-            <NavButton
-              key={item.id}
-              active={view === item.id}
-              icon={item.icon}
-              label={item.label}
-              onClick={() => setView(item.id)}
-            />
-          ))}
-        </nav>
-        <div className="mt-auto pt-4">
+        <div className="shrink-0 border-t border-sidebar-fg/15 px-7 py-4">
           <RequestNavLink />
         </div>
       </aside>
