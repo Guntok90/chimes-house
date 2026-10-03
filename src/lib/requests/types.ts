@@ -1,3 +1,4 @@
+export type RequestKind = "bug" | "feature";
 export type RequestSource = "web" | "mcp";
 
 export type RequestImageInput = {
@@ -11,6 +12,8 @@ export type RequestImageInput = {
 };
 
 export type CreateRequestInput = {
+  /** Required: "bug" or "feature". */
+  kind: RequestKind;
   title: string;
   description: string;
   images?: RequestImageInput[];
@@ -26,6 +29,7 @@ export type StoredRequestImage = {
 
 export type StoredRequest = {
   id: string;
+  kind: RequestKind;
   title: string;
   description: string;
   source: RequestSource;
@@ -37,3 +41,11 @@ export const MAX_REQUEST_IMAGES = 6;
 export const MAX_IMAGE_BYTES = 4 * 1024 * 1024; // 4 MiB each
 export const MAX_TITLE_CHARS = 200;
 export const MAX_DESCRIPTION_CHARS = 8000;
+
+export function isRequestKind(value: unknown): value is RequestKind {
+  return value === "bug" || value === "feature";
+}
+
+export function requestKindLabel(kind: RequestKind): string {
+  return kind === "feature" ? "Feature" : "Bug";
+}

@@ -1,5 +1,6 @@
-import type { CreateRequestInput, RequestImageInput } from "./types.ts";
+import type { CreateRequestInput, RequestImageInput, RequestKind } from "./types.ts";
 import {
+  isRequestKind,
   MAX_DESCRIPTION_CHARS,
   MAX_IMAGE_BYTES,
   MAX_REQUEST_IMAGES,
@@ -15,6 +16,7 @@ export type ParsedImage = {
 export type ParseError = { ok: false; error: string; status: number };
 export type ParseOk = {
   ok: true;
+  kind: RequestKind;
   title: string;
   description: string;
   images: ParsedImage[];
@@ -159,6 +161,14 @@ export async function parseCreateRequestBody(
     return { ok: false, error: "Expected JSON body", status: 400 };
   }
   const input = body as CreateRequestInput;
+  if (!isRequestKind(input.kind)) {
+    return {
+      ok: false,
+      error: 'kind is required ("bug" or "feature")',
+      status: 400,
+    };
+  }
+  const kind = input.kind;
   const title = typeof input.title === "string" ? input.title.trim() : "";
   const description =
     typeof input.description === "string" ? input.description.trim() : "";
@@ -205,5 +215,5 @@ export async function parseCreateRequestBody(
     return { ok: false, error: inline.error, status: 400 };
   }
 
-  return { ok: true, title, description, images };
+  return { ok: true, kind, title, description, images };
 }

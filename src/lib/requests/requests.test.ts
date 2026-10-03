@@ -75,18 +75,39 @@ describe("inbox auth", () => {
 });
 
 describe("request parse", () => {
-  it("requires title and description", async () => {
-    const missing = await parseCreateRequestBody({ title: "", description: "x" });
+  it("requires kind, title and description", async () => {
+    const missingKind = await parseCreateRequestBody({
+      title: "x",
+      description: "y",
+    });
+    assert.equal(missingKind.ok, false);
+    const missing = await parseCreateRequestBody({
+      kind: "bug",
+      title: "",
+      description: "x",
+    });
     assert.equal(missing.ok, false);
     const ok = await parseCreateRequestBody({
+      kind: "bug",
       title: "Battery tile blank",
       description: "On the iPad overview the SOC stays at —",
     });
     assert.equal(ok.ok, true);
     if (ok.ok) {
+      assert.equal(ok.kind, "bug");
       assert.equal(ok.title, "Battery tile blank");
       assert.equal(ok.images.length, 0);
     }
+  });
+
+  it("accepts feature kind", async () => {
+    const ok = await parseCreateRequestBody({
+      kind: "feature",
+      title: "Show EV Ready by on Home",
+      description: "Would help Dad glance at the target time without opening Charge.",
+    });
+    assert.equal(ok.ok, true);
+    if (ok.ok) assert.equal(ok.kind, "feature");
   });
 
   it("parses a tiny PNG data URL", async () => {
@@ -103,6 +124,7 @@ describe("request parse", () => {
     }
 
     const body = await parseCreateRequestBody({
+      kind: "bug",
       title: "With shot",
       description: "See image",
       images: [{ data: `data:image/png;base64,${png}` }],
