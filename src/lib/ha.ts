@@ -2841,16 +2841,22 @@ export class HaSocket {
     start: string,
     end: string,
     period: "hour" | "day" | "month" = "day",
+    /** Dense period:hour windows (pond Month/Year) need longer than the 20s default. */
+    timeoutMs = 20_000,
   ) {
     if (!statisticIds.length || !this.ws) return {};
     try {
-      return await this.send("recorder/statistics_during_period", {
-        start_time: start,
-        end_time: end,
-        statistic_ids: statisticIds,
-        period,
-        types: ["change", "state", "mean", "sum"],
-      });
+      return await this.send(
+        "recorder/statistics_during_period",
+        {
+          start_time: start,
+          end_time: end,
+          statistic_ids: statisticIds,
+          period,
+          types: ["change", "state", "mean", "sum"],
+        },
+        timeoutMs,
+      );
     } catch {
       return {};
     }

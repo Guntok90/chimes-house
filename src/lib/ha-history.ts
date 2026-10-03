@@ -605,6 +605,10 @@ export function tempsFromHistory(
  *
  * Labels are `HH:00` for a single day (count ≤ 24); multi-day ranges include
  * a short weekday so Week / Month / Year stay readable while scrolling.
+ *
+ * Uses a Map keyed by local hour — never `rows.find` per slot. A year-scale
+ * hour series (~2k–8k rows) with O(n²) find froze Live Overview charts after
+ * #57 (main thread stuck; historyStatus stayed "loading").
  */
 export function tempsFromHourStatistics(
   stats: HaStatisticsBag,
@@ -612,9 +616,15 @@ export function tempsFromHourStatistics(
   count: number,
   now = new Date(),
 ): TempPoint[] {
-  if (!entityId) return [];
+  if (!entityId || count <= 0) return [];
   const rows = stats[entityId];
   if (!rows?.length) return [];
+
+  const byHour = new Map<string, HaStatRow>();
+  for (const row of rows) {
+    const key = hourKeyFromStart(row.start);
+    if (key) byHour.set(key, row);
+  }
 
   const out: TempPoint[] = [];
   const end = new Date(now);
@@ -624,8 +634,7 @@ export function tempsFromHourStatistics(
     const t = new Date(end);
     t.setHours(end.getHours() - i);
     const key = localHourKey(t);
-    const row = rows.find((r) => hourKeyFromStart(r.start) === key);
-    const tempC = tempMeanC(row);
+    const tempC = tempMeanC(byHour.get(key));
     if (tempC == null) continue;
     out.push({
       key,

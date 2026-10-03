@@ -26,7 +26,7 @@ import {
   type HaStatisticsBag,
 } from "./ha-history.ts";
 import type { HaMap } from "./ha.ts";
-import type { HourPoint, TempPoint } from "./house.ts";
+import { POND_TEMP_YEAR, type HourPoint, type TempPoint } from "./house.ts";
 import { DEFAULT_TARIFF } from "./octopus.ts";
 
 describe("ha history helpers", () => {
@@ -636,6 +636,28 @@ describe("ha history helpers", () => {
     assert.match(week[0].label, /\d{2}:00$/);
     assert.match(week[0].label, /[A-Za-z]/); // weekday prefix
     assert.equal(week[week.length - 1].label.endsWith("18:00"), true);
+  });
+
+  it("tempsFromHourStatistics stays O(n) on year-scale hour series", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const now = new Date(2026, 8, 23, 18, 0, 0, 0);
+    // Live pond Year matches demo cap (~90 days of hours), not 365×24.
+    const count = POND_TEMP_YEAR.length;
+    assert.equal(count, 90 * 24);
+    const rows = [];
+    for (let i = count - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setHours(now.getHours() - i, 0, 0, 0);
+      rows.push({ start: d.getTime(), mean: 11 + (i % 11) * 0.05, change: 0 });
+    }
+    const stats: HaStatisticsBag = { [probe]: rows };
+    const t0 = Date.now();
+    const year = tempsFromHourStatistics(stats, probe, count, now);
+    const ms = Date.now() - t0;
+    assert.equal(year.length, count);
+    // Map lookup must finish in well under a second (O(n²) find was ~18s+).
+    assert.ok(ms < 2000, `tempsFromHourStatistics took ${ms}ms`);
+    assert.equal(year[year.length - 1].label.endsWith("18:00"), true);
   });
 
   it("todayKwhFromPowerHourStats sums today’s hour means (kW or W)", () => {
