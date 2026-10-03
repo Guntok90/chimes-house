@@ -10,11 +10,14 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BugRouteImport } from './routes/bug'
+import { Route as FeatureRouteImport } from './routes/feature'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RequestRouteImport } from './routes/request'
 import { Route as ApiLoginRouteImport } from './routes/api/login'
 import { Route as ApiLogoutRouteImport } from './routes/api/logout'
+import { Route as ApiMcpRouteImport } from './routes/api/mcp'
 import { Route as ApiRequestsRouteImport } from './routes/api/requests'
 import { Route as ApiHaBootstrapRouteImport } from './routes/api/ha/bootstrap'
 import { Route as ApiHaLiveRouteImport } from './routes/api/ha/live'
@@ -27,6 +30,16 @@ import { Route as ApiInboxImagesImageIdRouteImport } from './routes/api/inbox/im
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BugRoute = BugRouteImport.update({
+  id: '/bug',
+  path: '/bug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeatureRoute = FeatureRouteImport.update({
+  id: '/feature',
+  path: '/feature',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InboxRoute = InboxRouteImport.update({
@@ -52,6 +65,11 @@ const ApiLoginRoute = ApiLoginRouteImport.update({
 const ApiLogoutRoute = ApiLogoutRouteImport.update({
   id: '/api/logout',
   path: '/api/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMcpRoute = ApiMcpRouteImport.update({
+  id: '/api/mcp',
+  path: '/api/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiRequestsRoute = ApiRequestsRouteImport.update({
@@ -97,11 +115,14 @@ const ApiInboxImagesImageIdRoute = ApiInboxImagesImageIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bug': typeof BugRoute
+  '/feature': typeof FeatureRoute
   '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
   '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
@@ -113,11 +134,14 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bug': typeof BugRoute
+  '/feature': typeof FeatureRoute
   '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
   '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
@@ -130,11 +154,14 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bug': typeof BugRoute
+  '/feature': typeof FeatureRoute
   '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
   '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
@@ -148,11 +175,14 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/bug'
+    | '/feature'
     | '/inbox'
     | '/login'
     | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/mcp'
     | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
@@ -164,11 +194,14 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/bug'
+    | '/feature'
     | '/inbox'
     | '/login'
     | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/mcp'
     | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
@@ -180,11 +213,14 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/bug'
+    | '/feature'
     | '/inbox'
     | '/login'
     | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/mcp'
     | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
@@ -197,11 +233,14 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BugRoute: typeof BugRoute
+  FeatureRoute: typeof FeatureRoute
   InboxRoute: typeof InboxRoute
   LoginRoute: typeof LoginRoute
   RequestRoute: typeof RequestRoute
   ApiLoginRoute: typeof ApiLoginRoute
   ApiLogoutRoute: typeof ApiLogoutRoute
+  ApiMcpRoute: typeof ApiMcpRoute
   ApiRequestsRoute: typeof ApiRequestsRoute
   ApiHaBootstrapRoute: typeof ApiHaBootstrapRoute
   ApiHaLiveRoute: typeof ApiHaLiveRoute
@@ -219,6 +258,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bug': {
+      id: '/bug'
+      path: '/bug'
+      fullPath: '/bug'
+      preLoaderRoute: typeof BugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feature': {
+      id: '/feature'
+      path: '/feature'
+      fullPath: '/feature'
+      preLoaderRoute: typeof FeatureRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inbox': {
@@ -254,6 +307,13 @@ declare module '@tanstack/react-router' {
       path: '/api/logout'
       fullPath: '/api/logout'
       preLoaderRoute: typeof ApiLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mcp': {
+      id: '/api/mcp'
+      path: '/api/mcp'
+      fullPath: '/api/mcp'
+      preLoaderRoute: typeof ApiMcpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/requests': {
@@ -317,11 +377,14 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BugRoute: BugRoute,
+  FeatureRoute: FeatureRoute,
   InboxRoute: InboxRoute,
   LoginRoute: LoginRoute,
   RequestRoute: RequestRoute,
   ApiLoginRoute: ApiLoginRoute,
   ApiLogoutRoute: ApiLogoutRoute,
+  ApiMcpRoute: ApiMcpRoute,
   ApiRequestsRoute: ApiRequestsRoute,
   ApiHaBootstrapRoute: ApiHaBootstrapRoute,
   ApiHaLiveRoute: ApiHaLiveRoute,
@@ -334,3 +397,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

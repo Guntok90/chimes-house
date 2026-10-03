@@ -5,8 +5,10 @@ CREATE TABLE IF NOT EXISTS house_requests (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   description TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'bug',
   source TEXT NOT NULL DEFAULT 'web',
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT house_requests_kind_check CHECK (kind IN ('bug', 'feature'))
 );
 
 CREATE INDEX IF NOT EXISTS house_requests_created_at_idx
