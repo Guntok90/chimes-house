@@ -1,8 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
-import { Inbox, Lock, LogOut } from "lucide-react";
+import { Bug, Inbox, Lightbulb, Lock, LogOut } from "lucide-react";
 import { PageTitle, Surface } from "@/components/chimes/ui";
-import type { StoredRequest } from "@/lib/requests/types";
+import {
+  requestKindLabel,
+  type StoredRequest,
+} from "@/lib/requests/types";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/inbox")({
   head: () => ({
@@ -206,7 +210,7 @@ function InboxPage() {
                 <Inbox className="mx-auto size-8 text-teal/70" strokeWidth={1.5} />
                 <p className="mt-3 text-base font-medium">No requests yet</p>
                 <p className="mt-1 text-sm text-ink-soft">
-                  When Dad submits a bug or idea, it shows up here.
+                  When Dad submits a bug or a feature request, it shows up here.
                 </p>
               </Surface>
             ) : (
@@ -214,17 +218,32 @@ function InboxPage() {
                 {requests.map((item) => (
                   <li key={item.id}>
                     <Surface className="overflow-hidden p-5 md:p-6" tone="sand">
-                      <div className="flex flex-wrap items-baseline justify-between gap-2">
-                        <h2 className="text-lg font-semibold tracking-tight">
-                          {item.title}
-                        </h2>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-widest",
+                            item.kind === "feature"
+                              ? "bg-teal/15 text-teal"
+                              : "bg-terra/15 text-terra",
+                          )}
+                        >
+                          {item.kind === "feature" ? (
+                            <Lightbulb className="size-3" strokeWidth={2} />
+                          ) : (
+                            <Bug className="size-3" strokeWidth={2} />
+                          )}
+                          {requestKindLabel(item.kind)}
+                        </span>
                         <time
                           dateTime={item.createdAt}
-                          className="text-xs uppercase tracking-widest text-ink-soft"
+                          className="ml-auto text-xs uppercase tracking-widest text-ink-soft"
                         >
                           {formatWhen(item.createdAt)}
                         </time>
                       </div>
+                      <h2 className="mt-3 text-lg font-semibold tracking-tight">
+                        {item.title}
+                      </h2>
                       <p className="mt-1 text-xs uppercase tracking-widest text-umber/70">
                         via {item.source === "mcp" ? "MCP" : "web form"}
                       </p>

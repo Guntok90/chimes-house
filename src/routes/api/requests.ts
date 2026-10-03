@@ -18,13 +18,13 @@ function json(body: unknown, status = 200) {
 }
 
 /**
- * Create a bug / feature request.
+ * Create a bug or feature request.
  *
  * Auth (either):
- * - Family session cookie (Dad’s web form at /request)
+ * - Family session cookie (Dad’s web forms at /bug and /feature)
  * - `Authorization: Bearer <CHIMES_REQUEST_API_TOKEN>` (Dad’s house MCP)
  *
- * Body: `{ title, description, images?: [{ data, mimeType? }] }`
+ * Body: `{ kind: "bug"|"feature", title, description, images?: [{ data, mimeType? }] }`
  * `data` may be a data URL, raw base64 (+ mimeType), or an http(s) image URL.
  */
 export const Route = createFileRoute("/api/requests")({
@@ -65,6 +65,7 @@ export const Route = createFileRoute("/api/requests")({
 
         try {
           const stored = await createHouseRequest({
+            kind: parsed.kind,
             title: parsed.title,
             description: parsed.description,
             images: parsed.images,

@@ -10,6 +10,8 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as BugRouteImport } from './routes/bug'
+import { Route as FeatureRouteImport } from './routes/feature'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as RequestRouteImport } from './routes/request'
@@ -27,6 +29,16 @@ import { Route as ApiInboxImagesImageIdRouteImport } from './routes/api/inbox/im
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BugRoute = BugRouteImport.update({
+  id: '/bug',
+  path: '/bug',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const FeatureRoute = FeatureRouteImport.update({
+  id: '/feature',
+  path: '/feature',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InboxRoute = InboxRouteImport.update({
@@ -97,6 +109,8 @@ const ApiInboxImagesImageIdRoute = ApiInboxImagesImageIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/bug': typeof BugRoute
+  '/feature': typeof FeatureRoute
   '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
   '/request': typeof RequestRoute
@@ -113,6 +127,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/bug': typeof BugRoute
+  '/feature': typeof FeatureRoute
   '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
   '/request': typeof RequestRoute
@@ -130,6 +146,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/bug': typeof BugRoute
+  '/feature': typeof FeatureRoute
   '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
   '/request': typeof RequestRoute
@@ -148,6 +166,8 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/bug'
+    | '/feature'
     | '/inbox'
     | '/login'
     | '/request'
@@ -164,6 +184,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/bug'
+    | '/feature'
     | '/inbox'
     | '/login'
     | '/request'
@@ -180,6 +202,8 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/bug'
+    | '/feature'
     | '/inbox'
     | '/login'
     | '/request'
@@ -197,6 +221,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  BugRoute: typeof BugRoute
+  FeatureRoute: typeof FeatureRoute
   InboxRoute: typeof InboxRoute
   LoginRoute: typeof LoginRoute
   RequestRoute: typeof RequestRoute
@@ -219,6 +245,20 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/bug': {
+      id: '/bug'
+      path: '/bug'
+      fullPath: '/bug'
+      preLoaderRoute: typeof BugRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/feature': {
+      id: '/feature'
+      path: '/feature'
+      fullPath: '/feature'
+      preLoaderRoute: typeof FeatureRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/inbox': {
@@ -317,6 +357,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  BugRoute: BugRoute,
+  FeatureRoute: FeatureRoute,
   InboxRoute: InboxRoute,
   LoginRoute: LoginRoute,
   RequestRoute: RequestRoute,
@@ -334,3 +376,13 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}
