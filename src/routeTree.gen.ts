@@ -10,21 +10,38 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as RequestRouteImport } from './routes/request'
 import { Route as ApiLoginRouteImport } from './routes/api/login'
 import { Route as ApiLogoutRouteImport } from './routes/api/logout'
+import { Route as ApiRequestsRouteImport } from './routes/api/requests'
 import { Route as ApiHaBootstrapRouteImport } from './routes/api/ha/bootstrap'
 import { Route as ApiHaLiveRouteImport } from './routes/api/ha/live'
 import { Route as ApiHaStatesRouteImport } from './routes/api/ha/states'
+import { Route as ApiInboxIndexRouteImport } from './routes/api/inbox/index'
+import { Route as ApiInboxLoginRouteImport } from './routes/api/inbox/login'
+import { Route as ApiInboxLogoutRouteImport } from './routes/api/inbox/logout'
+import { Route as ApiInboxImagesImageIdRouteImport } from './routes/api/inbox/images/$imageId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const InboxRoute = InboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RequestRoute = RequestRouteImport.update({
+  id: '/request',
+  path: '/request',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiLoginRoute = ApiLoginRouteImport.update({
@@ -35,6 +52,11 @@ const ApiLoginRoute = ApiLoginRouteImport.update({
 const ApiLogoutRoute = ApiLogoutRouteImport.update({
   id: '/api/logout',
   path: '/api/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiRequestsRoute = ApiRequestsRouteImport.update({
+  id: '/api/requests',
+  path: '/api/requests',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiHaBootstrapRoute = ApiHaBootstrapRouteImport.update({
@@ -52,73 +74,142 @@ const ApiHaStatesRoute = ApiHaStatesRouteImport.update({
   path: '/api/ha/states',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiInboxIndexRoute = ApiInboxIndexRouteImport.update({
+  id: '/api/inbox/',
+  path: '/api/inbox/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiInboxLoginRoute = ApiInboxLoginRouteImport.update({
+  id: '/api/inbox/login',
+  path: '/api/inbox/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiInboxLogoutRoute = ApiInboxLogoutRouteImport.update({
+  id: '/api/inbox/logout',
+  path: '/api/inbox/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiInboxImagesImageIdRoute = ApiInboxImagesImageIdRouteImport.update({
+  id: '/api/inbox/images/$imageId',
+  path: '/api/inbox/images/$imageId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
+  '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
   '/api/ha/states': typeof ApiHaStatesRoute
+  '/api/inbox/login': typeof ApiInboxLoginRoute
+  '/api/inbox/logout': typeof ApiInboxLogoutRoute
+  '/api/inbox/': typeof ApiInboxIndexRoute
+  '/api/inbox/images/$imageId': typeof ApiInboxImagesImageIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
+  '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
   '/api/ha/states': typeof ApiHaStatesRoute
+  '/api/inbox/login': typeof ApiInboxLoginRoute
+  '/api/inbox/logout': typeof ApiInboxLogoutRoute
+  '/api/inbox': typeof ApiInboxIndexRoute
+  '/api/inbox/images/$imageId': typeof ApiInboxImagesImageIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/inbox': typeof InboxRoute
   '/login': typeof LoginRoute
+  '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
   '/api/ha/states': typeof ApiHaStatesRoute
+  '/api/inbox/login': typeof ApiInboxLoginRoute
+  '/api/inbox/logout': typeof ApiInboxLogoutRoute
+  '/api/inbox/': typeof ApiInboxIndexRoute
+  '/api/inbox/images/$imageId': typeof ApiInboxImagesImageIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/inbox'
     | '/login'
+    | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
     | '/api/ha/states'
+    | '/api/inbox/login'
+    | '/api/inbox/logout'
+    | '/api/inbox/'
+    | '/api/inbox/images/$imageId'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/inbox'
     | '/login'
+    | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
     | '/api/ha/states'
+    | '/api/inbox/login'
+    | '/api/inbox/logout'
+    | '/api/inbox'
+    | '/api/inbox/images/$imageId'
   id:
     | '__root__'
     | '/'
+    | '/inbox'
     | '/login'
+    | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
     | '/api/ha/states'
+    | '/api/inbox/login'
+    | '/api/inbox/logout'
+    | '/api/inbox/'
+    | '/api/inbox/images/$imageId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  InboxRoute: typeof InboxRoute
   LoginRoute: typeof LoginRoute
+  RequestRoute: typeof RequestRoute
   ApiLoginRoute: typeof ApiLoginRoute
   ApiLogoutRoute: typeof ApiLogoutRoute
+  ApiRequestsRoute: typeof ApiRequestsRoute
   ApiHaBootstrapRoute: typeof ApiHaBootstrapRoute
   ApiHaLiveRoute: typeof ApiHaLiveRoute
   ApiHaStatesRoute: typeof ApiHaStatesRoute
+  ApiInboxLoginRoute: typeof ApiInboxLoginRoute
+  ApiInboxLogoutRoute: typeof ApiInboxLogoutRoute
+  ApiInboxIndexRoute: typeof ApiInboxIndexRoute
+  ApiInboxImagesImageIdRoute: typeof ApiInboxImagesImageIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -130,11 +221,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/inbox': {
+      id: '/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/request': {
+      id: '/request'
+      path: '/request'
+      fullPath: '/request'
+      preLoaderRoute: typeof RequestRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/login': {
@@ -149,6 +254,13 @@ declare module '@tanstack/react-router' {
       path: '/api/logout'
       fullPath: '/api/logout'
       preLoaderRoute: typeof ApiLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/requests': {
+      id: '/api/requests'
+      path: '/api/requests'
+      fullPath: '/api/requests'
+      preLoaderRoute: typeof ApiRequestsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/ha/bootstrap': {
@@ -172,28 +284,53 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiHaStatesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/inbox/': {
+      id: '/api/inbox/'
+      path: '/api/inbox'
+      fullPath: '/api/inbox/'
+      preLoaderRoute: typeof ApiInboxIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/inbox/login': {
+      id: '/api/inbox/login'
+      path: '/api/inbox/login'
+      fullPath: '/api/inbox/login'
+      preLoaderRoute: typeof ApiInboxLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/inbox/logout': {
+      id: '/api/inbox/logout'
+      path: '/api/inbox/logout'
+      fullPath: '/api/inbox/logout'
+      preLoaderRoute: typeof ApiInboxLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/inbox/images/$imageId': {
+      id: '/api/inbox/images/$imageId'
+      path: '/api/inbox/images/$imageId'
+      fullPath: '/api/inbox/images/$imageId'
+      preLoaderRoute: typeof ApiInboxImagesImageIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  InboxRoute: InboxRoute,
   LoginRoute: LoginRoute,
+  RequestRoute: RequestRoute,
   ApiLoginRoute: ApiLoginRoute,
   ApiLogoutRoute: ApiLogoutRoute,
+  ApiRequestsRoute: ApiRequestsRoute,
   ApiHaBootstrapRoute: ApiHaBootstrapRoute,
   ApiHaLiveRoute: ApiHaLiveRoute,
   ApiHaStatesRoute: ApiHaStatesRoute,
+  ApiInboxLoginRoute: ApiInboxLoginRoute,
+  ApiInboxLogoutRoute: ApiInboxLogoutRoute,
+  ApiInboxIndexRoute: ApiInboxIndexRoute,
+  ApiInboxImagesImageIdRoute: ApiInboxImagesImageIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

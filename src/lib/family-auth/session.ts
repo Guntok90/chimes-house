@@ -13,6 +13,12 @@ const PUBLIC_EXACT = new Set([
   "/login",
   "/api/login",
   "/api/logout",
+  // Guy inbox — own password gate (GUY_INBOX_PASSWORD); not linked from Dad UI.
+  "/inbox",
+  "/api/inbox/login",
+  "/api/inbox/logout",
+  // MCP + form submit: auth is family cookie OR Bearer CHIMES_REQUEST_API_TOKEN.
+  "/api/requests",
 ]);
 
 const PUBLIC_PREFIXES = [
@@ -29,6 +35,8 @@ const PUBLIC_PREFIXES = [
 export function isPublicPath(pathname: string): boolean {
   if (!pathname) return false;
   if (PUBLIC_EXACT.has(pathname)) return true;
+  // Inbox image + list APIs — gated by Guy inbox cookie inside the handlers.
+  if (pathname === "/api/inbox" || pathname.startsWith("/api/inbox/")) return true;
   // Leave Better Auth scaffold reachable without breaking the build.
   if (pathname === "/api/auth" || pathname.startsWith("/api/auth/")) return true;
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));

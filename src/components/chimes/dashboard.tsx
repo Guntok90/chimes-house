@@ -12,6 +12,7 @@ import {
   Lamp,
   Leaf,
   Lightbulb,
+  MessageSquarePlus,
   Plug,
   Sun,
   Tv,
@@ -20,6 +21,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { HOURS, usesDemoCharts } from "@/lib/house";
 import { lastHoursWindow } from "@/lib/ha-history";
@@ -69,42 +71,47 @@ export function ChimesDashboard() {
 
   return (
     <div className="flex h-dvh overflow-hidden bg-paper text-ink">
-      <aside className="sidebar-wash relative z-30 hidden w-72 shrink-0 flex-col gap-5 overflow-auto p-7 text-sidebar-fg md:flex">
-        <div className="flex items-start justify-between gap-3">
-          <Brand />
-          <OverviewButton onClick={() => setOverview(true)} />
-        </div>
-        <Clock />
-        <p className="text-sm text-sidebar-fg/80">
-          <Greeting />
-        </p>
-        <button
-          type="button"
-          onPointerDown={(event) => {
-            if (event.button === 0) setView("battery");
-          }}
-          onClick={() => setView("battery")}
-          className="text-left"
-        >
-          <BatteryCard />
-        </button>
-        <div className="rounded-md border border-sidebar-fg/15 bg-sidebar-fg/10 px-3.5 py-3">
-          <p className="mb-2 text-xs font-medium uppercase tracking-widest text-sidebar-fg/55">
-            Status
+      <aside className="sidebar-wash relative z-30 hidden h-full w-72 shrink-0 flex-col text-sidebar-fg md:flex">
+        <div className="flex min-h-0 flex-1 flex-col gap-5 overflow-auto p-7 pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <Brand />
+            <OverviewButton onClick={() => setOverview(true)} />
+          </div>
+          <Clock />
+          <p className="text-sm text-sidebar-fg/80">
+            <Greeting />
           </p>
-          <StatusChips />
+          <button
+            type="button"
+            onPointerDown={(event) => {
+              if (event.button === 0) setView("battery");
+            }}
+            onClick={() => setView("battery")}
+            className="text-left"
+          >
+            <BatteryCard />
+          </button>
+          <div className="rounded-md border border-sidebar-fg/15 bg-sidebar-fg/10 px-3.5 py-3">
+            <p className="mb-2 text-xs font-medium uppercase tracking-widest text-sidebar-fg/55">
+              Status
+            </p>
+            <StatusChips />
+          </div>
+          <nav className="flex flex-col gap-1.5">
+            {NAV.map((item) => (
+              <NavButton
+                key={item.id}
+                active={view === item.id}
+                icon={item.icon}
+                label={item.label}
+                onClick={() => setView(item.id)}
+              />
+            ))}
+          </nav>
         </div>
-        <nav className="flex flex-col gap-1.5">
-          {NAV.map((item) => (
-            <NavButton
-              key={item.id}
-              active={view === item.id}
-              icon={item.icon}
-              label={item.label}
-              onClick={() => setView(item.id)}
-            />
-          ))}
-        </nav>
+        <div className="shrink-0 border-t border-sidebar-fg/15 px-7 py-4">
+          <RequestNavLink />
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -112,6 +119,7 @@ export function ChimesDashboard() {
           <Brand compact />
           <div className="flex items-center gap-2">
             <Clock compact />
+            <RequestNavLink compact />
             <OverviewButton onClick={() => setOverview(true)} compact />
           </div>
         </header>
@@ -173,6 +181,31 @@ function OverviewButton({ onClick, compact = false }: { onClick: () => void; com
     >
       <Maximize2 className={compact ? "size-4" : "size-5"} strokeWidth={1.7} />
     </button>
+  );
+}
+
+/** Dad → /request form. Never link /inbox from here (Guy-only). */
+function RequestNavLink({ compact = false }: { compact?: boolean }) {
+  if (compact) {
+    return (
+      <Link
+        to="/request"
+        aria-label="Bug / idea"
+        title="Bug / idea"
+        className="grid size-10 shrink-0 place-items-center rounded-md border border-line bg-paper-deep text-teal"
+      >
+        <MessageSquarePlus className="size-4" strokeWidth={1.7} />
+      </Link>
+    );
+  }
+  return (
+    <Link
+      to="/request"
+      className="flex w-full items-center gap-3 rounded-md border border-sidebar-fg/20 bg-sidebar-fg/10 px-3.5 py-3 text-sm font-medium text-sidebar-fg transition-colors hover:bg-sidebar-fg/15"
+    >
+      <MessageSquarePlus className="size-5 shrink-0" strokeWidth={1.7} />
+      Bug / idea
+    </Link>
   );
 }
 
