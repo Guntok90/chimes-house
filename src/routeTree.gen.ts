@@ -17,6 +17,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as RequestRouteImport } from './routes/request'
 import { Route as ApiLoginRouteImport } from './routes/api/login'
 import { Route as ApiLogoutRouteImport } from './routes/api/logout'
+import { Route as ApiMcpRouteImport } from './routes/api/mcp'
 import { Route as ApiRequestsRouteImport } from './routes/api/requests'
 import { Route as ApiHaBootstrapRouteImport } from './routes/api/ha/bootstrap'
 import { Route as ApiHaLiveRouteImport } from './routes/api/ha/live'
@@ -64,6 +65,11 @@ const ApiLoginRoute = ApiLoginRouteImport.update({
 const ApiLogoutRoute = ApiLogoutRouteImport.update({
   id: '/api/logout',
   path: '/api/logout',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMcpRoute = ApiMcpRouteImport.update({
+  id: '/api/mcp',
+  path: '/api/mcp',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiRequestsRoute = ApiRequestsRouteImport.update({
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/request': typeof RequestRoute
   '/api/login': typeof ApiLoginRoute
   '/api/logout': typeof ApiLogoutRoute
+  '/api/mcp': typeof ApiMcpRoute
   '/api/requests': typeof ApiRequestsRoute
   '/api/ha/bootstrap': typeof ApiHaBootstrapRoute
   '/api/ha/live': typeof ApiHaLiveRoute
@@ -173,6 +182,7 @@ export interface FileRouteTypes {
     | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/mcp'
     | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
@@ -191,6 +201,7 @@ export interface FileRouteTypes {
     | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/mcp'
     | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/request'
     | '/api/login'
     | '/api/logout'
+    | '/api/mcp'
     | '/api/requests'
     | '/api/ha/bootstrap'
     | '/api/ha/live'
@@ -228,6 +240,7 @@ export interface RootRouteChildren {
   RequestRoute: typeof RequestRoute
   ApiLoginRoute: typeof ApiLoginRoute
   ApiLogoutRoute: typeof ApiLogoutRoute
+  ApiMcpRoute: typeof ApiMcpRoute
   ApiRequestsRoute: typeof ApiRequestsRoute
   ApiHaBootstrapRoute: typeof ApiHaBootstrapRoute
   ApiHaLiveRoute: typeof ApiHaLiveRoute
@@ -294,6 +307,13 @@ declare module '@tanstack/react-router' {
       path: '/api/logout'
       fullPath: '/api/logout'
       preLoaderRoute: typeof ApiLogoutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/mcp': {
+      id: '/api/mcp'
+      path: '/api/mcp'
+      fullPath: '/api/mcp'
+      preLoaderRoute: typeof ApiMcpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/requests': {
@@ -364,6 +384,7 @@ const rootRouteChildren: RootRouteChildren = {
   RequestRoute: RequestRoute,
   ApiLoginRoute: ApiLoginRoute,
   ApiLogoutRoute: ApiLogoutRoute,
+  ApiMcpRoute: ApiMcpRoute,
   ApiRequestsRoute: ApiRequestsRoute,
   ApiHaBootstrapRoute: ApiHaBootstrapRoute,
   ApiHaLiveRoute: ApiHaLiveRoute,

@@ -19,6 +19,8 @@ const PUBLIC_EXACT = new Set([
   "/api/inbox/logout",
   // MCP + form submit: auth is family cookie OR Bearer CHIMES_REQUEST_API_TOKEN.
   "/api/requests",
+  // Streamable HTTP MCP (submit_bug / submit_feature) — Bearer token inside handler.
+  "/api/mcp",
 ]);
 
 const PUBLIC_PREFIXES = [

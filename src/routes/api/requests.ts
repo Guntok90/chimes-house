@@ -22,8 +22,9 @@ function json(body: unknown, status = 200) {
  *
  * Auth (either):
  * - Family session cookie (Dad’s web forms at /bug and /feature)
- * - `Authorization: Bearer <CHIMES_REQUEST_API_TOKEN>` (Dad’s house MCP)
+ * - `Authorization: Bearer <CHIMES_REQUEST_API_TOKEN>` (Dad’s house MCP / REST)
  *
+ * Prefer MCP tools `submit_bug` / `submit_feature` at `/api/mcp`.
  * Body: `{ kind: "bug"|"feature", title, description, images?: [{ data, mimeType? }] }`
  * `data` may be a data URL, raw base64 (+ mimeType), or an http(s) image URL.
  */

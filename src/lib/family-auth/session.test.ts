@@ -86,6 +86,7 @@ describe("family-auth session", () => {
     assert.equal(isPublicPath("/api/inbox/login"), true);
     assert.equal(isPublicPath("/api/inbox/images/img_abc"), true);
     assert.equal(isPublicPath("/api/requests"), true);
+    assert.equal(isPublicPath("/api/mcp"), true);
     // Dad form pages still need the family session.
     assert.equal(isPublicPath("/request"), false);
     assert.equal(isPublicPath("/bug"), false);
