@@ -32,6 +32,7 @@ import {
   GLASS_OPACITY_MIN,
   OVERVIEW_FLOW_BOX_KEY,
   OVERVIEW_GRAPH_BOX_KEY,
+  OVERVIEW_HEAT_BOX_KEY,
   OVERVIEW_POND_BOX_KEY,
   OVERVIEW_WEATHER_BOX_KEY,
   clampGlassOpacity,
@@ -46,6 +47,7 @@ import {
   boxesNearlyEqual,
   type OverviewBox,
 } from "@/lib/overview-glass";
+import { heatingForScreen, nestAmbientBadge } from "@/lib/heating";
 import { cn } from "@/lib/utils";
 import {
   DEMO_WEATHER,
@@ -62,6 +64,7 @@ import {
   PondTempChart,
 } from "./charts";
 import { EnergyFlow } from "./energy-flow";
+import { NestAmbientFace } from "./heating-view";
 import { NoHistoryYet } from "./no-history";
 
 type Box = OverviewBox;
@@ -169,6 +172,9 @@ export function Overview({ onClose }: { onClose: () => void }) {
   const live = useLive();
   const liveWeather = useWeather();
   const status = useHouse((s) => s.status);
+  const heatingStored = useHouse((s) => s.heating);
+  const heating = heatingForScreen(status, heatingStored);
+  const nestBadge = nestAmbientBadge(heating);
   const weather = usesDemoCharts(status) ? DEMO_WEATHER : liveWeather;
   const stacked = useStackedOverview();
 
@@ -309,6 +315,9 @@ export function Overview({ onClose }: { onClose: () => void }) {
           <StackedTile title="Weather" badge={weatherBadge} tall="chart" style={tileStyle}>
             <OverviewWeatherPanel weather={weather} />
           </StackedTile>
+          <StackedTile title="Nest" badge={nestBadge} tall="glance" style={tileStyle}>
+            <NestAmbientFace heating={heating} />
+          </StackedTile>
           <StackedTile
             title="Fish pond water temp"
             badge={pondBadge}
@@ -345,6 +354,18 @@ export function Overview({ onClose }: { onClose: () => void }) {
             onGrabChange={setTileGrabbing}
           >
             <OverviewWeatherPanel weather={weather} />
+          </GlassTile>
+
+          <GlassTile
+            storageKey={OVERVIEW_HEAT_BOX_KEY}
+            title="Nest"
+            badge={nestBadge}
+            handleOnly
+            fallback={defaultHeat}
+            style={tileStyle}
+            onGrabChange={setTileGrabbing}
+          >
+            <NestAmbientFace heating={heating} />
           </GlassTile>
 
           <GlassTile
@@ -443,7 +464,7 @@ function StackedTile({
   title: string;
   badge: string;
   children: ReactNode;
-  tall: "chart" | "flow";
+  tall: "chart" | "flow" | "glance";
   style: CSSProperties;
 }) {
   return (
@@ -451,7 +472,11 @@ function StackedTile({
       style={style}
       className={cn(
         "flex w-full shrink-0 flex-col overflow-hidden rounded-lg border border-sidebar-fg/20 shadow-card",
-        tall === "chart" ? "h-[min(42dvh,20rem)] min-h-[14rem]" : "h-[min(52dvh,24rem)] min-h-[17.5rem]",
+        tall === "chart"
+          ? "h-[min(42dvh,20rem)] min-h-[14rem]"
+          : tall === "glance"
+            ? "h-[min(36dvh,18rem)] min-h-[14rem]"
+            : "h-[min(52dvh,24rem)] min-h-[17.5rem]",
       )}
     >
       <div className="flex shrink-0 items-center justify-between gap-3 px-4 py-2.5">
@@ -1076,6 +1101,18 @@ function defaultPond(): Box {
   return {
     x: 28,
     y: Math.max(96, Math.min(window.innerHeight - h - 28, 96 + 340 + 16)),
+    w,
+    h,
+  };
+}
+
+/** Nest face — current temperature and Heat set to. Sits low-centre so it can be dragged. */
+function defaultHeat(): Box {
+  const w = Math.min(340, Math.max(300, window.innerWidth - 48));
+  const h = Math.min(280, Math.max(220, window.innerHeight - 160));
+  return {
+    x: Math.max(24, Math.round((window.innerWidth - w) / 2)),
+    y: Math.max(96, window.innerHeight - h - 28),
     w,
     h,
   };

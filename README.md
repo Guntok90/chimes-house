@@ -51,6 +51,7 @@ Mapped when present (preferred ids first):
 | Zappi charge W  | Internal CT (`…_power_ct_internal` / `…_internal_load`) — not generation/battery |
 | Zappi today kWh | `sensor.myenergi_zappi_25435526_energy_used_today` (Charge page)                 |
 | Fan (Home)      | Smart Life / Tuya Fan. Preferred `fan.fan` / `fan.bedroom_fan` / `fan.tuya_fan` / `fan.ceiling_fan` (`fan.turn_on` / `turn_off` + `fan.set_percentage` for Speed 1–N). Optional speed helper: `number.fan_speed` / `select.fan_speed` (or `input_number.*`). Optional light: `light.fan_light`. When no `fan.*` exists, Home shows **Not mapped** (does not fake speed). Plug real ids into `PREFERRED_FAN` / `PREFERRED_FAN_SPEED` / `PREFERRED_FAN_LIGHT` in `src/lib/ha.ts`. The mislabelled switch named “Fan” is renamed in the UI to **Master Bedroom Light** and is not used as the Fan tile. |
+| Nest heating    | Home **Central Heating** + Overview **Nest** window. The climate entity is discovered live: device-registry identifier domain `nest` (official Google Nest integration), else a `climate.*` whose name contains Nest. No preferred entity id — HA names it after the thermostat (`climate.downstairs`, …). Current temperature and setpoint come from that entity’s attributes. Setpoint uses `climate.set_temperature`, mode uses `climate.set_hvac_mode` (only modes HA lists), eco uses `climate.set_preset_mode` (`eco` / `none`) when `preset_modes` includes eco. 24h history is recorder history of the same entity **with attributes** (the state string is only the HVAC mode). **Schedule is not available:** the Nest SDM climate traits Home Assistant exposes do not include the weekly timetable, and Chimes will not invent one. A schedule control appears only if that same Nest device has a real schedule entity. |
 | Range Rover     | Meross Hybrid preferred: plug = cable sensor → `switch.range_rover_hybrid` (on = charging path) → ambiguous plug binary last. Power = `sensor.smart_plug_power` (kW→W; preferred over Meross `current_consumption`). No Cupra/VAG ids. |
 | Range Rover kWh | Prefer `sensor.smart_plug_today_s_consumption` (or other smart_plug *today* energy). Skip Meross `*_today_s_consumption` when stuck at 0. If still blank, Charge “Today” is filled from today’s hourly means of `sensor.smart_plug_power`. |
 | Cupra / VAG     | Driveway Cupra stays on the **Zappi** path (`zappiPlugged` / `zappiW` / today). Do not remap VAG `*_plug_connected` onto Range Rover. |
@@ -140,7 +141,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 
 | Page     | What it is                                             |
 | -------- | ------------------------------------------------------ |
-| Home     | 24h energy graph, Fan on/off+speed, area-grouped switches (device areas when entity.area_id is null; keeps registry-hidden Meross/Smart Life plugs; no Spares heading; hides dnd / myenergi / child lock / enable / grid-charge; UI renames Fan→Master Bedroom Light, first Spare→Fly Killer), Stevie |
+| Home     | 24h energy graph, Central Heating (Nest: now, heat set to, mode, eco, 24h history — schedule stays in the Nest app), Fan on/off+speed, area-grouped switches (device areas when entity.area_id is null; keeps registry-hidden Meross/Smart Life plugs; no Spares heading; hides dnd / myenergi / child lock / enable / grid-charge; UI renames Fan→Master Bedroom Light, first Spare→Fly Killer), Stevie |
 | Energy   | Live flow (solar / grid / battery / home / Zappi / Range Rover) + Charge (Zappi mode Apply + Rover + Cheap Energy Available + EV Ready by) + **Battery** charge limits (grid/solar cutoffs + min SOC) + inverter / Octopus + custom £/kWh rates |
 | Site     | 3D plot — house, solar, battery, both cars             |
 | Battery  | SOC / charge / discharge + Grid / Solar cutoffs + min SOC (Allow vs actively charging clarified) |
@@ -149,7 +150,7 @@ Open `/login`, enter the password. With `HA_TOKEN` set, a machine on Tailscale g
 | Weather  | Ecowitt outdoor / wind / rain / sun + greenhouse + pond |
 | Garden   | Front (Willow Tree + Range Rover Hybrid switches) · Back (Pergola, ponds, Frank) |
 | House    | Lights, plugs, **Pi connection**, sign out             |
-| Overview | iPad wall — house film, glass tiles (flow + 24h graph + weather + pond) |
+| Overview | iPad wall — house film, glass tiles (flow + 24h graph + weather + pond + Nest: current temp and Heat set to) |
 
 ## Note
 
