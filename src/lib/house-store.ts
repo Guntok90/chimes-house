@@ -57,6 +57,14 @@ import {
   type PowerLimitKey,
   type SwitchId,
 } from "./ha";
+import {
+  heatingControlFromInventory,
+  heatingHistoryFromResult,
+  demoHeatingControl,
+  roundTemp,
+  type HeatingControl,
+  type HeatingHistPoint,
+} from "./heating";
 import { applyLiveStates } from "./live-updates";
 import { DEMO_WEATHER, type WeatherLive } from "./weather";
 import {
@@ -107,8 +115,9 @@ function syncSocketInterest(
   areaSwitches: AreaSwitch[],
   fan: FanControl,
   states?: HaState[],
+  heatingEntityId?: string | null,
 ) {
-  socket.interest = interestForLiveUi(map, areaSwitches, fan, states);
+  socket.interest = interestForLiveUi(map, areaSwitches, fan, states, heatingEntityId ?? null);
 }
 
 function bootTariffs(): TariffState {
@@ -221,6 +230,12 @@ type Store = {
   areaSwitches: AreaSwitch[];
   /** Curated Home Fan tile (on/off + speed). Unmapped when live ids missing. */
   fanControl: FanControl;
+  /** Nest climate discovered from the Pi. Unmapped when no Nest device is present. */
+  heating: HeatingControl;
+  /** Recorder history for the Nest climate entity (attributes). Never demo while live. */
+  heatingHistory: HeatingHistPoint[];
+  heatingHistoryStatus: HistoryStatus;
+  heatingWriteError?: string;
   status: Status;
   error?: string;
   map: HaMap;
@@ -301,6 +316,19 @@ type Store = {
   setFanSpeedLevel: (level: number) => void;
   /** Optional Tuya fan light toggle when mapped. */
   toggleFanLight: () => void;
+  /** Nest setpoint. Ignored while Eco is on or the thermostat is off. */
+  setHeatingTemperature: (patch: {
+    temperature?: number;
+    targetLow?: number;
+    targetHigh?: number;
+  }) => Promise<boolean>;
+  /** Nest HVAC mode — only a mode the climate entity already lists. */
+  setHeatingMode: (mode: string) => Promise<boolean>;
+  /** Nest Eco preset (`eco` / `none`) when HA exposes it. */
+  setHeatingEco: (on: boolean) => Promise<boolean>;
+  /** Schedule option, only when a schedule entity exists on the Nest device. */
+  setHeatingSchedule: (option: string) => Promise<boolean>;
+  refreshHeatingHistory: () => Promise<void>;
   /** Save custom cheap/peak £/kWh — HA helpers when mapped, else localStorage. */
   setTariffs: (patch: Partial<TariffRates>) => Promise<boolean>;
   refreshHistory: () => Promise<void>;
@@ -309,6 +337,7 @@ type Store = {
 let bootInFlight: Promise<void> | null = null;
 let connectInFlight: Promise<void> | null = null;
 let historyInFlight: Promise<void> | null = null;
+let heatingHistoryInFlight: Promise<void> | null = null;
 /** Once we have been live this SPA session, keep last readings across drops. */
 let hadLiveSession = false;
 let reconnectTimer: number | null = null;
@@ -559,6 +588,9 @@ export const useHouse = create<Store>((set, get) => {
     switches: {},
     areaSwitches: demoAreaSwitches({}),
     fanControl: demoFanControl(),
+    heating: demoHeatingControl(),
+    heatingHistory: [],
+    heatingHistoryStatus: "idle",
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
@@ -605,6 +637,10 @@ export const useHouse = create<Store>((set, get) => {
               weather: DEMO_WEATHER,
               areaSwitches: demoAreaSwitches({}),
               fanControl: demoFanControl(),
+              heating: demoHeatingControl(),
+              heatingHistory: [],
+              heatingHistoryStatus: "idle",
+              heatingWriteError: undefined,
               tariffs: resolveTariffs(null, readLocalTariffs()),
               error: undefined,
               ...emptyHistory(),
@@ -724,10 +760,13 @@ export const useHouse = create<Store>((set, get) => {
         if (tariffs.source === "ha") writeLocalTariffs(tariffs);
         const areaSwitches = rebuildAreaSwitches(list);
         const fanControl = fanControlFromStates(list, mapped);
-        syncSocketInterest(mapped, areaSwitches, fanControl, list);
+        const heating = heatingControlFromInventory(list, deviceRegCache, entityRegCache);
+        const prevHeatingId = get().heating.entityId;
+        syncSocketInterest(mapped, areaSwitches, fanControl, list, heating.entityId);
         set({
           areaSwitches,
           fanControl,
+          heating,
           chargeLimitMeta: chargeLimitMetaMap(list, mapped),
           powerLimitMeta: powerLimitMetaMap(list, mapped),
           zappiModeOptions: zappiModeOptions(list, mapped),
@@ -737,6 +776,15 @@ export const useHouse = create<Store>((set, get) => {
         });
         if (!wasLive && get().status === "live") {
           void refreshRegistries();
+        }
+        const heatingId = heating.entityId;
+        if (
+          get().status === "live" &&
+          heatingId &&
+          !heatingId.startsWith("demo.") &&
+          (heatingId !== prevHeatingId || get().heatingHistoryStatus === "idle")
+        ) {
+          void get().refreshHeatingHistory();
         }
       };
 
@@ -988,6 +1036,10 @@ export const useHouse = create<Store>((set, get) => {
         weather: DEMO_WEATHER,
         areaSwitches: demoAreaSwitches({}),
         fanControl: demoFanControl(),
+        heating: demoHeatingControl(),
+        heatingHistory: [],
+        heatingHistoryStatus: "idle",
+        heatingWriteError: undefined,
         error: undefined,
         writeError: undefined,
         writePending: undefined,
@@ -1670,6 +1722,185 @@ export const useHouse = create<Store>((set, get) => {
         void socket.call(fanControl.lightEntityId, nextOn);
       }
     },
+
+    async setHeatingTemperature(patch) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.entityId || !heating.setpointWritable) return false;
+      const prev = heating;
+      const temperature =
+        patch.temperature != null ? roundTemp(patch.temperature, heating.stepC) : undefined;
+      const targetLow =
+        patch.targetLow != null ? roundTemp(patch.targetLow, heating.stepC) : undefined;
+      const targetHigh =
+        patch.targetHigh != null ? roundTemp(patch.targetHigh, heating.stepC) : undefined;
+      set({
+        heatingWriteError: undefined,
+        heating: {
+          ...heating,
+          targetC: temperature ?? heating.targetC,
+          targetLowC: targetLow ?? heating.targetLowC,
+          targetHighC: targetHigh ?? heating.targetHighC,
+        },
+      });
+      if (heating.entityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        if (heating.hvacMode === "heat_cool") {
+          const low = targetLow ?? heating.targetLowC;
+          const high = targetHigh ?? heating.targetHighC;
+          if (low == null || high == null) {
+            set({ heating: prev });
+            return false;
+          }
+          await socket.setClimateTemperature(heating.entityId, {
+            target_temp_low: low,
+            target_temp_high: high,
+          });
+        } else if (temperature != null) {
+          await socket.setClimateTemperature(heating.entityId, { temperature });
+        } else {
+          set({ heating: prev });
+          return false;
+        }
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "the Nest setpoint"),
+        });
+        return false;
+      }
+    },
+
+    async setHeatingMode(mode) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.entityId) return false;
+      if (!heating.hvacModes.includes(mode) || mode === heating.hvacMode) return false;
+      const prev = heating;
+      const setpointWritable = mode === "heat" || mode === "cool" || mode === "heat_cool";
+      set({
+        heatingWriteError: undefined,
+        heating: {
+          ...heating,
+          hvacMode: mode,
+          eco: mode === "off" ? false : heating.eco,
+          setpointWritable: setpointWritable && !heating.eco,
+          hvacAction: mode === "off" ? "off" : heating.hvacAction,
+        },
+      });
+      if (heating.entityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        await socket.setClimateHvacMode(heating.entityId, mode);
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "the Nest mode"),
+        });
+        return false;
+      }
+    },
+
+    async setHeatingEco(on) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.entityId || !heating.ecoSupported) return false;
+      const preset = on ? "eco" : heating.presetModes.includes("none") ? "none" : null;
+      if (!preset || !heating.presetModes.includes(preset) || heating.eco === on) return false;
+      const prev = heating;
+      set({
+        heatingWriteError: undefined,
+        heating: {
+          ...heating,
+          eco: on,
+          presetMode: preset,
+          setpointWritable: !on && heating.hvacMode !== "off",
+        },
+      });
+      if (heating.entityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        await socket.setClimatePreset(heating.entityId, preset);
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "Nest eco"),
+        });
+        return false;
+      }
+    },
+
+    async setHeatingSchedule(option) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.scheduleEntityId) return false;
+      if (!heating.scheduleOptions.includes(option)) return false;
+      const prev = heating;
+      set({
+        heatingWriteError: undefined,
+        heating: { ...heating, scheduleState: option },
+      });
+      if (heating.scheduleEntityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        await socket.setSelect(heating.scheduleEntityId, option);
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "the Nest schedule"),
+        });
+        return false;
+      }
+    },
+
+    async refreshHeatingHistory() {
+      if (heatingHistoryInFlight) return heatingHistoryInFlight;
+      if (get().status !== "live") return;
+      const entityId = get().heating.entityId;
+      if (!entityId || entityId.startsWith("demo.")) {
+        set({ heatingHistory: [], heatingHistoryStatus: "empty" });
+        return;
+      }
+      set({ heatingHistoryStatus: "loading" });
+      heatingHistoryInFlight = (async () => {
+        const end = new Date();
+        const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+        try {
+          const raw = await socket.historyDuringPeriod(
+            [entityId],
+            start.toISOString(),
+            end.toISOString(),
+            { attributes: true },
+          );
+          const points = heatingHistoryFromResult(raw, entityId, end, 24);
+          if (get().heating.entityId !== entityId) return;
+          set({
+            heatingHistory: points,
+            heatingHistoryStatus: points.length ? "ready" : "empty",
+          });
+        } catch {
+          if (get().heating.entityId === entityId) {
+            set({ heatingHistory: [], heatingHistoryStatus: "empty" });
+          }
+        } finally {
+          heatingHistoryInFlight = null;
+        }
+      })();
+      return heatingHistoryInFlight;
+    },
   };
 });
 
@@ -1704,8 +1935,19 @@ async function refreshRegistries() {
   const map = useHouse.getState().map;
   const areaSwitches = rebuildAreaSwitches(lastStates);
   const fanControl = fanControlFromStates(lastStates, map);
-  syncSocketInterest(map, areaSwitches, fanControl, lastStates);
-  useHouse.setState({ areaSwitches, fanControl });
+  const prevHeatingId = useHouse.getState().heating.entityId;
+  const heating = heatingControlFromInventory(lastStates, deviceRegCache, entityRegCache);
+  syncSocketInterest(map, areaSwitches, fanControl, lastStates, heating.entityId);
+  useHouse.setState({ areaSwitches, fanControl, heating });
+  if (
+    heating.entityId &&
+    !heating.entityId.startsWith("demo.") &&
+    (heating.entityId !== prevHeatingId ||
+      useHouse.getState().heatingHistoryStatus === "idle" ||
+      useHouse.getState().heatingHistoryStatus === "empty")
+  ) {
+    void useHouse.getState().refreshHeatingHistory();
+  }
 }
 
 export function useLive() {

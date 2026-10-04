@@ -24,6 +24,7 @@ export const OVERVIEW_GRAPH_BOX_KEY = "chimes.overview.graph";
 export const OVERVIEW_FLOW_BOX_KEY = "chimes.overview.flow";
 export const OVERVIEW_POND_BOX_KEY = "chimes.overview.pond";
 export const OVERVIEW_WEATHER_BOX_KEY = "chimes.overview.weather";
+export const OVERVIEW_HEAT_BOX_KEY = "chimes.overview.heat";
 
 /** Merged layout document — one JSON object, one tile write at a time. */
 export const OVERVIEW_LAYOUT_KEY = "chimes.overview.layout";
@@ -40,6 +41,7 @@ export const OVERVIEW_LAYOUT_STORAGE_KEYS = [
   OVERVIEW_FLOW_BOX_KEY,
   OVERVIEW_POND_BOX_KEY,
   OVERVIEW_WEATHER_BOX_KEY,
+  OVERVIEW_HEAT_BOX_KEY,
   OVERVIEW_LAYOUT_KEY,
   GLASS_OPACITY_KEY,
 ] as const;
@@ -50,6 +52,7 @@ export const OVERVIEW_TILE_IDS: Record<string, string> = {
   [OVERVIEW_FLOW_BOX_KEY]: "flow",
   [OVERVIEW_POND_BOX_KEY]: "pond",
   [OVERVIEW_WEATHER_BOX_KEY]: "weather",
+  [OVERVIEW_HEAT_BOX_KEY]: "heat",
 };
 
 export const BOX_MIN_W = 300;

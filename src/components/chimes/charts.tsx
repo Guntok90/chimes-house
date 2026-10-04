@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import { useEffect, useRef, type ReactNode } from "react";
+import type { HeatingHistPoint } from "@/lib/heating";
 import type { DayPoint, HourPoint, TempPoint } from "@/lib/house";
 
 const axis = { fill: "var(--color-ink-soft)", fontSize: 11 };
@@ -564,6 +565,68 @@ export function EnergyMetersChart({
           dot={false}
           strokeWidth={1.3}
         />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+const paperTick = { fill: "var(--color-ink-soft)", fontSize: 11 };
+
+/** Nest room temperature and setpoint — Home Central Heating, paper theme. */
+export function HeatingHistoryChart({ data }: { data: HeatingHistPoint[] }) {
+  const showHigh = data.some((p) => p.targetHighC != null);
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <ComposedChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+        <CartesianGrid {...grid} vertical={false} />
+        <XAxis
+          dataKey="label"
+          tick={paperTick}
+          axisLine={false}
+          tickLine={false}
+          interval="preserveStartEnd"
+          minTickGap={24}
+        />
+        <YAxis
+          tick={paperTick}
+          axisLine={false}
+          tickLine={false}
+          width={36}
+          tickFormatter={(v: number) => `${v}°`}
+          domain={["auto", "auto"]}
+        />
+        <Tooltip content={<Tip unit="°" />} />
+        <Line
+          type="monotone"
+          dataKey="currentC"
+          name="Now"
+          stroke="#2a4e56"
+          strokeWidth={1.8}
+          dot={false}
+          connectNulls
+        />
+        <Line
+          type="monotone"
+          dataKey="targetC"
+          name="Heat set to"
+          stroke="#ae593c"
+          strokeWidth={1.6}
+          strokeDasharray="4 4"
+          dot={false}
+          connectNulls
+        />
+        {showHigh ? (
+          <Line
+            type="monotone"
+            dataKey="targetHighC"
+            name="Cool set to"
+            stroke="#c4a484"
+            strokeWidth={1.4}
+            strokeDasharray="2 3"
+            dot={false}
+            connectNulls
+          />
+        ) : null}
       </ComposedChart>
     </ResponsiveContainer>
   );
