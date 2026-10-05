@@ -234,7 +234,10 @@ type Store = {
   heating: HeatingControl;
   /** Recorder history for the Nest climate entity (attributes). Never demo while live. */
   heatingHistory: HeatingHistPoint[];
+  /** Same climate entity, last 7 days, hourly. Never demo while live. */
+  heatingHistoryWeek: HeatingHistPoint[];
   heatingHistoryStatus: HistoryStatus;
+  heatingHistoryWeekStatus: HistoryStatus;
   heatingWriteError?: string;
   status: Status;
   error?: string;
@@ -316,7 +319,7 @@ type Store = {
   setFanSpeedLevel: (level: number) => void;
   /** Optional Tuya fan light toggle when mapped. */
   toggleFanLight: () => void;
-  /** Nest setpoint. Ignored while Eco is on or the thermostat is off. */
+  /** Nest setpoint. Ignored while the thermostat is off. Official Nest also ignores it during Eco; Nest Legacy leaves Eco. */
   setHeatingTemperature: (patch: {
     temperature?: number;
     targetLow?: number;
@@ -590,7 +593,9 @@ export const useHouse = create<Store>((set, get) => {
     fanControl: demoFanControl(),
     heating: demoHeatingControl(),
     heatingHistory: [],
+    heatingHistoryWeek: [],
     heatingHistoryStatus: "idle",
+    heatingHistoryWeekStatus: "idle",
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
@@ -639,7 +644,9 @@ export const useHouse = create<Store>((set, get) => {
               fanControl: demoFanControl(),
               heating: demoHeatingControl(),
               heatingHistory: [],
+              heatingHistoryWeek: [],
               heatingHistoryStatus: "idle",
+              heatingHistoryWeekStatus: "idle",
               heatingWriteError: undefined,
               tariffs: resolveTariffs(null, readLocalTariffs()),
               error: undefined,
@@ -1038,7 +1045,9 @@ export const useHouse = create<Store>((set, get) => {
         fanControl: demoFanControl(),
         heating: demoHeatingControl(),
         heatingHistory: [],
+        heatingHistoryWeek: [],
         heatingHistoryStatus: "idle",
+        heatingHistoryWeekStatus: "idle",
         heatingWriteError: undefined,
         error: undefined,
         writeError: undefined,
@@ -1733,6 +1742,7 @@ export const useHouse = create<Store>((set, get) => {
         patch.targetLow != null ? roundTemp(patch.targetLow, heating.stepC) : undefined;
       const targetHigh =
         patch.targetHigh != null ? roundTemp(patch.targetHigh, heating.stepC) : undefined;
+      const leaveEco = heating.integration === "nest_legacy" && heating.eco;
       set({
         heatingWriteError: undefined,
         heating: {
@@ -1740,6 +1750,9 @@ export const useHouse = create<Store>((set, get) => {
           targetC: temperature ?? heating.targetC,
           targetLowC: targetLow ?? heating.targetLowC,
           targetHighC: targetHigh ?? heating.targetHighC,
+          eco: leaveEco ? false : heating.eco,
+          presetMode:
+            leaveEco && heating.presetModes.includes("none") ? "none" : heating.presetMode,
         },
       });
       if (heating.entityId.startsWith("demo.")) return true;
@@ -1814,13 +1827,18 @@ export const useHouse = create<Store>((set, get) => {
       const preset = on ? "eco" : heating.presetModes.includes("none") ? "none" : null;
       if (!preset || !heating.presetModes.includes(preset) || heating.eco === on) return false;
       const prev = heating;
+      const modeOk =
+        heating.hvacMode === "heat" ||
+        heating.hvacMode === "cool" ||
+        heating.hvacMode === "heat_cool";
+      const ecoBlocks = on && heating.integration !== "nest_legacy";
       set({
         heatingWriteError: undefined,
         heating: {
           ...heating,
           eco: on,
           presetMode: preset,
-          setpointWritable: !on && heating.hvacMode !== "off",
+          setpointWritable: modeOk && !ecoBlocks,
         },
       });
       if (heating.entityId.startsWith("demo.")) return true;
@@ -1871,29 +1889,55 @@ export const useHouse = create<Store>((set, get) => {
       if (get().status !== "live") return;
       const entityId = get().heating.entityId;
       if (!entityId || entityId.startsWith("demo.")) {
-        set({ heatingHistory: [], heatingHistoryStatus: "empty" });
+        set({
+          heatingHistory: [],
+          heatingHistoryWeek: [],
+          heatingHistoryStatus: "empty",
+          heatingHistoryWeekStatus: "empty",
+        });
         return;
       }
-      set({ heatingHistoryStatus: "loading" });
+      set({
+        heatingHistoryStatus: get().heatingHistory.length ? get().heatingHistoryStatus : "loading",
+        heatingHistoryWeekStatus: "loading",
+      });
       heatingHistoryInFlight = (async () => {
         const end = new Date();
-        const start = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+        const dayStart = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+        const weekStart = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
         try {
-          const raw = await socket.historyDuringPeriod(
+          const dayRaw = await socket.historyDuringPeriod(
             [entityId],
-            start.toISOString(),
+            dayStart.toISOString(),
             end.toISOString(),
-            { attributes: true },
+            { attributes: true, timeoutMs: 25_000 },
           );
-          const points = heatingHistoryFromResult(raw, entityId, end, 24);
           if (get().heating.entityId !== entityId) return;
+          const day = heatingHistoryFromResult(dayRaw, entityId, end, 24);
           set({
-            heatingHistory: points,
-            heatingHistoryStatus: points.length ? "ready" : "empty",
+            heatingHistory: day,
+            heatingHistoryStatus: day.length ? "ready" : "empty",
+          });
+          const weekRaw = await socket.historyDuringPeriod(
+            [entityId],
+            weekStart.toISOString(),
+            end.toISOString(),
+            { attributes: true, timeoutMs: 45_000 },
+          );
+          if (get().heating.entityId !== entityId) return;
+          const week = heatingHistoryFromResult(weekRaw, entityId, end, 7 * 24);
+          set({
+            heatingHistoryWeek: week,
+            heatingHistoryWeekStatus: week.length ? "ready" : "empty",
           });
         } catch {
           if (get().heating.entityId === entityId) {
-            set({ heatingHistory: [], heatingHistoryStatus: "empty" });
+            set({
+              heatingHistory: get().heatingHistory,
+              heatingHistoryWeek: [],
+              heatingHistoryStatus: get().heatingHistory.length ? "ready" : "empty",
+              heatingHistoryWeekStatus: "empty",
+            });
           }
         } finally {
           heatingHistoryInFlight = null;
@@ -1944,7 +1988,8 @@ async function refreshRegistries() {
     !heating.entityId.startsWith("demo.") &&
     (heating.entityId !== prevHeatingId ||
       useHouse.getState().heatingHistoryStatus === "idle" ||
-      useHouse.getState().heatingHistoryStatus === "empty")
+      useHouse.getState().heatingHistoryStatus === "empty" ||
+      useHouse.getState().heatingHistoryWeekStatus === "idle")
   ) {
     void useHouse.getState().refreshHeatingHistory();
   }

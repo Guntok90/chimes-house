@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Flame } from "lucide-react";
 import {
   DEMO_HEATING_HISTORY,
+  DEMO_HEATING_HISTORY_WEEK,
   formatNestTemp,
   heatingForScreen,
   hvacModeLabel,
@@ -12,9 +13,11 @@ import {
 import { usesDemoCharts } from "@/lib/house";
 import { useHouse } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
-import { HeatingHistoryChart } from "./charts";
+import { ChartScroll, HeatingHistoryChart } from "./charts";
 import { NoHistoryYet } from "./no-history";
 import { SectionLabel, Surface } from "./ui";
+
+type HeatRange = "day" | "week";
 
 function chipClass(selected: boolean) {
   return cn(
@@ -27,17 +30,29 @@ export function CentralHeatingSection() {
   const status = useHouse((s) => s.status);
   const stored = useHouse((s) => s.heating);
   const history = useHouse((s) => s.heatingHistory);
+  const historyWeek = useHouse((s) => s.heatingHistoryWeek);
   const historyStatus = useHouse((s) => s.heatingHistoryStatus);
+  const historyWeekStatus = useHouse((s) => s.heatingHistoryWeekStatus);
   const writeError = useHouse((s) => s.heatingWriteError);
   const setTemperature = useHouse((s) => s.setHeatingTemperature);
   const setMode = useHouse((s) => s.setHeatingMode);
   const setEco = useHouse((s) => s.setHeatingEco);
   const setSchedule = useHouse((s) => s.setHeatingSchedule);
+  const [range, setRange] = useState<HeatRange>("day");
 
   const heating = heatingForScreen(status, stored);
   const demo = usesDemoCharts(status);
-  const points = demo ? DEMO_HEATING_HISTORY : history;
-  const historyReady = demo || (historyStatus === "ready" && points.length > 0);
+  const points = demo
+    ? range === "week"
+      ? DEMO_HEATING_HISTORY_WEEK
+      : DEMO_HEATING_HISTORY
+    : range === "week"
+      ? historyWeek
+      : history;
+  const rangeStatus = range === "week" ? historyWeekStatus : historyStatus;
+  const historyReady = demo || (rangeStatus === "ready" && points.length > 0);
+  const scrollWidth =
+    range === "week" && points.length > 24 ? Math.max(points.length * 14, 420) : 0;
 
   return (
     <section>
@@ -54,17 +69,50 @@ export function CentralHeatingSection() {
         />
         {heating.available ? (
           <div className="mt-5">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-widest text-ink-soft">
-              History
-            </p>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-widest text-ink-soft">
+                History
+              </p>
+              <div
+                className="inline-flex rounded-sm bg-paper-deep p-0.5"
+                role="tablist"
+                aria-label="Central heating history range"
+              >
+                {(
+                  [
+                    ["day", "Day", "Day — last 24 hours"],
+                    ["week", "Week", "Week — last 7 days"],
+                  ] as const
+                ).map(([id, label, aria]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={range === id}
+                    aria-label={aria}
+                    onClick={() => setRange(id)}
+                    className={cn(
+                      "min-h-11 min-w-14 rounded-sm px-3 text-sm font-medium",
+                      range === id ? "bg-paper-raised text-ink shadow-sm" : "text-ink-soft",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
             {historyReady ? (
               <div className="h-52">
-                <HeatingHistoryChart data={points} />
+                <ChartScroll widthPx={scrollWidth}>
+                  <HeatingHistoryChart data={points} />
+                </ChartScroll>
               </div>
             ) : (
               <NoHistoryYet
                 label={
-                  historyStatus === "loading" ? "temperature history (loading)" : "temperature history"
+                  rangeStatus === "loading" || rangeStatus === "idle"
+                    ? `${range} temperature history (loading)`
+                    : `${range} temperature history`
                 }
               />
             )}
@@ -112,7 +160,7 @@ function HeatingBody({
         <p className="text-sm text-ink-soft">
           {connecting
             ? "Connecting to Home Assistant…"
-            : "Not mapped — Chimes uses the Nest device already on the Pi (registry identifier nest, or a climate entity whose name contains Nest). Nothing is shown until that device is there."}
+            : "Not mapped yet. Chimes is looking for the Nest thermostat from Nest Legacy on the Pi. It shows up here once that climate entity is there."}
         </p>
       </div>
     );
@@ -191,7 +239,11 @@ function HeatingBody({
         )}
       </div>
 
-      {heating.eco ? (
+      {heating.eco && heating.setpointWritable ? (
+        <p className="mt-3 text-sm text-ink-soft">
+          Eco is on. Changing the temperature turns Eco off.
+        </p>
+      ) : heating.eco ? (
         <p className="mt-3 text-sm text-ink-soft">
           Eco is on. Nest does not let Home Assistant change the heat setpoint until Eco is off.
         </p>
@@ -317,10 +369,27 @@ function ChartKey({ color, label, dashed = false }: { color: string; label: stri
   );
 }
 
-/** Ambient Nest face — current temperature and Heat set to, no controls. */
+function heatingCue(heating: HeatingControl): string {
+  if (heating.hvacAction === "heating") return "Heating";
+  if (heating.hvacAction === "cooling") return "Cooling";
+  if (heating.hvacAction === "idle") return "Idle";
+  if (heating.hvacMode === "off" || heating.hvacAction === "off") return "Off";
+  if (heating.hvacAction) return hvacModeLabel(heating.hvacAction);
+  return "";
+}
+
+/**
+ * Ambient Nest face — the thermostat’s own screen, no controls.
+ * Big number is the target (“Heat set to”). Room temperature sits underneath.
+ */
 export function NestAmbientFace({ heating }: { heating: HeatingControl }) {
   const lines = nestSetLines(heating);
+  const primary = lines[0];
+  const secondary = lines[1];
   const heatingNow = heating.hvacAction === "heating";
+  const cue = heatingCue(heating);
+  const big =
+    primary?.c != null ? formatNestTemp(primary.c, false) : primary?.label === "OFF" ? "OFF" : "—";
 
   if (!heating.available) {
     return (
@@ -331,35 +400,78 @@ export function NestAmbientFace({ heating }: { heating: HeatingControl }) {
   }
 
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-1 px-3 text-center">
-      <div className="flex items-baseline justify-center gap-1 tabular-nums leading-none text-sidebar-fg">
-        <span className="text-5xl font-medium tracking-tight sm:text-6xl">
-          {formatNestTemp(heating.currentC, false)}
-        </span>
-        <span className="text-lg text-sidebar-fg/55">°</span>
+    <div
+      className="flex h-full w-full flex-col items-center justify-center overflow-hidden px-2 text-center"
+      style={{ containerType: "size" }}
+    >
+      <div
+        className={cn(
+          "flex items-baseline justify-center gap-0.5 text-5xl tabular-nums leading-none",
+          heatingNow ? "text-sand" : "text-sidebar-fg",
+        )}
+        style={{ fontSize: "clamp(2.5rem, 34cqh, 6.25rem)" }}
+      >
+        <span className="font-medium tracking-tight">{big}</span>
+        {primary?.c != null ? (
+          <span className="text-[0.35em] text-sidebar-fg/50">°</span>
+        ) : null}
       </div>
-      <div className="mt-3 flex flex-col items-center gap-2">
-        {lines.map((line) => (
-          <div key={line.label}>
-            <div className="text-[0.65rem] font-bold uppercase tracking-widest text-sidebar-fg/80">
-              {line.label}
-            </div>
-            {line.c != null ? (
-              <div
-                className={cn(
-                  "mt-1 flex items-baseline justify-center gap-1 tabular-nums leading-none",
-                  heatingNow ? "text-sand" : "text-sidebar-fg",
-                )}
-              >
-                <span className="text-3xl font-medium tracking-tight sm:text-4xl">
-                  {formatNestTemp(line.c, false)}
-                </span>
-                <span className="text-sm text-sidebar-fg/55">°</span>
-              </div>
-            ) : null}
+      {primary && primary.label !== "OFF" ? (
+        <div
+          className="text-xs font-bold uppercase tracking-[0.22em] text-sidebar-fg/80"
+          style={{ fontSize: "clamp(0.6rem, 7cqh, 0.8rem)", marginTop: "0.35em" }}
+        >
+          {primary.label}
+        </div>
+      ) : null}
+      {secondary ? (
+        <div style={{ marginTop: "0.35em" }}>
+          <div
+            className="flex items-baseline justify-center gap-0.5 text-2xl tabular-nums leading-none text-sidebar-fg"
+            style={{ fontSize: "clamp(1.15rem, 14cqh, 2.25rem)" }}
+          >
+            <span className="font-medium tracking-tight">{formatNestTemp(secondary.c, false)}</span>
+            {secondary.c != null ? <span className="text-[0.45em] text-sidebar-fg/50">°</span> : null}
           </div>
-        ))}
+          <div
+            className="text-[0.65rem] font-bold uppercase tracking-widest text-sidebar-fg/70"
+            style={{ fontSize: "clamp(0.55rem, 6cqh, 0.7rem)", marginTop: "0.2em" }}
+          >
+            {secondary.label}
+          </div>
+        </div>
+      ) : null}
+      <div
+        className="flex items-baseline justify-center gap-2 text-sidebar-fg"
+        style={{ marginTop: "0.7em" }}
+      >
+        <span
+          className="text-[0.65rem] font-bold uppercase tracking-widest text-sidebar-fg/60"
+          style={{ fontSize: "clamp(0.55rem, 6cqh, 0.7rem)" }}
+        >
+          Now
+        </span>
+        <span
+          className="text-2xl font-medium tabular-nums leading-none"
+          style={{ fontSize: "clamp(1.15rem, 16cqh, 2.25rem)" }}
+        >
+          {formatNestTemp(heating.currentC, false)}
+          {heating.currentC != null ? (
+            <span className="text-[0.45em] text-sidebar-fg/50">°</span>
+          ) : null}
+        </span>
       </div>
+      {cue ? (
+        <div
+          className={cn(
+            "text-xs font-semibold uppercase tracking-widest",
+            heatingNow ? "text-sand" : "text-sidebar-fg/65",
+          )}
+          style={{ fontSize: "clamp(0.6rem, 6.5cqh, 0.8rem)", marginTop: "0.45em" }}
+        >
+          {cue}
+        </div>
+      ) : null}
     </div>
   );
 }

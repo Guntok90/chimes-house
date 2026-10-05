@@ -9,6 +9,7 @@ import {
   heatingForScreen,
   heatingHistoryFromResult,
   isNestDevice,
+  nestAmbientBadge,
   nestSetLines,
   stepHeatingTarget,
   unmappedHeatingControl,
@@ -200,6 +201,222 @@ describe("Nest discovery", () => {
       false,
     );
   });
+
+  it("maps Nest Legacy even when the manufacturer is Google and the name is not Nest", () => {
+    const states = [
+      climate("climate.hallway", "heat", {
+        friendly_name: "Hallway",
+        current_temperature: 18.5,
+        temperature: 20,
+        hvac_modes: ["heat", "cool", "heat_cool", "off"],
+        hvac_action: "idle",
+        preset_mode: "none",
+        preset_modes: ["none", "eco"],
+      }),
+      climate("climate.bedroom_ac", "cool", {
+        friendly_name: "Bedroom AC",
+        current_temperature: 22,
+        temperature: 23,
+        hvac_modes: ["cool", "off"],
+      }),
+    ];
+    const heating = heatingControlFromInventory(
+      states,
+      [
+        {
+          id: "dev-legacy",
+          area_id: "hall",
+          name: "Hallway",
+          manufacturer: "Google",
+          model: "Thermostat",
+          identifiers: [["nest_legacy", "09AA01AC351406WN"]],
+        },
+      ],
+      [
+        {
+          entity_id: "climate.hallway",
+          area_id: null,
+          device_id: "dev-legacy",
+          name: null,
+          platform: "nest_legacy",
+        },
+      ],
+    );
+    assert.equal(heating.entityId, "climate.hallway");
+    assert.equal(heating.integration, "nest_legacy");
+    assert.equal(heating.label, "Hallway");
+    assert.equal(heating.currentC, 18.5);
+    assert.equal(heating.targetC, 20);
+    assert.equal(heating.ecoSupported, true);
+    assert.equal(heating.setpointWritable, true);
+    assert.equal(nestAmbientBadge(heating), "20°");
+    assert.deepEqual(nestSetLines(heating), [{ label: "HEAT SET TO", c: 20 }]);
+  });
+
+  it("lets Nest Legacy change the setpoint while Eco is on", () => {
+    const heating = heatingControlFromInventory(
+      [
+        climate("climate.hallway", "heat", {
+          current_temperature: 17,
+          temperature: 15,
+          hvac_modes: ["heat", "off"],
+          preset_mode: "eco",
+          preset_modes: ["none", "eco"],
+          hvac_action: "idle",
+        }),
+      ],
+      [
+        {
+          id: "dev-legacy",
+          area_id: null,
+          name: "Hallway",
+          manufacturer: "Google",
+          identifiers: [["nest_legacy", "serial"]],
+        },
+      ],
+      [
+        {
+          entity_id: "climate.hallway",
+          area_id: null,
+          device_id: "dev-legacy",
+          platform: "nest_legacy",
+        },
+      ],
+    );
+    assert.equal(heating.eco, true);
+    assert.equal(heating.integration, "nest_legacy");
+    assert.equal(heating.setpointWritable, true);
+    assert.deepEqual(nestSetLines(heating), [{ label: "ECO", c: 15 }]);
+    assert.equal(nestAmbientBadge(heating), "15°");
+  });
+
+  it("uses the entity platform when the device registry has not arrived", () => {
+    const heating = heatingControlFromInventory(
+      [
+        climate("climate.living_room", "heat", {
+          friendly_name: "Living Room",
+          current_temperature: 19,
+          temperature: 21,
+          hvac_modes: ["heat", "off"],
+        }),
+      ],
+      [],
+      [
+        {
+          entity_id: "climate.living_room",
+          area_id: null,
+          device_id: null,
+          platform: "nest_legacy",
+        },
+      ],
+    );
+    assert.equal(heating.entityId, "climate.living_room");
+    assert.equal(heating.integration, "nest_legacy");
+  });
+
+  it("uses the only climate when Nest Legacy is installed and registries are empty", () => {
+    const heating = heatingControlFromInventory([
+      {
+        entity_id: "update.nest_legacy_update",
+        state: "off",
+        attributes: { friendly_name: "Nest Legacy update" },
+      },
+      climate("climate.hallway", "heat", {
+        friendly_name: "Hallway",
+        current_temperature: 19,
+        temperature: 21,
+        hvac_modes: ["heat", "off"],
+        preset_modes: ["none", "eco"],
+        preset_mode: "none",
+      }),
+    ]);
+    assert.equal(heating.entityId, "climate.hallway");
+    assert.equal(heating.integration, "nest_legacy");
+    assert.equal(heating.targetC, 21);
+  });
+
+  it("does not guess when Nest Legacy is installed beside another climate", () => {
+    const heating = heatingControlFromInventory([
+      {
+        entity_id: "update.nest_legacy_update",
+        state: "off",
+        attributes: {},
+      },
+      climate("climate.hallway", "heat", {
+        friendly_name: "Hallway",
+        current_temperature: 19,
+        temperature: 21,
+        hvac_modes: ["heat", "off"],
+      }),
+      climate("climate.bedroom_ac", "cool", {
+        friendly_name: "Bedroom AC",
+        current_temperature: 22,
+        temperature: 23,
+        hvac_modes: ["cool", "off"],
+      }),
+    ]);
+    assert.equal(heating.entityId, null);
+  });
+
+  it("prefers the downstairs Nest over an upstairs one", () => {
+    const states = [
+      climate("climate.upstairs", "heat", {
+        friendly_name: "Upstairs",
+        current_temperature: 18,
+        temperature: 18,
+        hvac_modes: ["heat", "off"],
+      }),
+      climate("climate.downstairs", "heat", {
+        friendly_name: "Downstairs",
+        current_temperature: 19,
+        temperature: 21,
+        hvac_modes: ["heat", "off"],
+      }),
+    ];
+    const heating = heatingControlFromInventory(
+      states,
+      [
+        {
+          id: "up",
+          area_id: null,
+          name: "Upstairs",
+          manufacturer: "Google",
+          identifiers: [["nest_legacy", "up"]],
+        },
+        {
+          id: "down",
+          area_id: null,
+          name: "Downstairs",
+          manufacturer: "Google",
+          identifiers: [["nest_legacy", "down"]],
+        },
+      ],
+      [
+        { entity_id: "climate.upstairs", area_id: null, device_id: "up", platform: "nest_legacy" },
+        {
+          entity_id: "climate.downstairs",
+          area_id: null,
+          device_id: "down",
+          platform: "nest_legacy",
+        },
+      ],
+    );
+    assert.equal(heating.entityId, "climate.downstairs");
+  });
+
+  it("treats a Nest Legacy device as Nest without the word Nest in the name", () => {
+    assert.equal(
+      isNestDevice({
+        id: "legacy",
+        area_id: null,
+        name: "Hallway",
+        manufacturer: "Google",
+        model: "Thermostat",
+        identifiers: [["nest_legacy", "serial"]],
+      }),
+      true,
+    );
+  });
 });
 
 describe("Nest screen helpers", () => {
@@ -250,6 +467,38 @@ describe("Nest screen helpers", () => {
     const last = points[points.length - 1]!;
     assert.equal(last.currentC, 20);
     assert.equal(last.targetC, 21);
+    assert.match(last.label, /^\d{2}:00$/);
     assert.deepEqual(heatingHistoryFromResult({}, DOWNSTAIRS, end), []);
+  });
+
+  it("labels a week of climate history with the day as well as the hour", () => {
+    const end = new Date("2026-10-04T12:30:00");
+    const points = heatingHistoryFromResult(
+      {
+        [DOWNSTAIRS]: [
+          {
+            state: "heat",
+            last_changed: "2026-10-01T09:10:00",
+            attributes: { current_temperature: 18, temperature: 20 },
+          },
+          {
+            state: "heat",
+            last_changed: "2026-10-04T11:05:00",
+            attributes: { current_temperature: 20, temperature: 21 },
+          },
+        ],
+      },
+      DOWNSTAIRS,
+      end,
+      7 * 24,
+    );
+    assert.ok(points.length >= 2);
+    for (const point of points) {
+      assert.match(point.label, /:00$/);
+      assert.equal(/^\d{2}:00$/.test(point.label), false);
+    }
+    const last = points[points.length - 1]!;
+    assert.equal(last.currentC, 20);
+    assert.equal(last.targetC, 21);
   });
 });

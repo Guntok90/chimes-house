@@ -1,24 +1,29 @@
 /**
  * Nest central heating — discovered from the live Home Assistant inventory.
  *
- * The official Nest integration names the climate entity after the thermostat
- * (climate.hallway, climate.downstairs, …). Those ids are not stable across
- * houses, so Chimes does not keep a preferred-id list. A device is the Nest
- * when the device registry identifier domain is `nest`, or the manufacturer /
- * model / name says Nest. The climate entity on that device is the one Home
- * and the ambient window both use.
+ * This house uses Nest Legacy (`tronikos/nest_legacy`). That integration’s
+ * device identifier domain is `nest_legacy` (not `nest`), the manufacturer is
+ * often "Google", and the climate entity is named after the thermostat
+ * (`climate.hallway`, `climate.downstairs`, …). Those ids are not stable, so
+ * Chimes does not keep a preferred-id list. A device is the Nest when:
+ * - the identifier domain or entity platform is `nest_legacy`, `nest`, or `badnest`, or
+ * - the manufacturer / model / name says Nest.
+ * If registries are empty but `update.nest_legacy_update` is present and there
+ * is exactly one climate entity, that climate is used. Several climates and no
+ * Nest match → unmapped (never guess a bedroom AC).
  *
- * Schedule: Google’s SDM climate traits (what HA’s nest integration exposes)
- * cover setpoint, HVAC mode, and eco. They do not include the weekly timetable.
- * Chimes only offers a schedule control when HA actually has a schedule entity
- * on that same device.
+ * Schedule: Nest Legacy exposes setpoint, HVAC mode, and Eco (`climate.set_preset_mode`).
+ * It does not expose the weekly timetable. Chimes only offers a schedule control
+ * when HA actually has a schedule entity on that same device.
  */
 
 import type { ConnectionStatus } from "./house.ts";
 import type { HaDeviceReg, HaEntityReg, HaState } from "./ha.ts";
 
 export const NEST_SCHEDULE_NOTE =
-  "The weekly schedule stays in the Nest app. Home Assistant’s Nest climate entity does not expose the timetable, so Chimes cannot change it.";
+  "The weekly schedule stays in the Nest app. Nest Legacy does not give Home Assistant the timetable, so Chimes cannot change it.";
+
+export type NestIntegration = "nest_legacy" | "nest" | "badnest";
 
 export type HeatingHistPoint = {
   label: string;
@@ -36,6 +41,8 @@ export type NestSetLine = {
 
 export type HeatingControl = {
   entityId: string | null;
+  /** Which Nest integration owns this climate. Null when only the name matched. */
+  integration: NestIntegration | null;
   label: string;
   available: boolean;
   /** Room temperature the Nest shows (°C from HA; Nest SDM is Celsius). */
@@ -51,7 +58,11 @@ export type HeatingControl = {
   presetModes: string[];
   eco: boolean;
   ecoSupported: boolean;
-  /** SDM rejects setpoint writes while Eco is on, and while the thermostat is off. */
+  /**
+   * False while the thermostat is off.
+   * Official Nest (SDM) also rejects setpoint writes while Eco is on.
+   * Nest Legacy accepts them and leaves Eco, so the stepper stays enabled.
+   */
   setpointWritable: boolean;
   minC: number;
   maxC: number;
@@ -69,6 +80,7 @@ const NEST_MAX_C = 32;
 export function unmappedHeatingControl(): HeatingControl {
   return {
     entityId: null,
+    integration: null,
     label: "Nest",
     available: false,
     currentC: null,
@@ -97,6 +109,7 @@ export function unmappedHeatingControl(): HeatingControl {
 export function demoHeatingControl(): HeatingControl {
   return {
     entityId: "demo.climate",
+    integration: "nest_legacy",
     label: "Nest",
     available: true,
     currentC: 19.5,
@@ -136,6 +149,25 @@ export const DEMO_HEATING_HISTORY: HeatingHistPoint[] = [
   { label: "21:00", currentC: 19.5, targetC: 21 },
 ];
 
+/** Demo week — one evening point per day, same shape as the live hourly series. */
+export function demoHeatingHistoryWeek(now = new Date()): HeatingHistPoint[] {
+  const out: HeatingHistPoint[] = [];
+  for (let d = 6; d >= 0; d--) {
+    const stamp = new Date(now);
+    stamp.setHours(18, 0, 0, 0);
+    stamp.setDate(stamp.getDate() - d);
+    const day = stamp.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
+    out.push({
+      label: `${day} 18:00`,
+      currentC: Number((18.4 + ((6 - d) % 3) * 0.3).toFixed(1)),
+      targetC: d % 2 === 0 ? 21 : 20,
+    });
+  }
+  return out;
+}
+
+export const DEMO_HEATING_HISTORY_WEEK = demoHeatingHistoryWeek();
+
 export function heatingForScreen(
   status: ConnectionStatus,
   heating: HeatingControl,
@@ -149,6 +181,10 @@ export function heatingForScreen(
   return heating;
 }
 
+export function isNestDomain(domain: string): domain is NestIntegration {
+  return domain === "nest" || domain === "nest_legacy" || domain === "badnest";
+}
+
 export function isNestDevice(device: HaDeviceReg): boolean {
   const bits = [device.manufacturer, device.model, device.name, device.name_by_user]
     .filter((part) => typeof part === "string" && part.trim())
@@ -157,9 +193,22 @@ export function isNestDevice(device: HaDeviceReg): boolean {
   if (bits.includes("nest")) return true;
   for (const row of device.identifiers ?? []) {
     const domain = String(row[0] ?? "").toLowerCase();
-    if (domain === "nest") return true;
+    if (isNestDomain(domain)) return true;
   }
   return false;
+}
+
+function integrationOf(
+  device: HaDeviceReg | null,
+  reg?: HaEntityReg,
+): NestIntegration | null {
+  for (const row of device?.identifiers ?? []) {
+    const domain = String(row[0] ?? "").toLowerCase();
+    if (isNestDomain(domain)) return domain;
+  }
+  const platform = reg?.platform?.toLowerCase() ?? "";
+  if (isNestDomain(platform)) return platform;
+  return null;
 }
 
 function stateAvailable(s: HaState) {
@@ -261,9 +310,13 @@ export function formatNestTemp(c: number | null, withUnit = true): string {
   return withUnit ? `${text}°` : text;
 }
 
+/** Tile badge — the set temperature Nest puts in front, not the room temp. */
 export function nestAmbientBadge(heating: HeatingControl): string {
-  if (!heating.available || heating.currentC == null) return "—";
-  return formatNestTemp(heating.currentC);
+  if (!heating.available) return "—";
+  const line = nestSetLines(heating)[0];
+  if (!line) return "—";
+  if (line.c == null) return line.label === "OFF" ? "Off" : line.label;
+  return formatNestTemp(line.c);
 }
 
 function climateCandidates(
@@ -279,11 +332,19 @@ function climateCandidates(
   });
 }
 
+/** Lower is a better “main house” thermostat when several Nest climates exist. */
+function housePreference(blob: string): number {
+  if (/heat\s*link/.test(blob)) return 40;
+  if (/bedroom|upstairs|loft|nursery/.test(blob)) return 20;
+  if (/downstairs|hallway|hall|living|lounge|house|main/.test(blob)) return 0;
+  return 10;
+}
+
 function pickClimate(
   states: HaState[],
   devices: HaDeviceReg[],
   entities: HaEntityReg[],
-): { state: HaState; device: HaDeviceReg | null } | null {
+): { state: HaState; device: HaDeviceReg | null; integration: NestIntegration | null } | null {
   const byEntity = new Map(entities.map((e) => [e.entity_id, e]));
   const byDevice = new Map(devices.map((d) => [d.id, d]));
   const nestDeviceIds = new Set(devices.filter(isNestDevice).map((d) => d.id));
@@ -291,24 +352,44 @@ function pickClimate(
   const ranked = climateCandidates(states, entities).map((state) => {
     const reg = byEntity.get(state.entity_id);
     const device = reg?.device_id ? (byDevice.get(reg.device_id) ?? null) : null;
-    const onNestDevice = Boolean(reg?.device_id && nestDeviceIds.has(reg.device_id));
+    const integration = integrationOf(device, reg);
+    const onNestDevice =
+      Boolean(reg?.device_id && nestDeviceIds.has(reg.device_id)) || integration != null;
     const nameHit = blobOf(state, reg).includes("nest");
-    return { state, device, onNestDevice, nameHit };
+    return { state, device, reg, integration, onNestDevice, nameHit };
   });
 
   const hits = ranked
     .filter((row) => row.onNestDevice || row.nameHit)
     .sort((a, b) => {
       if (a.onNestDevice !== b.onNestDevice) return a.onNestDevice ? -1 : 1;
+      const aTemp = a.state.attributes.current_temperature != null ? 0 : 1;
+      const bTemp = b.state.attributes.current_temperature != null ? 0 : 1;
+      if (aTemp !== bTemp) return aTemp - bTemp;
       const aHeat = stringList(a.state.attributes.hvac_modes).includes("heat") ? 0 : 1;
       const bHeat = stringList(b.state.attributes.hvac_modes).includes("heat") ? 0 : 1;
       if (aHeat !== bHeat) return aHeat - bHeat;
+      const aHouse = housePreference(blobOf(a.state, a.reg));
+      const bHouse = housePreference(blobOf(b.state, b.reg));
+      if (aHouse !== bHouse) return aHouse - bHouse;
       return a.state.entity_id.localeCompare(b.state.entity_id);
     });
 
   const hit = hits[0];
-  if (!hit) return null;
-  return { state: hit.state, device: hit.device };
+  if (hit) return { state: hit.state, device: hit.device, integration: hit.integration };
+
+  // Registries not loaded yet: Nest Legacy is installed and there is one climate.
+  const legacyInstalled = states.some(
+    (s) => s.entity_id === "update.nest_legacy_update" || s.entity_id.startsWith("update.nest_legacy"),
+  );
+  const climates = climateCandidates(states, entities);
+  if (legacyInstalled && climates.length === 1) {
+    const state = climates[0]!;
+    const reg = byEntity.get(state.entity_id);
+    const device = reg?.device_id ? (byDevice.get(reg.device_id) ?? null) : null;
+    return { state, device, integration: integrationOf(device, reg) ?? "nest_legacy" };
+  }
+  return null;
 }
 
 function scheduleOnDevice(
@@ -335,6 +416,7 @@ function controlFromClimate(
   state: HaState,
   device: HaDeviceReg | null,
   schedule: HaState | null,
+  integration: NestIntegration | null,
 ): HeatingControl {
   const attrs = state.attributes;
   const hvacModes = stringList(attrs.hvac_modes);
@@ -356,7 +438,10 @@ function controlFromClimate(
   const maxC = maxAttr ?? NEST_MAX_C;
   const range = hvacMode === "heat_cool";
   const single = hvacMode === "heat" || hvacMode === "cool";
-  const setpointWritable = stateAvailable(state) && !eco && hvacMode !== "off" && (single || range);
+  // Nest Legacy's climate.set_temperature leaves Eco. SDM rejects the write.
+  const ecoBlocksSetpoint = eco && integration !== "nest_legacy";
+  const setpointWritable =
+    stateAvailable(state) && !ecoBlocksSetpoint && hvacMode !== "off" && (single || range);
 
   const label =
     device?.name_by_user?.trim() ||
@@ -370,6 +455,7 @@ function controlFromClimate(
 
   return {
     entityId: state.entity_id,
+    integration,
     label,
     available: stateAvailable(state),
     currentC,
@@ -408,7 +494,7 @@ export function heatingControlFromInventory(
   const deviceId =
     entities.find((e) => e.entity_id === picked.state.entity_id)?.device_id ?? picked.device?.id;
   const schedule = scheduleOnDevice(states, entities, deviceId);
-  return controlFromClimate(picked.state, picked.device, schedule);
+  return controlFromClimate(picked.state, picked.device, schedule, picked.integration);
 }
 
 type RawHist = {
@@ -504,8 +590,13 @@ export function heatingHistoryFromResult(
     if (!last || last.t > bucketEnd) continue;
     if (last.currentC == null && last.targetC == null) continue;
     const stamp = new Date(bucketEnd);
+    const hh = `${pad2(stamp.getHours())}:00`;
+    const label =
+      hours > 24
+        ? `${stamp.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" })} ${hh}`
+        : hh;
     out.push({
-      label: `${pad2(stamp.getHours())}:00`,
+      label,
       currentC: last.currentC,
       targetC: last.targetC,
       targetHighC: last.targetHighC,
