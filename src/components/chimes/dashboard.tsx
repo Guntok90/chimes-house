@@ -386,7 +386,7 @@ function HomeView() {
   const toggleFanLight = useHouse((s) => s.toggleFanLight);
 
   const liveMode = !usesDemoCharts(status);
-  // Store keeps 7×24h for Overview day-scroll; Home label is "Last 24 hours".
+  // Store keeps ~48h of hourly statistics; Home label is "Last 24 hours".
   const graphData = useMemo(
     () => lastHoursWindow(liveMode ? historyHours : HOURS),
     [liveMode, historyHours],
