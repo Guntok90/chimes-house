@@ -1,8 +1,11 @@
 import { create } from "zustand";
 import {
+  dayEnergyStatisticIds,
+  dayPowerHistoryIds,
   daysFromStatistics,
   historyEntityIds,
   hoursFromHistory,
+  hoursFromHourStatistics,
   mergeGardenIntoTemps,
   monthsFromStatistics,
   normalizeHistoryResult,
@@ -163,10 +166,16 @@ function ratesForHistory(tariffs: TariffRates): {
 }
 
 /**
- * Hourly buffer kept in the store (reuse / scroll elsewhere).
- * Overview Energy Day slices to the trailing 24h via `lastHoursWindow`.
+ * Trailing hourly statistics for the Day energy graph.
+ * Overview / Home / Battery slice to 24h via `lastHoursWindow`.
+ * 48h covers clock skew and a partial current hour — not a 7-day raw history pull.
  */
-export const HISTORY_HOUR_COUNT = 7 * 24;
+export const HISTORY_HOUR_COUNT = 48;
+/**
+ * Raw state-history fallback when hourly statistics do not land.
+ * About a day and a half — never the old 7-day / 168h power megapull.
+ */
+export const HISTORY_HOUR_FALLBACK_COUNT = 36;
 /**
  * Daily buffer for Month (last 28) and other consumers.
  * Overview Energy Week uses `historyWeek` (7 days); Month uses last 28 days
@@ -244,7 +253,7 @@ type Store = {
   map: HaMap;
   url: string;
   /** Live HA history only — never demo WEEK/HOURS while status === "live". */
-  /** Past-week hourly (≤168). Battery view uses the last 24. */
+  /** Hourly statistics (~48h). Battery / Home / Overview Day use the last 24. */
   historyHours: HourPoint[];
   /** Longer daily series for Overview week scroll (≤56). */
   historyDays: DayPoint[];
@@ -885,20 +894,48 @@ export const useHouse = create<Store>((set, get) => {
         try {
           // Hourly and daily paths are independent — a stats parse throw must
           // not wipe an otherwise-valid series (and never invent demo data).
+          // Day uses period:hour statistics (same recorder family as Week's
+          // period:day). The old 7-day raw history pull of power sensors was
+          // ~1.5 MB, often timed out, and left historyHours empty ("No graph").
           try {
-            const raw = await socket.historyDuringPeriod(
-              ids,
-              startHours.toISOString(),
-              end.toISOString(),
-            );
-            const histBag: HaHistoryBag = normalizeHistoryResult(raw);
-            hours = hoursFromHistory(histBag, map, end, HISTORY_HOUR_COUNT);
-            // Day fallback from history samples (overwritten by hour stats when present).
-            const waterDay = tempsFromHistory(histBag, map.pondWaterTempC, end, 24);
-            const gardenDay = tempsFromHistory(histBag, map.gardenTempC, end, 24);
-            pondDay = mergeGardenIntoTemps(waterDay, gardenDay);
+            const energyIds = dayEnergyStatisticIds(map);
+            if (energyIds.length) {
+              const hourEnergy = (await socket.statisticsDuringPeriod(
+                energyIds,
+                startHours.toISOString(),
+                end.toISOString(),
+                "hour",
+              )) as HaStatisticsBag;
+              hours = hoursFromHourStatistics(hourEnergy, map, end, HISTORY_HOUR_COUNT);
+            }
           } catch {
             hours = [];
+          }
+
+          // Only if hourly statistics did not land: a short raw-history window.
+          // Power / SOC only — pond temps have their own try below and must not
+          // clear historyHours if that parse throws.
+          if (!hours.length) {
+            try {
+              const fallbackIds = dayPowerHistoryIds(map);
+              const startFallback = new Date(
+                end.getTime() - HISTORY_HOUR_FALLBACK_COUNT * 60 * 60 * 1000,
+              );
+              if (fallbackIds.length) {
+                const raw = await socket.historyDuringPeriod(
+                  fallbackIds,
+                  startFallback.toISOString(),
+                  end.toISOString(),
+                );
+                const histBag: HaHistoryBag = normalizeHistoryResult(raw);
+                const hasPoints = fallbackIds.some((id) => (histBag[id]?.length ?? 0) > 0);
+                if (hasPoints) {
+                  hours = hoursFromHistory(histBag, map, end, HISTORY_HOUR_FALLBACK_COUNT);
+                }
+              }
+            } catch {
+              hours = [];
+            }
           }
 
           // Energy first — Overview Energy / Home / Battery must not wait on
@@ -1010,7 +1047,30 @@ export const useHouse = create<Store>((set, get) => {
               const fromYear = pondSlice(POND_YEAR_HOUR_COUNT);
               if (fromYear.length) pondYear = fromYear;
             } catch {
-              /* keep history-sampled pondDay; leave longer ranges empty */
+              /* Pond statistics failed. Do not clear historyHours. */
+            }
+          }
+
+          // Pond Day sample from a short history window only when hour stats
+          // did not fill it. Its own try — a throw here must not set hours = [].
+          if (!pondDay.length && tempIds.length) {
+            try {
+              const startPondDay = new Date(
+                end.getTime() - HISTORY_HOUR_FALLBACK_COUNT * 60 * 60 * 1000,
+              );
+              const raw = await socket.historyDuringPeriod(
+                tempIds,
+                startPondDay.toISOString(),
+                end.toISOString(),
+              );
+              const bag = normalizeHistoryResult(raw);
+              const sampled = mergeGardenIntoTemps(
+                tempsFromHistory(bag, map.pondWaterTempC, end, 24),
+                tempsFromHistory(bag, map.gardenTempC, end, 24),
+              );
+              if (sampled.length) pondDay = sampled;
+            } catch {
+              /* Leave pondDay as-is. Never assign historyHours from this catch. */
             }
           }
 

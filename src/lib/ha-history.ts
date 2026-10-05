@@ -226,6 +226,152 @@ export function hoursFromHistory(
   return out;
 }
 
+/**
+ * True when this entity's recorder statistics are an energy counter (kWh `change`)
+ * rather than a power / measurement `mean` in watts.
+ */
+export function entityStatisticsAreEnergy(entityId: string): boolean {
+  const b = entityId.toLowerCase();
+  return (
+    b.includes("kwh") ||
+    b.includes("yield") ||
+    b.includes("_energy") ||
+    b.includes("energy_") ||
+    b.includes("energy_used")
+  );
+}
+
+/**
+ * Average watts for one statistics hour.
+ * Power sensors: `mean` is W (HA often leaves `change` at 0).
+ * Energy sensors: `change` is kWh over that hour → W = change × 1000.
+ * Never treats cumulative `sum` as watts.
+ */
+function hourAverageWatts(row: HaStatRow | undefined, energy: boolean): number | null {
+  if (!row) return null;
+  if (energy) {
+    const change = num(row.change);
+    if (change == null) return null;
+    return change * 1000;
+  }
+  const mean = num(row.mean);
+  if (mean != null) return mean;
+  const change = num(row.change);
+  if (change != null && change !== 0) return change * 1000;
+  return null;
+}
+
+/** SOC % for one statistics hour. Mean (then state) only — never energy `change`. */
+function hourSocPercent(row: HaStatRow | undefined): number | null {
+  if (!row) return null;
+  const mean = num(row.mean);
+  if (mean != null) return Math.round(mean);
+  const state = num(row.state);
+  if (state != null) return Math.round(state);
+  return null;
+}
+
+function indexStatHours(rows: HaStatRow[] | undefined): Map<string, HaStatRow> {
+  const byHour = new Map<string, HaStatRow>();
+  if (!rows?.length) return byHour;
+  for (const row of rows) {
+    const key = hourKeyFromStart(row.start);
+    if (key) byHour.set(key, row);
+  }
+  return byHour;
+}
+
+/**
+ * Hourly Day-graph points from recorder statistics (`period: "hour"`).
+ *
+ * Power sensors and SOC use `mean`. Energy sensors (yield / kWh) use `change`,
+ * converted to average watts for the same HourPoint fields the Day chart plots.
+ * Empty → [] (never invent a flat zero series when nothing landed).
+ *
+ * `count` is the trailing window (store keeps ~48h; Overview slices to 24).
+ * Indexed by local hour — same approach as `tempsFromHourStatistics`, not O(n²) find.
+ */
+export function hoursFromHourStatistics(
+  stats: HaStatisticsBag,
+  map: HaMap,
+  now = new Date(),
+  count = 48,
+): HourPoint[] {
+  const solarId = map.solarNowW;
+  const yieldId = map.solarTodayKwh;
+  const battId = map.batteryW;
+  const socId = map.soc;
+  const gridId = map.gridW;
+  const houseId = map.houseW;
+  const zappiId = map.zappiW;
+  if (!solarId && !yieldId && !battId && !socId && !gridId && !houseId && !zappiId) return [];
+  if (count <= 0) return [];
+
+  const solarByHour = indexStatHours(solarId ? stats[solarId] : undefined);
+  const yieldByHour = indexStatHours(yieldId && yieldId !== solarId ? stats[yieldId] : undefined);
+  const battByHour = indexStatHours(battId ? stats[battId] : undefined);
+  const socByHour = indexStatHours(socId ? stats[socId] : undefined);
+  const gridByHour = indexStatHours(gridId ? stats[gridId] : undefined);
+  const houseByHour = indexStatHours(houseId ? stats[houseId] : undefined);
+  const zappiByHour = indexStatHours(zappiId ? stats[zappiId] : undefined);
+  const solarIsEnergy = Boolean(solarId && entityStatisticsAreEnergy(solarId));
+  const battIsEnergy = Boolean(battId && entityStatisticsAreEnergy(battId));
+  const gridIsEnergy = Boolean(gridId && entityStatisticsAreEnergy(gridId));
+  const houseIsEnergy = Boolean(houseId && entityStatisticsAreEnergy(houseId));
+  const zappiIsEnergy = Boolean(zappiId && entityStatisticsAreEnergy(zappiId));
+
+  const out: HourPoint[] = [];
+  const end = new Date(now);
+  end.setMinutes(0, 0, 0);
+  const multiDay = count > 24;
+  let hits = 0;
+  let socHold = 0;
+  for (let i = count - 1; i >= 0; i--) {
+    const t = new Date(end);
+    t.setHours(end.getHours() - i);
+    const key = localHourKey(t);
+    const solarPower = solarId ? hourAverageWatts(solarByHour.get(key), solarIsEnergy) : null;
+    const solarEnergy =
+      yieldId && yieldId !== solarId ? hourAverageWatts(yieldByHour.get(key), true) : null;
+    const solarSample = solarPower != null ? solarPower : solarEnergy;
+    const battSample = battId ? hourAverageWatts(battByHour.get(key), battIsEnergy) : null;
+    const gridSample = gridId ? hourAverageWatts(gridByHour.get(key), gridIsEnergy) : null;
+    const zappiSample = zappiId ? hourAverageWatts(zappiByHour.get(key), zappiIsEnergy) : null;
+    const houseSample = houseId ? hourAverageWatts(houseByHour.get(key), houseIsEnergy) : null;
+    const socSample = socId ? hourSocPercent(socByHour.get(key)) : null;
+    if (
+      solarSample != null ||
+      battSample != null ||
+      gridSample != null ||
+      zappiSample != null ||
+      houseSample != null ||
+      socSample != null
+    ) {
+      hits += 1;
+    }
+    if (socSample != null) socHold = socSample;
+    const solarW = Math.round(solarSample ?? 0);
+    const battW = Math.round(battSample ?? 0);
+    const gridW = Math.round(gridSample ?? 0);
+    const zappiW = zappiSample ?? 0;
+    const houseW =
+      houseSample != null
+        ? Math.max(0, Math.round(houseSample))
+        : deriveHouseW(solarW, gridW, battW, zappiW);
+    out.push({
+      hour: hourLabel(t, multiDay),
+      soc: socSample != null ? socSample : socHold,
+      battW,
+      solarW,
+      houseW,
+      gridW,
+      carW: Math.round(Math.max(0, zappiW)),
+    });
+  }
+  if (hits === 0) return [];
+  return out;
+}
+
 function dayLabel(isoDay: string) {
   const d = new Date(`${isoDay}T12:00:00`);
   return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric" });
@@ -824,6 +970,27 @@ export function mergeGardenIntoTemps(water: TempPoint[], garden: TempPoint[]): T
     if (g?.tempC != null) point.gardenTempC = g.tempC;
     return point;
   });
+}
+
+function dedupeIds(ids: (string | undefined)[]): string[] {
+  return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+}
+
+/**
+ * Power, SOC, house, and zappi ids for a short raw-history fallback.
+ * No energy counters and no pond temps — those must not ride along on Day.
+ */
+export function dayPowerHistoryIds(map: HaMap): string[] {
+  return dedupeIds([map.solarNowW, map.batteryW, map.soc, map.gridW, map.houseW, map.zappiW]);
+}
+
+/**
+ * Statistic ids for the Day energy graph (`period: "hour"`).
+ * Same power sensors as the chart, plus the solar energy counter (`change` → W).
+ * Pond temperatures stay on their own fetch.
+ */
+export function dayEnergyStatisticIds(map: HaMap): string[] {
+  return dedupeIds([...dayPowerHistoryIds(map), map.solarTodayKwh]);
 }
 
 export function historyEntityIds(map: HaMap): string[] {
