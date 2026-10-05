@@ -315,7 +315,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
           <StackedTile title="Weather" badge={weatherBadge} tall="chart" style={tileStyle}>
             <OverviewWeatherPanel weather={weather} />
           </StackedTile>
-          <StackedTile title="Nest" badge={nestBadge} tall="glance" style={tileStyle}>
+          <StackedTile title="Central Heating" badge={nestBadge} tall="glance" style={tileStyle}>
             <NestAmbientFace heating={heating} />
           </StackedTile>
           <StackedTile
@@ -358,7 +358,7 @@ export function Overview({ onClose }: { onClose: () => void }) {
 
           <GlassTile
             storageKey={OVERVIEW_HEAT_BOX_KEY}
-            title="Nest"
+            title="Central Heating"
             badge={nestBadge}
             handleOnly
             fallback={defaultHeat}
@@ -475,7 +475,7 @@ function StackedTile({
         tall === "chart"
           ? "h-[min(42dvh,20rem)] min-h-[14rem]"
           : tall === "glance"
-            ? "h-[min(36dvh,18rem)] min-h-[14rem]"
+            ? "h-[min(46dvh,24rem)] min-h-[18rem]"
             : "h-[min(52dvh,24rem)] min-h-[17.5rem]",
       )}
     >
@@ -1106,13 +1106,13 @@ function defaultPond(): Box {
   };
 }
 
-/** Nest face — current temperature and Heat set to. Sits low-centre so it can be dragged. */
+/** Nest face — Heat set to, then current temperature. Sits low-centre so it can be dragged. */
 function defaultHeat(): Box {
-  const w = Math.min(340, Math.max(300, window.innerWidth - 48));
-  const h = Math.min(280, Math.max(220, window.innerHeight - 160));
+  const w = Math.min(380, Math.max(300, window.innerWidth - 48));
+  const h = Math.min(440, Math.max(320, Math.round(window.innerHeight * 0.46)));
   return {
     x: Math.max(24, Math.round((window.innerWidth - w) / 2)),
-    y: Math.max(96, window.innerHeight - h - 28),
+    y: Math.max(96, Math.round(window.innerHeight * 0.22)),
     w,
     h,
   };

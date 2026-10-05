@@ -1825,9 +1825,9 @@ export type HaDeviceReg = {
   manufacturer?: string | null;
   model?: string | null;
   /**
-   * Integration identifiers. Nest’s official integration uses
-   * `["nest", "enterprises/…/devices/…"]` — that domain is how Chimes finds
-   * the thermostat without guessing `climate.*` ids.
+   * Integration identifiers. Official Nest uses `["nest", "enterprises/…"]`.
+   * Nest Legacy (this house) uses `["nest_legacy", "<serial>"]`. That domain
+   * is how Chimes finds the thermostat without guessing `climate.*` ids.
    */
   identifiers?: string[][] | null;
 };
@@ -1845,6 +1845,8 @@ export type HaEntityReg = {
    * (Meross/Smart Life plugs are often user/integration-hidden; see #34 Willow).
    */
   hidden_by?: string | null;
+  /** Integration domain (`nest_legacy`, `nest`, …) when the registry sent it. */
+  platform?: string | null;
 };
 
 /** Controllable switch/light for Home, grouped by HA area. */
@@ -2842,22 +2844,26 @@ export class HaSocket {
     entityIds: string[],
     start: string,
     end: string,
-    options?: { attributes?: boolean },
+    options?: { attributes?: boolean; timeoutMs?: number },
   ) {
     if (!entityIds.length || !this.ws) return [];
     // Climate history stores room temp and setpoint on attributes. The state
     // string is only the HVAC mode, so Nest charts must ask for attributes.
     const withAttributes = Boolean(options?.attributes);
     try {
-      const result = await this.send("history/history_during_period", {
-        start_time: start,
-        end_time: end,
-        entity_ids: entityIds,
-        include_start_time_state: true,
-        significant_changes_only: false,
-        minimal_response: !withAttributes,
-        no_attributes: !withAttributes,
-      });
+      const result = await this.send(
+        "history/history_during_period",
+        {
+          start_time: start,
+          end_time: end,
+          entity_ids: entityIds,
+          include_start_time_state: true,
+          significant_changes_only: false,
+          minimal_response: !withAttributes,
+          no_attributes: !withAttributes,
+        },
+        options?.timeoutMs ?? 20_000,
+      );
       return result;
     } catch {
       return [];
@@ -2976,6 +2982,7 @@ export class HaSocket {
           name: e.name ?? null,
           disabled_by: e.disabled_by ?? null,
           hidden_by: e.hidden_by ?? null,
+          platform: typeof e.platform === "string" ? e.platform : null,
         }));
     } catch {
       return [];
