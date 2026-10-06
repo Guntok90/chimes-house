@@ -1398,6 +1398,7 @@ export function interestForLiveUi(
   areaSwitches: AreaSwitch[] = [],
   fan: Pick<FanControl, "entityId" | "speedEntityId" | "lightEntityId"> | null = null,
   states?: HaState[] | Map<string, HaState>,
+  heatingEntityId: string | null = null,
 ): Set<string> {
   const ids = interestFromMap(map, states);
   for (const sw of areaSwitches) {
@@ -1406,6 +1407,7 @@ export function interestForLiveUi(
   if (fan?.entityId) ids.add(fan.entityId);
   if (fan?.speedEntityId) ids.add(fan.speedEntityId);
   if (fan?.lightEntityId) ids.add(fan.lightEntityId);
+  if (heatingEntityId && !heatingEntityId.startsWith("demo.")) ids.add(heatingEntityId);
   return ids;
 }
 
@@ -1820,6 +1822,14 @@ export type HaDeviceReg = {
   area_id: string | null;
   name?: string | null;
   name_by_user?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  /**
+   * Integration identifiers. Official Nest uses `["nest", "enterprises/…"]`.
+   * Nest Legacy (this house) uses `["nest_legacy", "<serial>"]`. That domain
+   * is how Chimes finds the thermostat without guessing `climate.*` ids.
+   */
+  identifiers?: string[][] | null;
 };
 
 /** HA entity registry row (config/entity_registry/list). */
@@ -1835,6 +1845,8 @@ export type HaEntityReg = {
    * (Meross/Smart Life plugs are often user/integration-hidden; see #34 Willow).
    */
   hidden_by?: string | null;
+  /** Integration domain (`nest_legacy`, `nest`, …) when the registry sent it. */
+  platform?: string | null;
 };
 
 /** Controllable switch/light for Home, grouped by HA area. */
@@ -2463,6 +2475,16 @@ export function resolveFrontGardenTiles(
 
 type Msg = { id?: number; type: string; [k: string]: unknown };
 
+function readDeviceIdentifiers(raw: unknown): string[][] | null {
+  if (!Array.isArray(raw)) return null;
+  const out: string[][] = [];
+  for (const row of raw) {
+    if (!Array.isArray(row) || row.length < 1) continue;
+    out.push(row.map((part) => String(part)));
+  }
+  return out.length ? out : null;
+}
+
 /**
  * Browser WebSocket to Home Assistant.
  *
@@ -2818,22 +2840,91 @@ export class HaSocket {
    * HA recorder history for chart series. Returns [] when the Pi has no data or
    * the command is unsupported — callers must not fall back to demo curves.
    */
-  async historyDuringPeriod(entityIds: string[], start: string, end: string) {
+  async historyDuringPeriod(
+    entityIds: string[],
+    start: string,
+    end: string,
+    options?: { attributes?: boolean; timeoutMs?: number },
+  ) {
     if (!entityIds.length || !this.ws) return [];
+    // Climate history stores room temp and setpoint on attributes. The state
+    // string is only the HVAC mode, so Nest charts must ask for attributes.
+    const withAttributes = Boolean(options?.attributes);
     try {
-      const result = await this.send("history/history_during_period", {
-        start_time: start,
-        end_time: end,
-        entity_ids: entityIds,
-        include_start_time_state: true,
-        significant_changes_only: false,
-        minimal_response: true,
-        no_attributes: true,
-      });
+      const result = await this.send(
+        "history/history_during_period",
+        {
+          start_time: start,
+          end_time: end,
+          entity_ids: entityIds,
+          include_start_time_state: true,
+          significant_changes_only: false,
+          minimal_response: !withAttributes,
+          no_attributes: !withAttributes,
+        },
+        options?.timeoutMs ?? 20_000,
+      );
       return result;
     } catch {
       return [];
     }
+  }
+
+  /** `climate.set_temperature` — heat/cool use `temperature`; heat_cool uses the range. */
+  async setClimateTemperature(
+    entityId: string,
+    data: { temperature?: number; target_temp_low?: number; target_temp_high?: number },
+    timeoutMs = 45_000,
+  ) {
+    const [domain] = entityId.split(".");
+    if (domain !== "climate") throw new Error("Only climate entities can set a temperature.");
+    const service_data: Record<string, number> = {};
+    if (data.temperature != null) service_data.temperature = data.temperature;
+    if (data.target_temp_low != null) service_data.target_temp_low = data.target_temp_low;
+    if (data.target_temp_high != null) service_data.target_temp_high = data.target_temp_high;
+    if (!Object.keys(service_data).length) throw new Error("No temperature to set.");
+    await this.send(
+      "call_service",
+      {
+        domain: "climate",
+        service: "set_temperature",
+        service_data,
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
+  }
+
+  /** `climate.set_hvac_mode` — only modes the entity already lists. */
+  async setClimateHvacMode(entityId: string, hvacMode: string, timeoutMs = 45_000) {
+    const [domain] = entityId.split(".");
+    if (domain !== "climate") throw new Error("Only climate entities can set a mode.");
+    await this.send(
+      "call_service",
+      {
+        domain: "climate",
+        service: "set_hvac_mode",
+        service_data: { hvac_mode: hvacMode },
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
+  }
+
+  /** `climate.set_preset_mode` — Nest eco is preset `eco`; off is `none`. */
+  async setClimatePreset(entityId: string, presetMode: string, timeoutMs = 45_000) {
+    const [domain] = entityId.split(".");
+    if (domain !== "climate") throw new Error("Only climate entities can set a preset.");
+    await this.send(
+      "call_service",
+      {
+        domain: "climate",
+        service: "set_preset_mode",
+        service_data: { preset_mode: presetMode },
+        target: { entity_id: entityId },
+      },
+      timeoutMs,
+    );
   }
 
   async statisticsDuringPeriod(
@@ -2891,6 +2982,7 @@ export class HaSocket {
           name: e.name ?? null,
           disabled_by: e.disabled_by ?? null,
           hidden_by: e.hidden_by ?? null,
+          platform: typeof e.platform === "string" ? e.platform : null,
         }));
     } catch {
       return [];
@@ -2910,6 +3002,9 @@ export class HaSocket {
           area_id: d.area_id ?? null,
           name: d.name ?? null,
           name_by_user: d.name_by_user ?? null,
+          manufacturer: d.manufacturer ?? null,
+          model: d.model ?? null,
+          identifiers: readDeviceIdentifiers(d.identifiers),
         }));
     } catch {
       return [];

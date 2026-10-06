@@ -1,8 +1,11 @@
 import { create } from "zustand";
 import {
+  dayEnergyStatisticIds,
+  dayPowerHistoryIds,
   daysFromStatistics,
   historyEntityIds,
   hoursFromHistory,
+  hoursFromHourStatistics,
   mergeGardenIntoTemps,
   monthsFromStatistics,
   normalizeHistoryResult,
@@ -57,6 +60,14 @@ import {
   type PowerLimitKey,
   type SwitchId,
 } from "./ha";
+import {
+  heatingControlFromInventory,
+  heatingHistoryFromResult,
+  demoHeatingControl,
+  roundTemp,
+  type HeatingControl,
+  type HeatingHistPoint,
+} from "./heating";
 import { applyLiveStates } from "./live-updates";
 import { DEMO_WEATHER, type WeatherLive } from "./weather";
 import {
@@ -107,8 +118,9 @@ function syncSocketInterest(
   areaSwitches: AreaSwitch[],
   fan: FanControl,
   states?: HaState[],
+  heatingEntityId?: string | null,
 ) {
-  socket.interest = interestForLiveUi(map, areaSwitches, fan, states);
+  socket.interest = interestForLiveUi(map, areaSwitches, fan, states, heatingEntityId ?? null);
 }
 
 function bootTariffs(): TariffState {
@@ -154,10 +166,16 @@ function ratesForHistory(tariffs: TariffRates): {
 }
 
 /**
- * Hourly buffer kept in the store (reuse / scroll elsewhere).
- * Overview Energy Day slices to the trailing 24h via `lastHoursWindow`.
+ * Trailing hourly statistics for the Day energy graph.
+ * Overview / Home / Battery slice to 24h via `lastHoursWindow`.
+ * 48h covers clock skew and a partial current hour — not a 7-day raw history pull.
  */
-export const HISTORY_HOUR_COUNT = 7 * 24;
+export const HISTORY_HOUR_COUNT = 48;
+/**
+ * Raw state-history fallback when hourly statistics do not land.
+ * About a day and a half — never the old 7-day / 168h power megapull.
+ */
+export const HISTORY_HOUR_FALLBACK_COUNT = 36;
 /**
  * Daily buffer for Month (last 28) and other consumers.
  * Overview Energy Week uses `historyWeek` (7 days); Month uses last 28 days
@@ -221,12 +239,21 @@ type Store = {
   areaSwitches: AreaSwitch[];
   /** Curated Home Fan tile (on/off + speed). Unmapped when live ids missing. */
   fanControl: FanControl;
+  /** Nest climate discovered from the Pi. Unmapped when no Nest device is present. */
+  heating: HeatingControl;
+  /** Recorder history for the Nest climate entity (attributes). Never demo while live. */
+  heatingHistory: HeatingHistPoint[];
+  /** Same climate entity, last 7 days, hourly. Never demo while live. */
+  heatingHistoryWeek: HeatingHistPoint[];
+  heatingHistoryStatus: HistoryStatus;
+  heatingHistoryWeekStatus: HistoryStatus;
+  heatingWriteError?: string;
   status: Status;
   error?: string;
   map: HaMap;
   url: string;
   /** Live HA history only — never demo WEEK/HOURS while status === "live". */
-  /** Past-week hourly (≤168). Battery view uses the last 24. */
+  /** Hourly statistics (~48h). Battery / Home / Overview Day use the last 24. */
   historyHours: HourPoint[];
   /** Longer daily series for Overview week scroll (≤56). */
   historyDays: DayPoint[];
@@ -301,6 +328,19 @@ type Store = {
   setFanSpeedLevel: (level: number) => void;
   /** Optional Tuya fan light toggle when mapped. */
   toggleFanLight: () => void;
+  /** Nest setpoint. Ignored while the thermostat is off. Official Nest also ignores it during Eco; Nest Legacy leaves Eco. */
+  setHeatingTemperature: (patch: {
+    temperature?: number;
+    targetLow?: number;
+    targetHigh?: number;
+  }) => Promise<boolean>;
+  /** Nest HVAC mode — only a mode the climate entity already lists. */
+  setHeatingMode: (mode: string) => Promise<boolean>;
+  /** Nest Eco preset (`eco` / `none`) when HA exposes it. */
+  setHeatingEco: (on: boolean) => Promise<boolean>;
+  /** Schedule option, only when a schedule entity exists on the Nest device. */
+  setHeatingSchedule: (option: string) => Promise<boolean>;
+  refreshHeatingHistory: () => Promise<void>;
   /** Save custom cheap/peak £/kWh — HA helpers when mapped, else localStorage. */
   setTariffs: (patch: Partial<TariffRates>) => Promise<boolean>;
   refreshHistory: () => Promise<void>;
@@ -309,6 +349,7 @@ type Store = {
 let bootInFlight: Promise<void> | null = null;
 let connectInFlight: Promise<void> | null = null;
 let historyInFlight: Promise<void> | null = null;
+let heatingHistoryInFlight: Promise<void> | null = null;
 /** Once we have been live this SPA session, keep last readings across drops. */
 let hadLiveSession = false;
 let reconnectTimer: number | null = null;
@@ -559,6 +600,11 @@ export const useHouse = create<Store>((set, get) => {
     switches: {},
     areaSwitches: demoAreaSwitches({}),
     fanControl: demoFanControl(),
+    heating: demoHeatingControl(),
+    heatingHistory: [],
+    heatingHistoryWeek: [],
+    heatingHistoryStatus: "idle",
+    heatingHistoryWeekStatus: "idle",
     status: "demo",
     map: {},
     url: DEFAULT_HA_URL,
@@ -605,6 +651,12 @@ export const useHouse = create<Store>((set, get) => {
               weather: DEMO_WEATHER,
               areaSwitches: demoAreaSwitches({}),
               fanControl: demoFanControl(),
+              heating: demoHeatingControl(),
+              heatingHistory: [],
+              heatingHistoryWeek: [],
+              heatingHistoryStatus: "idle",
+              heatingHistoryWeekStatus: "idle",
+              heatingWriteError: undefined,
               tariffs: resolveTariffs(null, readLocalTariffs()),
               error: undefined,
               ...emptyHistory(),
@@ -724,10 +776,13 @@ export const useHouse = create<Store>((set, get) => {
         if (tariffs.source === "ha") writeLocalTariffs(tariffs);
         const areaSwitches = rebuildAreaSwitches(list);
         const fanControl = fanControlFromStates(list, mapped);
-        syncSocketInterest(mapped, areaSwitches, fanControl, list);
+        const heating = heatingControlFromInventory(list, deviceRegCache, entityRegCache);
+        const prevHeatingId = get().heating.entityId;
+        syncSocketInterest(mapped, areaSwitches, fanControl, list, heating.entityId);
         set({
           areaSwitches,
           fanControl,
+          heating,
           chargeLimitMeta: chargeLimitMetaMap(list, mapped),
           powerLimitMeta: powerLimitMetaMap(list, mapped),
           zappiModeOptions: zappiModeOptions(list, mapped),
@@ -737,6 +792,15 @@ export const useHouse = create<Store>((set, get) => {
         });
         if (!wasLive && get().status === "live") {
           void refreshRegistries();
+        }
+        const heatingId = heating.entityId;
+        if (
+          get().status === "live" &&
+          heatingId &&
+          !heatingId.startsWith("demo.") &&
+          (heatingId !== prevHeatingId || get().heatingHistoryStatus === "idle")
+        ) {
+          void get().refreshHeatingHistory();
         }
       };
 
@@ -830,20 +894,48 @@ export const useHouse = create<Store>((set, get) => {
         try {
           // Hourly and daily paths are independent — a stats parse throw must
           // not wipe an otherwise-valid series (and never invent demo data).
+          // Day uses period:hour statistics (same recorder family as Week's
+          // period:day). The old 7-day raw history pull of power sensors was
+          // ~1.5 MB, often timed out, and left historyHours empty ("No graph").
           try {
-            const raw = await socket.historyDuringPeriod(
-              ids,
-              startHours.toISOString(),
-              end.toISOString(),
-            );
-            const histBag: HaHistoryBag = normalizeHistoryResult(raw);
-            hours = hoursFromHistory(histBag, map, end, HISTORY_HOUR_COUNT);
-            // Day fallback from history samples (overwritten by hour stats when present).
-            const waterDay = tempsFromHistory(histBag, map.pondWaterTempC, end, 24);
-            const gardenDay = tempsFromHistory(histBag, map.gardenTempC, end, 24);
-            pondDay = mergeGardenIntoTemps(waterDay, gardenDay);
+            const energyIds = dayEnergyStatisticIds(map);
+            if (energyIds.length) {
+              const hourEnergy = (await socket.statisticsDuringPeriod(
+                energyIds,
+                startHours.toISOString(),
+                end.toISOString(),
+                "hour",
+              )) as HaStatisticsBag;
+              hours = hoursFromHourStatistics(hourEnergy, map, end, HISTORY_HOUR_COUNT);
+            }
           } catch {
             hours = [];
+          }
+
+          // Only if hourly statistics did not land: a short raw-history window.
+          // Power / SOC only — pond temps have their own try below and must not
+          // clear historyHours if that parse throws.
+          if (!hours.length) {
+            try {
+              const fallbackIds = dayPowerHistoryIds(map);
+              const startFallback = new Date(
+                end.getTime() - HISTORY_HOUR_FALLBACK_COUNT * 60 * 60 * 1000,
+              );
+              if (fallbackIds.length) {
+                const raw = await socket.historyDuringPeriod(
+                  fallbackIds,
+                  startFallback.toISOString(),
+                  end.toISOString(),
+                );
+                const histBag: HaHistoryBag = normalizeHistoryResult(raw);
+                const hasPoints = fallbackIds.some((id) => (histBag[id]?.length ?? 0) > 0);
+                if (hasPoints) {
+                  hours = hoursFromHistory(histBag, map, end, HISTORY_HOUR_FALLBACK_COUNT);
+                }
+              }
+            } catch {
+              hours = [];
+            }
           }
 
           // Energy first — Overview Energy / Home / Battery must not wait on
@@ -955,7 +1047,30 @@ export const useHouse = create<Store>((set, get) => {
               const fromYear = pondSlice(POND_YEAR_HOUR_COUNT);
               if (fromYear.length) pondYear = fromYear;
             } catch {
-              /* keep history-sampled pondDay; leave longer ranges empty */
+              /* Pond statistics failed. Do not clear historyHours. */
+            }
+          }
+
+          // Pond Day sample from a short history window only when hour stats
+          // did not fill it. Its own try — a throw here must not set hours = [].
+          if (!pondDay.length && tempIds.length) {
+            try {
+              const startPondDay = new Date(
+                end.getTime() - HISTORY_HOUR_FALLBACK_COUNT * 60 * 60 * 1000,
+              );
+              const raw = await socket.historyDuringPeriod(
+                tempIds,
+                startPondDay.toISOString(),
+                end.toISOString(),
+              );
+              const bag = normalizeHistoryResult(raw);
+              const sampled = mergeGardenIntoTemps(
+                tempsFromHistory(bag, map.pondWaterTempC, end, 24),
+                tempsFromHistory(bag, map.gardenTempC, end, 24),
+              );
+              if (sampled.length) pondDay = sampled;
+            } catch {
+              /* Leave pondDay as-is. Never assign historyHours from this catch. */
             }
           }
 
@@ -988,6 +1103,12 @@ export const useHouse = create<Store>((set, get) => {
         weather: DEMO_WEATHER,
         areaSwitches: demoAreaSwitches({}),
         fanControl: demoFanControl(),
+        heating: demoHeatingControl(),
+        heatingHistory: [],
+        heatingHistoryWeek: [],
+        heatingHistoryStatus: "idle",
+        heatingHistoryWeekStatus: "idle",
+        heatingWriteError: undefined,
         error: undefined,
         writeError: undefined,
         writePending: undefined,
@@ -1670,6 +1791,220 @@ export const useHouse = create<Store>((set, get) => {
         void socket.call(fanControl.lightEntityId, nextOn);
       }
     },
+
+    async setHeatingTemperature(patch) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.entityId || !heating.setpointWritable) return false;
+      const prev = heating;
+      const temperature =
+        patch.temperature != null ? roundTemp(patch.temperature, heating.stepC) : undefined;
+      const targetLow =
+        patch.targetLow != null ? roundTemp(patch.targetLow, heating.stepC) : undefined;
+      const targetHigh =
+        patch.targetHigh != null ? roundTemp(patch.targetHigh, heating.stepC) : undefined;
+      const leaveEco = heating.integration === "nest_legacy" && heating.eco;
+      set({
+        heatingWriteError: undefined,
+        heating: {
+          ...heating,
+          targetC: temperature ?? heating.targetC,
+          targetLowC: targetLow ?? heating.targetLowC,
+          targetHighC: targetHigh ?? heating.targetHighC,
+          eco: leaveEco ? false : heating.eco,
+          presetMode:
+            leaveEco && heating.presetModes.includes("none") ? "none" : heating.presetMode,
+        },
+      });
+      if (heating.entityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        if (heating.hvacMode === "heat_cool") {
+          const low = targetLow ?? heating.targetLowC;
+          const high = targetHigh ?? heating.targetHighC;
+          if (low == null || high == null) {
+            set({ heating: prev });
+            return false;
+          }
+          await socket.setClimateTemperature(heating.entityId, {
+            target_temp_low: low,
+            target_temp_high: high,
+          });
+        } else if (temperature != null) {
+          await socket.setClimateTemperature(heating.entityId, { temperature });
+        } else {
+          set({ heating: prev });
+          return false;
+        }
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "the Nest setpoint"),
+        });
+        return false;
+      }
+    },
+
+    async setHeatingMode(mode) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.entityId) return false;
+      if (!heating.hvacModes.includes(mode) || mode === heating.hvacMode) return false;
+      const prev = heating;
+      const setpointWritable = mode === "heat" || mode === "cool" || mode === "heat_cool";
+      set({
+        heatingWriteError: undefined,
+        heating: {
+          ...heating,
+          hvacMode: mode,
+          eco: mode === "off" ? false : heating.eco,
+          setpointWritable: setpointWritable && !heating.eco,
+          hvacAction: mode === "off" ? "off" : heating.hvacAction,
+        },
+      });
+      if (heating.entityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        await socket.setClimateHvacMode(heating.entityId, mode);
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "the Nest mode"),
+        });
+        return false;
+      }
+    },
+
+    async setHeatingEco(on) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.entityId || !heating.ecoSupported) return false;
+      const preset = on ? "eco" : heating.presetModes.includes("none") ? "none" : null;
+      if (!preset || !heating.presetModes.includes(preset) || heating.eco === on) return false;
+      const prev = heating;
+      const modeOk =
+        heating.hvacMode === "heat" ||
+        heating.hvacMode === "cool" ||
+        heating.hvacMode === "heat_cool";
+      const ecoBlocks = on && heating.integration !== "nest_legacy";
+      set({
+        heatingWriteError: undefined,
+        heating: {
+          ...heating,
+          eco: on,
+          presetMode: preset,
+          setpointWritable: modeOk && !ecoBlocks,
+        },
+      });
+      if (heating.entityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        await socket.setClimatePreset(heating.entityId, preset);
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "Nest eco"),
+        });
+        return false;
+      }
+    },
+
+    async setHeatingSchedule(option) {
+      const { heating, status } = get();
+      if (!heating.available || !heating.scheduleEntityId) return false;
+      if (!heating.scheduleOptions.includes(option)) return false;
+      const prev = heating;
+      set({
+        heatingWriteError: undefined,
+        heating: { ...heating, scheduleState: option },
+      });
+      if (heating.scheduleEntityId.startsWith("demo.")) return true;
+      if (status !== "live" || !readCreds()) {
+        set({ heating: prev });
+        return false;
+      }
+      try {
+        await socket.setSelect(heating.scheduleEntityId, option);
+        return true;
+      } catch (err) {
+        set({
+          heating: prev,
+          heatingWriteError: haWriteFailureMessage(err, "the Nest schedule"),
+        });
+        return false;
+      }
+    },
+
+    async refreshHeatingHistory() {
+      if (heatingHistoryInFlight) return heatingHistoryInFlight;
+      if (get().status !== "live") return;
+      const entityId = get().heating.entityId;
+      if (!entityId || entityId.startsWith("demo.")) {
+        set({
+          heatingHistory: [],
+          heatingHistoryWeek: [],
+          heatingHistoryStatus: "empty",
+          heatingHistoryWeekStatus: "empty",
+        });
+        return;
+      }
+      set({
+        heatingHistoryStatus: get().heatingHistory.length ? get().heatingHistoryStatus : "loading",
+        heatingHistoryWeekStatus: "loading",
+      });
+      heatingHistoryInFlight = (async () => {
+        const end = new Date();
+        const dayStart = new Date(end.getTime() - 24 * 60 * 60 * 1000);
+        const weekStart = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+        try {
+          const dayRaw = await socket.historyDuringPeriod(
+            [entityId],
+            dayStart.toISOString(),
+            end.toISOString(),
+            { attributes: true, timeoutMs: 25_000 },
+          );
+          if (get().heating.entityId !== entityId) return;
+          const day = heatingHistoryFromResult(dayRaw, entityId, end, 24);
+          set({
+            heatingHistory: day,
+            heatingHistoryStatus: day.length ? "ready" : "empty",
+          });
+          const weekRaw = await socket.historyDuringPeriod(
+            [entityId],
+            weekStart.toISOString(),
+            end.toISOString(),
+            { attributes: true, timeoutMs: 45_000 },
+          );
+          if (get().heating.entityId !== entityId) return;
+          const week = heatingHistoryFromResult(weekRaw, entityId, end, 7 * 24);
+          set({
+            heatingHistoryWeek: week,
+            heatingHistoryWeekStatus: week.length ? "ready" : "empty",
+          });
+        } catch {
+          if (get().heating.entityId === entityId) {
+            set({
+              heatingHistory: get().heatingHistory,
+              heatingHistoryWeek: [],
+              heatingHistoryStatus: get().heatingHistory.length ? "ready" : "empty",
+              heatingHistoryWeekStatus: "empty",
+            });
+          }
+        } finally {
+          heatingHistoryInFlight = null;
+        }
+      })();
+      return heatingHistoryInFlight;
+    },
   };
 });
 
@@ -1704,8 +2039,20 @@ async function refreshRegistries() {
   const map = useHouse.getState().map;
   const areaSwitches = rebuildAreaSwitches(lastStates);
   const fanControl = fanControlFromStates(lastStates, map);
-  syncSocketInterest(map, areaSwitches, fanControl, lastStates);
-  useHouse.setState({ areaSwitches, fanControl });
+  const prevHeatingId = useHouse.getState().heating.entityId;
+  const heating = heatingControlFromInventory(lastStates, deviceRegCache, entityRegCache);
+  syncSocketInterest(map, areaSwitches, fanControl, lastStates, heating.entityId);
+  useHouse.setState({ areaSwitches, fanControl, heating });
+  if (
+    heating.entityId &&
+    !heating.entityId.startsWith("demo.") &&
+    (heating.entityId !== prevHeatingId ||
+      useHouse.getState().heatingHistoryStatus === "idle" ||
+      useHouse.getState().heatingHistoryStatus === "empty" ||
+      useHouse.getState().heatingHistoryWeekStatus === "idle")
+  ) {
+    void useHouse.getState().refreshHeatingHistory();
+  }
 }
 
 export function useLive() {

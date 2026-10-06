@@ -2,13 +2,17 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   dailyMeansFromHourStatistics,
+  dayEnergyStatisticIds,
   dayKeyFromStart,
+  dayPowerHistoryIds,
   daySpendGbp,
   daySpendPartsGbp,
   daysFromStatistics,
+  entityStatisticsAreEnergy,
   historyEntityIds,
   hourKwh,
   hoursFromHistory,
+  hoursFromHourStatistics,
   lastHoursWindow,
   localDayKey,
   localMonthKey,
@@ -90,6 +94,129 @@ describe("ha history helpers", () => {
       lastHoursWindow(day).map((h) => h.hour),
       day.map((h) => h.hour),
     );
+  });
+
+  it("hoursFromHourStatistics uses mean W for power and SOC, not energy change", () => {
+    const now = new Date(2026, 8, 23, 15, 30, 0, 0);
+    const hourStart = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const prev = new Date(2026, 8, 23, 14, 0, 0, 0);
+    const power = (start: Date, mean: number) => ({
+      start: start.getTime(),
+      mean,
+      change: 0,
+      state: mean,
+    });
+    const solarId = "sensor.inverter_input_power";
+    const battId = "sensor.batteries_charge_discharge_power";
+    const socId = "sensor.battery_1_state_of_capacity";
+    const gridId = "sensor.myenergi_chimes_power_grid";
+    const carId = "sensor.myenergi_chimes_power_charging";
+    const yieldId = "sensor.inverter_daily_yield";
+    const liveMap: HaMap = {
+      solarNowW: solarId,
+      batteryW: battId,
+      soc: socId,
+      gridW: gridId,
+      zappiW: carId,
+      solarTodayKwh: yieldId,
+    };
+    const stats: HaStatisticsBag = {
+      // Non-zero change on a power sensor must not replace mean watts.
+      [solarId]: [
+        { start: hourStart.getTime(), mean: 800, change: 12, state: 800 },
+        power(prev, 100),
+      ],
+      [battId]: [power(hourStart, -200)],
+      // SOC change must not be treated as watts or replace the mean %.
+      [socId]: [{ start: hourStart.getTime(), mean: 70, change: 5, state: 71 }],
+      [gridId]: [power(hourStart, 50)],
+      [carId]: [power(hourStart, 1500)],
+      // Cumulative mean on an energy counter must not become solar watts.
+      [yieldId]: [{ start: hourStart.getTime(), mean: 99999, change: 0.8, state: 99999 }],
+    };
+
+    const hours = hoursFromHourStatistics(stats, liveMap, now, 48);
+    assert.equal(hours.length, 48);
+    const last = hours[hours.length - 1];
+    assert.equal(last.solarW, 800);
+    assert.equal(last.battW, -200);
+    assert.equal(last.soc, 70);
+    assert.equal(last.gridW, 50);
+    assert.equal(last.carW, 1500);
+    // house = solar + grid − battery − zappi = 800 + 50 − (−200) − 1500 = −450 → 0
+    assert.equal(last.houseW, 0);
+    const day = lastHoursWindow(hours, 24);
+    assert.equal(day.length, 24);
+    assert.match(day[day.length - 1].hour, /^\d{2}:00$/);
+    assert.equal(day[day.length - 1].solarW, 800);
+    // Previous hour kept its own solar mean (not held forward from a later row).
+    assert.equal(day[day.length - 2].solarW, 100);
+  });
+
+  it("hoursFromHourStatistics converts energy change kWh into average watts", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const start = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const yieldId = "sensor.inverter_daily_yield";
+    const houseId = "sensor.house_energy_kwh";
+    assert.equal(entityStatisticsAreEnergy(yieldId), true);
+    assert.equal(entityStatisticsAreEnergy(houseId), true);
+    assert.equal(entityStatisticsAreEnergy("sensor.inverter_input_power"), false);
+    assert.equal(entityStatisticsAreEnergy("sensor.myenergi_chimes_power_grid"), false);
+
+    const hours = hoursFromHourStatistics(
+      {
+        [yieldId]: [{ start: start.getTime(), change: 1.25, mean: 40000, state: 40000 }],
+        [houseId]: [{ start: start.getTime(), change: 0.4, mean: 9999, state: 9999 }],
+      },
+      { solarTodayKwh: yieldId, houseW: houseId },
+      now,
+      24,
+    );
+    assert.equal(hours.length, 24);
+    assert.equal(hours[hours.length - 1].solarW, 1250);
+    assert.equal(hours[hours.length - 1].houseW, 400);
+  });
+
+  it("hoursFromHourStatistics uses change when a power id has no mean", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const start = new Date(2026, 8, 23, 15, 0, 0, 0);
+    const solarId = "sensor.inverter_input_power";
+    const hours = hoursFromHourStatistics(
+      { [solarId]: [{ start: start.getTime(), mean: null, change: 0.5, state: 12000 }] },
+      { solarNowW: solarId },
+      now,
+      24,
+    );
+    assert.equal(hours[hours.length - 1].solarW, 500);
+  });
+
+  it("hoursFromHourStatistics returns [] when no hourly rows landed", () => {
+    const now = new Date(2026, 8, 23, 15, 0, 0, 0);
+    assert.deepEqual(hoursFromHourStatistics({}, map, now, 48), []);
+    assert.deepEqual(hoursFromHourStatistics({ "sensor.other": [] }, map, now, 24), []);
+  });
+
+  it("day energy statistic ids include power and yield and omit pond temps", () => {
+    const probe = "sensor.t_h_sensor_with_external_probe_probe_temperature";
+    const garden = "sensor.t_h_sensor_with_external_probe_temperature";
+    const yieldId = "sensor.inverter_daily_yield";
+    const withPond: HaMap = {
+      ...map,
+      solarTodayKwh: yieldId,
+      pondWaterTempC: probe,
+      gardenTempC: garden,
+    };
+    const statsIds = dayEnergyStatisticIds(withPond);
+    const historyIds = dayPowerHistoryIds(withPond);
+    assert.equal(statsIds.includes("sensor.inverter_input_power"), true);
+    assert.equal(statsIds.includes("sensor.batteries_charge_discharge_power"), true);
+    assert.equal(statsIds.includes("sensor.battery_1_state_of_capacity"), true);
+    assert.equal(statsIds.includes(yieldId), true);
+    assert.equal(statsIds.includes(probe), false);
+    assert.equal(statsIds.includes(garden), false);
+    assert.equal(historyIds.includes(yieldId), false);
+    assert.equal(historyIds.includes(probe), false);
+    assert.equal(historyIds.includes("sensor.inverter_input_power"), true);
   });
 
   it("returns empty days when statistics are all zero", () => {

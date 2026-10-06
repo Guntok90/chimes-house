@@ -32,6 +32,7 @@ import { ChargeView } from "./charge-view";
 import { DayAllChart, dayChartLegendColors } from "./charts";
 import { EnergyView } from "./energy-view";
 import { GardenView } from "./garden-view";
+import { CentralHeatingSection } from "./heating-view";
 import { HistoryView } from "./history-view";
 import { NoHistoryYet } from "./no-history";
 import { Overview } from "./overview";
@@ -397,7 +398,7 @@ function HomeView() {
   const toggleFanLight = useHouse((s) => s.toggleFanLight);
 
   const liveMode = !usesDemoCharts(status);
-  // Store keeps 7×24h for Overview day-scroll; Home label is "Last 24 hours".
+  // Store keeps ~48h of hourly statistics; Home label is "Last 24 hours".
   const graphData = useMemo(
     () => lastHoursWindow(liveMode ? historyHours : HOURS),
     [liveMode, historyHours],
@@ -438,6 +439,8 @@ function HomeView() {
           <NoHistoryYet label={historyStatus === "loading" ? "24h graph (loading)" : "24h graph"} />
         )}
       </section>
+
+      <CentralHeatingSection />
 
       <FanHomeTile
         fan={fanControl}
