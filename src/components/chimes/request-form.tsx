@@ -13,11 +13,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowLeft, Bug, Check, ImagePlus, Lightbulb, X } from "lucide-react";
 import { PageTitle, Surface } from "@/components/chimes/ui";
 import { cn } from "@/lib/utils";
-import {
-  MAX_REQUEST_IMAGES,
-  requestKindLabel,
-  type RequestKind,
-} from "@/lib/requests/types";
+import { MAX_REQUEST_IMAGES, requestKindLabel, type RequestKind } from "@/lib/requests/types";
 
 type Preview = {
   id: string;
@@ -31,15 +27,13 @@ const COPY: Record<
 > = {
   bug: {
     title: "Report a bug",
-    blurb:
-      "Something broken or wrong on the dashboard? Screenshots help. Only Guy sees this.",
+    blurb: "Something broken or wrong on the dashboard? Screenshots help. Only Guy sees this.",
     titlePlaceholder: "What’s broken?",
     descPlaceholder: "What happened? What did you expect?",
   },
   feature: {
     title: "Request a feature",
-    blurb:
-      "An idea for something new on Chimes? Screenshots or sketches help. Only Guy sees this.",
+    blurb: "An idea for something new on Chimes? Screenshots or sketches help. Only Guy sees this.",
     titlePlaceholder: "What would you like?",
     descPlaceholder: "Describe the idea — when you’d use it, why it helps.",
   },
@@ -70,12 +64,14 @@ export function RequestFormPage({ kind }: { kind: RequestKind }) {
   }, []);
 
   function addFiles(fileList: FileList | File[]) {
-    const incoming = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
+    const allowed = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp"]);
+    const files = Array.from(fileList);
+    const incoming = files.filter((f) => !f.type || allowed.has(f.type));
     if (incoming.length === 0) {
-      setError("Please choose image files (PNG, JPEG, WebP…)");
+      setError("Use a JPG, PNG, or WebP image");
       return;
     }
-    setError("");
+    setError(incoming.length < files.length ? "Use a JPG, PNG, or WebP image" : "");
     setPreviews((prev) => {
       const room = Math.max(0, MAX_REQUEST_IMAGES - prev.length);
       const nextFiles = incoming.slice(0, room);
@@ -150,6 +146,7 @@ export function RequestFormPage({ kind }: { kind: RequestKind }) {
         previews.map(async (p) => ({
           data: await fileToDataUrl(p.file),
           mimeType: p.file.type || "image/png",
+          filename: p.file.name,
         })),
       );
 
@@ -231,8 +228,8 @@ export function RequestFormPage({ kind }: { kind: RequestKind }) {
               <div>
                 <p className="text-xl font-semibold tracking-tight">Sent</p>
                 <p className="mt-1 text-sm text-ink-soft">
-                  Guy will see this {requestKindLabel(kind).toLowerCase()} in his
-                  inbox. You can send another if you like.
+                  Guy will see this {requestKindLabel(kind).toLowerCase()}. You can send another if
+                  you like.
                 </p>
               </div>
               <button

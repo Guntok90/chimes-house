@@ -12,29 +12,21 @@ const imageItemSchema = z.union([
 ]);
 
 const submitInputSchema = z.object({
-  title: z
-    .string()
-    .min(1)
-    .describe("Short title Dad would recognize on Guy’s inbox list"),
-  description: z
-    .string()
-    .min(1)
-    .describe("What happened / what Dad wants, in plain English"),
+  title: z.string().min(1).describe("Short title for Guy’s desk"),
+  description: z.string().min(1).describe("What happened / what Dad wants, in plain English"),
   images: z
     .array(imageItemSchema)
     .max(6)
     .optional()
-    .describe(
-      "Optional screenshots: data URLs, raw base64 (+ mimeType), or http(s) image URLs",
-    ),
+    .describe("Optional screenshots: data URLs, raw base64 (+ mimeType), or http(s) image URLs"),
 });
 
 /**
  * Build a fresh Chimes house MCP server (per request).
  *
  * Tools:
- * - submit_bug — file a Bug into Guy’s /inbox
- * - submit_feature — file a Feature idea into Guy’s /inbox
+ * - submit_bug — file a Bug for Guy’s desk
+ * - submit_feature — file a Feature idea for Guy’s desk
  */
 export function createChimesMcpServer(): McpServer {
   const server = new McpServer({
@@ -47,7 +39,7 @@ export function createChimesMcpServer(): McpServer {
     {
       title: "Submit bug",
       description:
-        "File a Bug report for Chimes (Dad’s house dashboard). Lands in Guy’s password-gated /inbox with kind=bug. Use when something is broken or wrong.",
+        "File a Bug report for Chimes (Dad’s house dashboard). Guy reads it on his desk. Use when something is broken or wrong.",
       inputSchema: submitInputSchema,
     },
     async (args) => {
@@ -61,7 +53,7 @@ export function createChimesMcpServer(): McpServer {
     {
       title: "Submit feature",
       description:
-        "File a Feature idea for Chimes (Dad’s house dashboard). Lands in Guy’s password-gated /inbox with kind=feature. Use when Dad wants something new or improved — not a breakage.",
+        "File a Feature idea for Chimes (Dad’s house dashboard). Guy reads it on his desk. Use when Dad wants something new or improved — not a breakage.",
       inputSchema: submitInputSchema,
     },
     async (args) => {
@@ -74,7 +66,6 @@ export function createChimesMcpServer(): McpServer {
 }
 
 /** Stateless Streamable HTTP handler for `/api/mcp`. */
-export const chimesMcpHandler = createMcpHandler(
-  () => createChimesMcpServer(),
-  { responseMode: "json" },
-);
+export const chimesMcpHandler = createMcpHandler(() => createChimesMcpServer(), {
+  responseMode: "json",
+});

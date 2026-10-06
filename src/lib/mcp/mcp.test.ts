@@ -4,29 +4,19 @@ import { mcpToolResultText } from "./submit.ts";
 import { CHIMES_MCP_TOOLS } from "./tool-names.ts";
 
 describe("mcpToolResultText", () => {
-  it("formats a successful bug submit", () => {
+  it("formats a successful bug submit with the desk id only", () => {
     const out = mcpToolResultText({
       ok: true,
-      request: {
-        id: "req_abc",
-        kind: "bug",
-        title: "Battery blank",
-        description: "SOC stays —",
-        source: "mcp",
-        createdAt: "2026-10-03T12:00:00.000Z",
-        images: [],
-      },
+      id: "req_abc",
     });
     assert.equal(out.isError, undefined);
     assert.equal(out.content.length, 1);
-    const parsed = JSON.parse(out.content[0]!.text) as {
-      ok: boolean;
-      kind: string;
-      id: string;
-    };
+    const parsed = JSON.parse(out.content[0]!.text) as Record<string, unknown>;
     assert.equal(parsed.ok, true);
-    assert.equal(parsed.kind, "bug");
     assert.equal(parsed.id, "req_abc");
+    assert.equal("status" in parsed, false);
+    assert.equal("note" in parsed, false);
+    assert.equal("queue" in parsed, false);
   });
 
   it("marks parse errors as isError", () => {

@@ -1,17 +1,6 @@
-import crypto from "node:crypto";
 import { getSql } from "../db.ts";
-import type { ParsedImage } from "./parse.ts";
-import type {
-  RequestKind,
-  RequestSource,
-  StoredRequest,
-  StoredRequestImage,
-} from "./types.ts";
+import type { StoredRequest, StoredRequestImage } from "./types.ts";
 import { isRequestKind } from "./types.ts";
-
-function newId(prefix: string): string {
-  return `${prefix}_${crypto.randomBytes(12).toString("hex")}`;
-}
 
 function asIso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -25,46 +14,6 @@ function asIso(value: unknown): string {
 
 function imageUrl(id: string): string {
   return `/api/inbox/images/${encodeURIComponent(id)}`;
-}
-
-export async function createHouseRequest(input: {
-  kind: RequestKind;
-  title: string;
-  description: string;
-  images: ParsedImage[];
-  source: RequestSource;
-}): Promise<StoredRequest> {
-  const sql = await getSql();
-  const id = newId("req");
-  const createdAt = new Date().toISOString();
-
-  await sql.query(
-    `INSERT INTO house_requests (id, title, description, kind, source, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6::timestamptz)`,
-    [id, input.title, input.description, input.kind, input.source, createdAt],
-  );
-
-  const images: StoredRequestImage[] = [];
-  for (let i = 0; i < input.images.length; i += 1) {
-    const img = input.images[i]!;
-    const imageId = newId("img");
-    await sql.query(
-      `INSERT INTO house_request_images (id, request_id, mime_type, data_base64, sort_order)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [imageId, id, img.mimeType, img.dataBase64, i],
-    );
-    images.push({ id: imageId, mimeType: img.mimeType, url: imageUrl(imageId) });
-  }
-
-  return {
-    id,
-    kind: input.kind,
-    title: input.title,
-    description: input.description,
-    source: input.source,
-    createdAt,
-    images,
-  };
 }
 
 type RequestRow = {

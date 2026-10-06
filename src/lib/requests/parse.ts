@@ -11,6 +11,7 @@ export type ParsedImage = {
   mimeType: string;
   dataBase64: string;
   byteLength: number;
+  filename?: string;
 };
 
 export type ParseError = { ok: false; error: string; status: number };
@@ -22,22 +23,30 @@ export type ParseOk = {
   images: ParsedImage[];
 };
 
-const ALLOWED_MIME = new Set([
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-  "image/gif",
-  "image/heic",
-  "image/heif",
-]);
+const ALLOWED_MIME = new Set(["image/png", "image/jpeg", "image/webp"]);
 
 function normalizeMime(raw: string | undefined): string | null {
   if (!raw) return null;
-  const mime = raw.trim().toLowerCase().split(";")[0]!.trim();
-  if (mime === "image/jpg") return "image/jpeg";
+  let mime = raw.trim().toLowerCase().split(";")[0]!.trim();
+  if (mime === "image/jpg") mime = "image/jpeg";
   if (!ALLOWED_MIME.has(mime)) return null;
-  return mime === "image/jpg" ? "image/jpeg" : mime;
+  return mime;
+}
+
+function cleanFilename(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.trim();
+  return trimmed || undefined;
+}
+
+function filenameFromUrl(url: string): string | undefined {
+  try {
+    const last = new URL(url).pathname.split("/").filter(Boolean).pop();
+    if (!last) return undefined;
+    return decodeURIComponent(last);
+  } catch {
+    return undefined;
+  }
 }
 
 /** Strip whitespace from base64 payloads (data URLs / pasted blobs). */
@@ -98,12 +107,21 @@ export function parseInlineImage(
     return { ok: false, error: "Image too small" };
   }
 
-  return { ok: true, image: { mimeType, dataBase64: base64, byteLength } };
+  return {
+    ok: true,
+    image: {
+      mimeType,
+      dataBase64: base64,
+      byteLength,
+      filename: cleanFilename(input.filename),
+    },
+  };
 }
 
 export async function resolveRemoteImage(
   url: string,
   mimeHint?: string,
+  filenameHint?: string,
 ): Promise<{ ok: true; image: ParsedImage } | { ok: false; error: string }> {
   let parsed: URL;
   try {
@@ -150,28 +168,32 @@ export async function resolveRemoteImage(
       mimeType,
       dataBase64: buf.toString("base64"),
       byteLength: buf.byteLength,
+      filename: cleanFilename(filenameHint) ?? filenameFromUrl(url),
     },
   };
 }
 
-export async function parseCreateRequestBody(
-  body: unknown,
-): Promise<ParseOk | ParseError> {
+export async function parseCreateRequestBody(body: unknown): Promise<ParseOk | ParseError> {
   if (!body || typeof body !== "object") {
     return { ok: false, error: "Expected JSON body", status: 400 };
   }
   const input = body as CreateRequestInput;
-  if (!isRequestKind(input.kind)) {
+  const rawKind = (body as { kind?: unknown }).kind;
+  let kind: RequestKind;
+  if (rawKind == null || rawKind === "") {
+    // Older POST /api/requests callers (Dad’s house MCP submit_request) omit kind.
+    kind = "feature";
+  } else if (!isRequestKind(rawKind)) {
     return {
       ok: false,
-      error: 'kind is required ("bug" or "feature")',
+      error: 'kind must be "bug" or "feature"',
       status: 400,
     };
+  } else {
+    kind = rawKind;
   }
-  const kind = input.kind;
   const title = typeof input.title === "string" ? input.title.trim() : "";
-  const description =
-    typeof input.description === "string" ? input.description.trim() : "";
+  const description = typeof input.description === "string" ? input.description.trim() : "";
 
   if (!title) return { ok: false, error: "Title is required", status: 400 };
   if (!description) return { ok: false, error: "Description is required", status: 400 };
@@ -207,7 +229,11 @@ export async function parseCreateRequestBody(
       continue;
     }
     if (inline.error === "remote") {
-      const remote = await resolveRemoteImage(imgInput.data.trim(), imgInput.mimeType);
+      const remote = await resolveRemoteImage(
+        imgInput.data.trim(),
+        imgInput.mimeType,
+        imgInput.filename,
+      );
       if (!remote.ok) return { ok: false, error: remote.error, status: 400 };
       images.push(remote.image);
       continue;

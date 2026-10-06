@@ -1,8 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  getRequestApiToken,
-  hasValidRequestApiToken,
-} from "@/lib/requests/inbox-auth";
+import { getRequestApiToken, hasValidRequestApiToken } from "@/lib/requests/inbox-auth";
 import { safeEqualString } from "@/lib/family-auth/session";
 import { chimesMcpHandler } from "@/lib/mcp/server";
 
@@ -55,8 +52,8 @@ async function handleMcp(request: Request): Promise<Response> {
  * Auth: `Authorization: Bearer <CHIMES_REQUEST_API_TOKEN>`
  *
  * Tools:
- * - `submit_bug` — kind=bug into Guy’s inbox
- * - `submit_feature` — kind=feature into Guy’s inbox
+ * - `submit_bug` — kind=bug, forwarded to Guy’s desk
+ * - `submit_feature` — kind=feature, forwarded to Guy’s desk
  *
  * Cursor / Claude config example:
  * `{ "url": "https://<host>/api/mcp", "headers": { "Authorization": "Bearer …" } }`

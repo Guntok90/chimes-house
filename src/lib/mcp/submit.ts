@@ -1,5 +1,5 @@
 import { parseCreateRequestBody } from "../requests/parse.ts";
-import type { RequestKind, StoredRequest } from "../requests/types.ts";
+import type { RequestKind } from "../requests/types.ts";
 
 export type McpImageArg =
   | string
@@ -14,7 +14,7 @@ export type McpSubmitArgs = {
   images?: McpImageArg[];
 };
 
-export type McpSubmitOk = { ok: true; request: StoredRequest };
+export type McpSubmitOk = { ok: true; id: string };
 export type McpSubmitErr = { ok: false; error: string };
 export type McpSubmitResult = McpSubmitOk | McpSubmitErr;
 
@@ -28,7 +28,7 @@ function normalizeImages(images: McpImageArg[] | undefined) {
 
 /**
  * Shared path for MCP `submit_bug` / `submit_feature` tools.
- * Always stores `source: "mcp"`.
+ * Always forwards with `source: "mcp"`.
  */
 export async function submitHouseRequestViaMcp(
   kind: RequestKind,
@@ -45,19 +45,19 @@ export async function submitHouseRequestViaMcp(
   }
 
   try {
-    // Lazy so unit tests can import MCP helpers without bootstrapping PGLite.
-    const { createHouseRequest } = await import("../requests/store.ts");
-    const request = await createHouseRequest({
+    const { createHouseRequest } = await import("../requests/desk.server.ts");
+    const result = await createHouseRequest({
       kind: parsed.kind,
       title: parsed.title,
       description: parsed.description,
       images: parsed.images,
       source: "mcp",
     });
-    return { ok: true, request };
+    if (!result.ok) return { ok: false, error: result.error };
+    return { ok: true, id: result.id };
   } catch (err) {
-    console.error("[mcp] submit failed:", err);
-    return { ok: false, error: "Could not save request" };
+    console.error("[mcp] submit failed:", err instanceof Error ? err.name : "error");
+    return { ok: false, error: "Could not send request" };
   }
 }
 
@@ -71,20 +71,11 @@ export function mcpToolResultText(result: McpSubmitResult): {
       content: [{ type: "text", text: result.error }],
     };
   }
-  const { request } = result;
-  const summary = {
-    ok: true,
-    id: request.id,
-    kind: request.kind,
-    title: request.title,
-    imageCount: request.images.length,
-    createdAt: request.createdAt,
-  };
   return {
     content: [
       {
         type: "text",
-        text: JSON.stringify(summary, null, 2),
+        text: JSON.stringify({ ok: true, id: result.id }, null, 2),
       },
     ],
   };

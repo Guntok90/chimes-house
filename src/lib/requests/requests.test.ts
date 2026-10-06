@@ -53,10 +53,7 @@ describe("inbox auth", () => {
   });
 
   it("reads the inbox cookie", () => {
-    assert.equal(
-      readInboxCookie("guy_inbox_session=hello%20world; other=1"),
-      "hello world",
-    );
+    assert.equal(readInboxCookie("guy_inbox_session=hello%20world; other=1"), "hello world");
     assert.equal(readInboxCookie(null), null);
   });
 
@@ -75,12 +72,37 @@ describe("inbox auth", () => {
 });
 
 describe("request parse", () => {
-  it("requires kind, title and description", async () => {
+  it("defaults a missing kind to feature and still requires title and description", async () => {
     const missingKind = await parseCreateRequestBody({
+      title: "Show the pond on Home",
+      description: "Dad asked for this before kinds existed",
+    });
+    assert.equal(missingKind.ok, true);
+    if (missingKind.ok) assert.equal(missingKind.kind, "feature");
+
+    const blankKind = await parseCreateRequestBody({
+      kind: undefined,
+      title: "Show the pond on Home",
+      description: "Still a feature",
+    });
+    assert.equal(blankKind.ok, true);
+    if (blankKind.ok) assert.equal(blankKind.kind, "feature");
+
+    const emptyKind = await parseCreateRequestBody({
+      title: "Show the pond on Home",
+      description: "Blank kind string",
+      kind: "",
+    } as { title: string; description: string; kind: "" });
+    assert.equal(emptyKind.ok, true);
+    if (emptyKind.ok) assert.equal(emptyKind.kind, "feature");
+
+    const unknown = await parseCreateRequestBody({
       title: "x",
       description: "y",
-    });
-    assert.equal(missingKind.ok, false);
+      kind: "idea",
+    } as { title: string; description: string; kind: "idea" });
+    assert.equal(unknown.ok, false);
+
     const missing = await parseCreateRequestBody({
       kind: "bug",
       title: "",
