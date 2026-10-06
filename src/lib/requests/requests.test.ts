@@ -53,10 +53,7 @@ describe("inbox auth", () => {
   });
 
   it("reads the inbox cookie", () => {
-    assert.equal(
-      readInboxCookie("guy_inbox_session=hello%20world; other=1"),
-      "hello world",
-    );
+    assert.equal(readInboxCookie("guy_inbox_session=hello%20world; other=1"), "hello world");
     assert.equal(readInboxCookie(null), null);
   });
 
@@ -75,18 +72,64 @@ describe("inbox auth", () => {
 });
 
 describe("request parse", () => {
-  it("requires title and description", async () => {
-    const missing = await parseCreateRequestBody({ title: "", description: "x" });
+  it("defaults a missing kind to feature and still requires title and description", async () => {
+    const missingKind = await parseCreateRequestBody({
+      title: "Show the pond on Home",
+      description: "Dad asked for this before kinds existed",
+    });
+    assert.equal(missingKind.ok, true);
+    if (missingKind.ok) assert.equal(missingKind.kind, "feature");
+
+    const blankKind = await parseCreateRequestBody({
+      kind: undefined,
+      title: "Show the pond on Home",
+      description: "Still a feature",
+    });
+    assert.equal(blankKind.ok, true);
+    if (blankKind.ok) assert.equal(blankKind.kind, "feature");
+
+    const emptyKind = await parseCreateRequestBody({
+      title: "Show the pond on Home",
+      description: "Blank kind string",
+      kind: "",
+    } as { title: string; description: string; kind: "" });
+    assert.equal(emptyKind.ok, true);
+    if (emptyKind.ok) assert.equal(emptyKind.kind, "feature");
+
+    const unknown = await parseCreateRequestBody({
+      title: "x",
+      description: "y",
+      kind: "idea",
+    } as { title: string; description: string; kind: "idea" });
+    assert.equal(unknown.ok, false);
+
+    const missing = await parseCreateRequestBody({
+      kind: "bug",
+      title: "",
+      description: "x",
+    });
     assert.equal(missing.ok, false);
     const ok = await parseCreateRequestBody({
+      kind: "bug",
       title: "Battery tile blank",
       description: "On the iPad overview the SOC stays at —",
     });
     assert.equal(ok.ok, true);
     if (ok.ok) {
+      assert.equal(ok.kind, "bug");
       assert.equal(ok.title, "Battery tile blank");
       assert.equal(ok.images.length, 0);
     }
+  });
+
+  it("accepts feature kind", async () => {
+    const ok = await parseCreateRequestBody({
+      kind: "feature",
+      title: "Show EV Ready by on Home",
+      description: "Would help Dad glance at the target time without opening Charge.",
+    });
+    assert.equal(ok.ok, true);
+    if (ok.ok) assert.equal(ok.kind, "feature");
   });
 
   it("parses a tiny PNG data URL", async () => {
@@ -103,6 +146,7 @@ describe("request parse", () => {
     }
 
     const body = await parseCreateRequestBody({
+      kind: "bug",
       title: "With shot",
       description: "See image",
       images: [{ data: `data:image/png;base64,${png}` }],

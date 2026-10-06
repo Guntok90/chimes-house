@@ -1,11 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { hasValidSession } from "@/lib/family-auth/session";
-import {
-  getRequestApiToken,
-  hasValidRequestApiToken,
-} from "@/lib/requests/inbox-auth";
+import { getRequestApiToken, hasValidRequestApiToken } from "@/lib/requests/inbox-auth";
 import { parseCreateRequestBody } from "@/lib/requests/parse";
-import { createHouseRequest } from "@/lib/requests/store";
+import { createHouseRequest } from "@/lib/requests/desk.server";
+import { intakeSource } from "@/lib/requests/types";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -18,14 +16,18 @@ function json(body: unknown, status = 200) {
 }
 
 /**
- * Create a bug / feature request.
+ * Create a bug or feature request.
  *
  * Auth (either):
- * - Family session cookie (Dad’s web form at /request)
- * - `Authorization: Bearer <CHIMES_REQUEST_API_TOKEN>` (Dad’s house MCP)
+ * - Family session cookie (Dad’s web forms at /bug and /feature)
+ * - `Authorization: Bearer <CHIMES_REQUEST_API_TOKEN>` (Dad’s house MCP / REST)
  *
- * Body: `{ title, description, images?: [{ data, mimeType? }] }`
+ * Prefer MCP tools `submit_bug` / `submit_feature` at `/api/mcp`.
+ * Body: `{ kind?: "bug"|"feature", title, description, images?: [{ data, mimeType?, filename? }] }`
+ * Missing `kind` is treated as `"feature"` (older `submit_request` callers).
  * `data` may be a data URL, raw base64 (+ mimeType), or an http(s) image URL.
+ * The server downloads URL screenshots and forwards the request to Guy’s desk.
+ * Success: `{ ok: true, id }`. Failures return a plain `error` and are not “sent”.
  */
 export const Route = createFileRoute("/api/requests")({
   server: {
@@ -64,16 +66,20 @@ export const Route = createFileRoute("/api/requests")({
         }
 
         try {
-          const stored = await createHouseRequest({
+          const result = await createHouseRequest({
+            kind: parsed.kind,
             title: parsed.title,
             description: parsed.description,
             images: parsed.images,
-            source: fromMcp && !fromFamily ? "mcp" : "web",
+            source: intakeSource(fromMcp),
           });
-          return json({ ok: true, request: stored }, 201);
+          if (!result.ok) {
+            return json({ error: result.error }, 502);
+          }
+          return json({ ok: true, id: result.id });
         } catch (err) {
-          console.error("[requests] create failed:", err);
-          return json({ error: "Could not save request" }, 500);
+          console.error("[requests] create failed:", err instanceof Error ? err.name : "error");
+          return json({ error: "Could not send request" }, 500);
         }
       },
     },

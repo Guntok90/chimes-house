@@ -1,11 +1,6 @@
-import crypto from "node:crypto";
 import { getSql } from "../db.ts";
-import type { ParsedImage } from "./parse.ts";
-import type { RequestSource, StoredRequest, StoredRequestImage } from "./types.ts";
-
-function newId(prefix: string): string {
-  return `${prefix}_${crypto.randomBytes(12).toString("hex")}`;
-}
+import type { StoredRequest, StoredRequestImage } from "./types.ts";
+import { isRequestKind } from "./types.ts";
 
 function asIso(value: unknown): string {
   if (value instanceof Date) return value.toISOString();
@@ -21,48 +16,11 @@ function imageUrl(id: string): string {
   return `/api/inbox/images/${encodeURIComponent(id)}`;
 }
 
-export async function createHouseRequest(input: {
-  title: string;
-  description: string;
-  images: ParsedImage[];
-  source: RequestSource;
-}): Promise<StoredRequest> {
-  const sql = await getSql();
-  const id = newId("req");
-  const createdAt = new Date().toISOString();
-
-  await sql.query(
-    `INSERT INTO house_requests (id, title, description, source, created_at)
-     VALUES ($1, $2, $3, $4, $5::timestamptz)`,
-    [id, input.title, input.description, input.source, createdAt],
-  );
-
-  const images: StoredRequestImage[] = [];
-  for (let i = 0; i < input.images.length; i += 1) {
-    const img = input.images[i]!;
-    const imageId = newId("img");
-    await sql.query(
-      `INSERT INTO house_request_images (id, request_id, mime_type, data_base64, sort_order)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [imageId, id, img.mimeType, img.dataBase64, i],
-    );
-    images.push({ id: imageId, mimeType: img.mimeType, url: imageUrl(imageId) });
-  }
-
-  return {
-    id,
-    title: input.title,
-    description: input.description,
-    source: input.source,
-    createdAt,
-    images,
-  };
-}
-
 type RequestRow = {
   id: string;
   title: string;
   description: string;
+  kind: string;
   source: string;
   created_at: unknown;
 };
@@ -77,7 +35,7 @@ type ImageRow = {
 export async function listHouseRequests(): Promise<StoredRequest[]> {
   const sql = await getSql();
   const rows = await sql.query<RequestRow>(
-    `SELECT id, title, description, source, created_at
+    `SELECT id, title, description, kind, source, created_at
      FROM house_requests
      ORDER BY created_at DESC`,
   );
@@ -85,7 +43,6 @@ export async function listHouseRequests(): Promise<StoredRequest[]> {
   if (rows.length === 0) return [];
 
   const ids = rows.map((r) => r.id);
-  // Parameterize IN list — small N, fine for an inbox.
   const placeholders = ids.map((_, i) => `$${i + 1}`).join(", ");
   const imageRows = await sql.query<ImageRow>(
     `SELECT id, request_id, mime_type, sort_order
@@ -108,6 +65,7 @@ export async function listHouseRequests(): Promise<StoredRequest[]> {
 
   return rows.map((row) => ({
     id: row.id,
+    kind: isRequestKind(row.kind) ? row.kind : "bug",
     title: row.title,
     description: row.description,
     source: row.source === "mcp" ? "mcp" : "web",

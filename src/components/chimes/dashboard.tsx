@@ -12,7 +12,7 @@ import {
   Lamp,
   Leaf,
   Lightbulb,
-  MessageSquarePlus,
+  Bug,
   Plug,
   Sun,
   Tv,
@@ -110,8 +110,9 @@ export function ChimesDashboard() {
             ))}
           </nav>
         </div>
-        <div className="shrink-0 border-t border-sidebar-fg/15 px-7 py-4">
-          <RequestNavLink />
+        <div className="shrink-0 space-y-2 border-t border-sidebar-fg/15 px-7 py-4">
+          <RequestNavLink kind="bug" />
+          <RequestNavLink kind="feature" />
         </div>
       </aside>
 
@@ -120,7 +121,8 @@ export function ChimesDashboard() {
           <Brand compact />
           <div className="flex items-center gap-2">
             <Clock compact />
-            <RequestNavLink compact />
+            <RequestNavLink kind="bug" compact />
+            <RequestNavLink kind="feature" compact />
             <OverviewButton onClick={() => setOverview(true)} compact />
           </div>
         </header>
@@ -185,27 +187,37 @@ function OverviewButton({ onClick, compact = false }: { onClick: () => void; com
   );
 }
 
-/** Dad → /request form. Never link /inbox from here (Guy-only). */
-function RequestNavLink({ compact = false }: { compact?: boolean }) {
+/** Dad → /bug or /feature. Never link /inbox from here (Guy-only). */
+function RequestNavLink({
+  kind,
+  compact = false,
+}: {
+  kind: "bug" | "feature";
+  compact?: boolean;
+}) {
+  const to = kind === "bug" ? "/bug" : "/feature";
+  const label = kind === "bug" ? "Bug" : "Feature";
+  const Icon = kind === "bug" ? Bug : Lightbulb;
+
   if (compact) {
     return (
       <Link
-        to="/request"
-        aria-label="Bug / idea"
-        title="Bug / idea"
+        to={to}
+        aria-label={label}
+        title={label}
         className="grid size-10 shrink-0 place-items-center rounded-md border border-line bg-paper-deep text-teal"
       >
-        <MessageSquarePlus className="size-4" strokeWidth={1.7} />
+        <Icon className="size-4" strokeWidth={1.7} />
       </Link>
     );
   }
   return (
     <Link
-      to="/request"
+      to={to}
       className="flex w-full items-center gap-3 rounded-md border border-sidebar-fg/20 bg-sidebar-fg/10 px-3.5 py-3 text-sm font-medium text-sidebar-fg transition-colors hover:bg-sidebar-fg/15"
     >
-      <MessageSquarePlus className="size-5 shrink-0" strokeWidth={1.7} />
-      Bug / idea
+      <Icon className="size-5 shrink-0" strokeWidth={1.7} />
+      {label}
     </Link>
   );
 }

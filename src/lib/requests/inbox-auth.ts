@@ -107,7 +107,7 @@ export function hasValidInboxSession(request: Request): boolean {
   return Boolean(token && verifyInboxSessionToken(token, secret));
 }
 
-/** Shared secret for Dad’s house MCP → POST /api/requests */
+/** Shared secret for Dad’s house MCP → /api/mcp tools + POST /api/requests */
 export function getRequestApiToken(): string | null {
   const token = process.env.CHIMES_REQUEST_API_TOKEN?.trim();
   return token || null;
