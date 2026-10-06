@@ -5,7 +5,7 @@ import { useHouse, useLive } from "@/lib/house-store";
 import { cn } from "@/lib/utils";
 
 /**
- * Default Energy Flow node positions (SVG viewBox 1000×560).
+ * Energy page node positions (SVG viewBox 1000×560).
  * Overview does not persist per-node placement — only the glass tile box
  * (`chimes.overview.flow`). Driveway layout matches the house photo / Site
  * scene: Range Rover on the left bay, Zappi (driveway charger) on the right.
@@ -19,6 +19,22 @@ const P = {
   rangeRover: { x: 700, y: 430 },
   /** Right driveway bay — Zappi / Cupra charger side. */
   zappi: { x: 900, y: 430 },
+} as const;
+
+/**
+ * Ambient glass nodes, in the same 1000×580 space FitFlow scales into the tile.
+ * Centres match the path endpoints so the larger discs still meet the lines.
+ * Bottom row sits high enough that names + status lines stay inside the canvas.
+ */
+const GLASS_CANVAS = { w: 1000, h: 580 } as const;
+
+const G = {
+  solar: { x: 500, y: 104 },
+  grid: { x: 145, y: 268 },
+  battery: { x: 355, y: 400 },
+  home: { x: 785, y: 180 },
+  rangeRover: { x: 688, y: 418 },
+  zappi: { x: 888, y: 418 },
 } as const;
 
 type Tone = "paper" | "glass";
@@ -89,7 +105,12 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
       )}
 
       <div className={cn("relative", bare ? "h-full" : "h-[28rem] md:h-[34rem]")}>
-        <svg viewBox="0 0 1000 560" className="absolute inset-0 h-full w-full" aria-hidden>
+        <svg
+          viewBox={glass ? `0 0 ${GLASS_CANVAS.w} ${GLASS_CANVAS.h}` : "0 0 1000 560"}
+          preserveAspectRatio={glass ? "none" : undefined}
+          className="absolute inset-0 h-full w-full"
+          aria-hidden
+        >
           <defs>
             <marker
               id="flow-arrow-sand"
@@ -138,7 +159,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
           </defs>
 
           <FlowPath
-            d={q(P.solar, P.home, 700, 60)}
+            d={glass ? q(G.solar, G.home, 690, 58) : q(P.solar, P.home, 700, 60)}
             active={solarOn}
             idle={idle}
             stroke="stroke-sand"
@@ -146,7 +167,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             marker="url(#flow-arrow-sand)"
           />
           <FlowPath
-            d={q(P.grid, P.home, 430, 150)}
+            d={glass ? q(G.grid, G.home, 440, 148) : q(P.grid, P.home, 430, 150)}
             active={gridIn || gridOut}
             reverse={gridOut}
             idle={idle}
@@ -156,7 +177,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             markerStart={gridOut ? "url(#flow-arrow-teal)" : undefined}
           />
           <FlowPath
-            d={q(P.home, P.rangeRover, 780, 320)}
+            d={glass ? q(G.home, G.rangeRover, 760, 308) : q(P.home, P.rangeRover, 780, 320)}
             active={roverOn}
             idle={idle}
             stroke="stroke-umber"
@@ -164,7 +185,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             marker="url(#flow-arrow-umber)"
           />
           <FlowPath
-            d={q(P.home, P.zappi, 920, 300)}
+            d={glass ? q(G.home, G.zappi, 910, 286) : q(P.home, P.zappi, 920, 300)}
             active={zappiOn}
             idle={idle}
             stroke="stroke-umber"
@@ -172,7 +193,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             marker="url(#flow-arrow-umber)"
           />
           <FlowPath
-            d={q(P.solar, P.battery, 340, 220)}
+            d={glass ? q(G.solar, G.battery, 340, 218) : q(P.solar, P.battery, 340, 220)}
             active={solarOn && battIn}
             idle={idle}
             stroke="stroke-sand"
@@ -180,7 +201,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
             marker="url(#flow-arrow-sand)"
           />
           <FlowPath
-            d={q(P.battery, P.home, 540, 250)}
+            d={glass ? q(G.battery, G.home, 555, 248) : q(P.battery, P.home, 540, 250)}
             active={battOut}
             idle={idle}
             stroke="stroke-terra"
@@ -192,8 +213,10 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         {battOut ? (
           <span
             className={cn(
-              "pointer-events-none absolute left-[54%] top-[44%] -translate-x-1/2 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums shadow-sm",
-              glass ? "bg-teal-deep/70 text-sand backdrop-blur-sm" : "bg-paper text-terra",
+              "pointer-events-none absolute -translate-x-1/2 rounded-full font-medium tabular-nums shadow-sm",
+              glass
+                ? "left-[56.5%] top-[46%] bg-teal-deep/70 px-3 py-1 text-base text-sand backdrop-blur-sm"
+                : "left-[54%] top-[44%] bg-paper px-2 py-0.5 text-xs text-terra",
             )}
           >
             {batt} W
@@ -203,6 +226,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         <Node
           tone={tone}
           at="left-[50%] top-[18%]"
+          pos={glass ? G.solar : undefined}
           icon={Sun}
           ring="border-sand"
           value={`${solar} W`}
@@ -213,6 +237,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         <Node
           tone={tone}
           at="left-[14%] top-[46%]"
+          pos={glass ? G.grid : undefined}
           icon={Zap}
           ring="border-teal-soft"
           value={`${Math.abs(live.gridW)} W`}
@@ -223,6 +248,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         <Node
           tone={tone}
           at="left-[35.5%] top-[70%]"
+          pos={glass ? G.battery : undefined}
           icon={BatteryMedium}
           ring="border-terra"
           value={`${live.soc}%`}
@@ -233,6 +259,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         <Node
           tone={tone}
           at="left-[78%] top-[32%]"
+          pos={glass ? G.home : undefined}
           icon={Home}
           ring="border-teal"
           fill
@@ -244,6 +271,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         <Node
           tone={tone}
           at="left-[70%] top-[77%]"
+          pos={glass ? G.rangeRover : undefined}
           icon={Car}
           ring="border-umber"
           value={roverValue}
@@ -254,6 +282,7 @@ export function EnergyFlow({ tone = "paper", bare = false }: { tone?: Tone; bare
         <Node
           tone={tone}
           at="left-[90%] top-[77%]"
+          pos={glass ? G.zappi : undefined}
           icon={Zap}
           ring="border-umber"
           value={`${live.zappiW} W`}
@@ -291,9 +320,7 @@ function FlowPath({
         d={d}
         className={cn(
           "flow-line",
-          active
-            ? cn("flow-active", reverse && "flow-active-rev", stroke)
-            : idle,
+          active ? cn("flow-active", reverse && "flow-active-rev", stroke) : idle,
         )}
         markerEnd={active && marker ? marker : undefined}
         markerStart={active && markerStart ? markerStart : undefined}
@@ -333,6 +360,7 @@ function q(a: { x: number; y: number }, b: { x: number; y: number }, cx: number,
 
 function Node({
   at,
+  pos,
   icon: Icon,
   ring,
   fill = false,
@@ -343,6 +371,8 @@ function Node({
   tone,
 }: {
   at: string;
+  /** Glass overview centre, in the 1000×580 FitFlow canvas. Paper keeps `at`. */
+  pos?: { x: number; y: number };
   icon: LucideIcon;
   ring: string;
   fill?: boolean;
@@ -354,12 +384,25 @@ function Node({
 }) {
   const glass = tone === "glass";
   return (
-    <div className={cn("absolute -translate-x-1/2 -translate-y-1/2", at)}>
+    <div
+      className={cn("absolute -translate-x-1/2 -translate-y-1/2", pos ? undefined : at)}
+      style={
+        pos
+          ? {
+              left: `${(pos.x / GLASS_CANVAS.w) * 100}%`,
+              top: `${(pos.y / GLASS_CANVAS.h) * 100}%`,
+            }
+          : undefined
+      }
+    >
       <div className="relative">
         <div
           className={cn(
-            "grid place-items-center rounded-full border-[3px]",
-            glass ? "size-24 md:size-28" : "size-[4.75rem] md:size-24",
+            "grid place-items-center rounded-full",
+            // Glass discs ~1.5× the previous size-24 / size-28 badges.
+            glass
+              ? "size-[9rem] border-4 md:size-[10.5rem]"
+              : "size-[4.75rem] border-[3px] md:size-24",
             ring,
             fill
               ? "bg-teal text-paper"
@@ -371,13 +414,20 @@ function Node({
         >
           <div>
             <Icon
-              className={cn("mx-auto opacity-80", glass ? "size-5" : "size-4")}
+              className={cn(
+                "mx-auto opacity-80",
+                // 2rem is 1.6× the previous glass size-5 glyph.
+                glass ? "size-8" : "size-4",
+              )}
               strokeWidth={1.7}
             />
             <div
               className={cn(
                 "mt-0.5 font-medium tabular-nums leading-none",
-                glass ? "text-lg md:text-xl" : "text-sm md:text-lg",
+                // ~1.35× previous glass text-lg / text-xl power figures.
+                glass
+                  ? "text-center text-[1.52rem] whitespace-nowrap md:text-[1.6875rem]"
+                  : "text-sm md:text-lg",
               )}
             >
               {value}
@@ -386,21 +436,26 @@ function Node({
         </div>
         <div
           className={cn(
-            "absolute left-1/2 top-full mt-2 -translate-x-1/2 text-center",
-            glass ? "w-36 text-sidebar-fg" : "w-28 text-ink",
+            "absolute left-1/2 top-full -translate-x-1/2 text-center",
+            glass ? "mt-1.5 w-max whitespace-nowrap text-sidebar-fg" : "mt-2 w-28 text-ink",
           )}
         >
           <div
             className={cn(
               "tracking-wide",
-              glass ? "text-base font-bold md:text-lg" : "text-xs font-medium",
+              // ~1.35× previous glass text-base / text-lg names.
+              glass
+                ? "text-[1.35rem] font-bold leading-none md:text-[1.575rem]"
+                : "text-xs font-medium",
             )}
           >
             {label}
           </div>
           <div
             className={cn(
-              glass ? "text-sm text-sidebar-fg/70" : "text-xs text-ink-soft",
+              glass
+                ? "mt-0.5 text-[1.2rem] leading-none text-sidebar-fg/70"
+                : "text-xs text-ink-soft",
             )}
           >
             {hint}
